@@ -322,7 +322,7 @@ export function showSettingsDialog() {
         </section>
         <section>
           <h4>主题</h4>
-          <p class="section-desc">内置 22 套暗色、11 套亮色（按名称排序），可基于任一主题派生自定义配色。点击色板即可切换。</p>
+          <p class="section-desc">内置 22 套暗色、17 套亮色/中性（按名称排序），可基于任一主题派生自定义配色。点击色板即可切换。</p>
           <div class="theme-picker-head">
             <span>配色主题</span>
             <button type="button" class="btn new-theme">基于当前新建</button>
