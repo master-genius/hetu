@@ -32,14 +32,38 @@
 - **标题栏颜色默认跟随主题**，也可在设置中单独取色。
 - **背景透明度**可调 + **毛玻璃虚化**：macOS（vibrancy）/ Windows（acrylic）原生模糊；应用内另有 backdrop 层，即使很透明也能看清终端内容。Linux 下窗口级模糊取决于合成器（KDE 可为透明窗口配置模糊规则）。
 
-## 开发
+## 构建与打包
+
+### 方式一：GitHub Actions 云端打包（推荐，本地无需 Rust）
+
+仓库已内置 `.github/workflows/release.yml`。推送到 GitHub 后打一个 tag 即可，
+CI 会在 Linux / Windows / macOS(Intel+Apple Silicon) 四个环境自动构建，
+并把 deb/rpm/AppImage/msi/exe/dmg 全部上传到 Release 草稿：
 
 ```bash
-# 依赖：Rust stable、Node 18+，Linux 需 libwebkit2gtk-4.1-dev libgtk-3-dev 等
-npm install
-npx tauri dev      # 开发运行
-npx tauri build    # 打包发布
+git tag v0.1.0
+git push origin v0.1.0
 ```
+
+也可在 GitHub 页面 Actions → release → Run workflow 手动触发。
+
+### 方式二：本地构建（需要 Rust 环境）
+
+```bash
+# 1. Rust 工具链（一次性）
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# 2. Linux 另需系统库（Debian/Ubuntu 示例；Windows 需 VS Build Tools，macOS 需 Xcode CLT）
+sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+  librsvg2-dev build-essential pkg-config libssl-dev
+
+# 3. 构建
+npm install
+npx tauri dev      # 开发运行（热更新）
+npx tauri build    # 打包，产物在 src-tauri/target/release/bundle/
+```
+
+注意：桌面安装包不支持交叉编译——Windows 包必须在 Windows 上构建、macOS 包必须在 macOS 上构建，这正是方式一的价值。
 
 配置文件位于系统配置目录 `superssh/settings.json`（Linux: `~/.config/superssh/`）。
 
