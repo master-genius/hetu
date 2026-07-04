@@ -27,15 +27,20 @@ fn read_config_file(path: &Path, depth: u8, out: &mut Vec<(String, HostBlock)>) 
         return;
     };
 
-    let mut current: Option<(String, HostBlock)> = None;
+    // 当前 Host 块：别名列表 + 共享设置。"Host web db" 会为 web、db 各生成一条。
+    let mut current: Option<(Vec<String>, HostBlock)> = None;
     for raw in content.lines() {
         let line = raw.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        // 支持 "Key Value" 与 "Key=Value" 两种写法
+        // 支持 "Key Value"、"Key=Value" 与 "Key = Value"（'=' 两侧可有空格）三种写法。
+        // 先在首个分隔符处切分，再从值侧剥掉可能残留的 '=' 与空白，避免 "= value" 粘连。
         let (key, value) = match line.split_once(|c: char| c == ' ' || c == '\t' || c == '=') {
-            Some((k, v)) => (k.trim().to_ascii_lowercase(), v.trim().trim_matches('"')),
+            Some((k, v)) => (
+                k.trim().to_ascii_lowercase(),
+                v.trim().trim_start_matches('=').trim().trim_matches('"'),
+            ),
             None => continue,
         };
         if value.is_empty() {
@@ -64,24 +69,20 @@ fn read_config_file(path: &Path, depth: u8, out: &mut Vec<(String, HostBlock)>) 
                 }
             }
             "host" => {
-                if let Some(block) = current.take() {
-                    out.push(block);
-                }
-                // Host 可跟多个模式，逐个生成条目；含通配符的跳过
-                for alias in value.split_whitespace() {
-                    if alias.contains('*') || alias.contains('?') || alias.starts_with('!') {
-                        continue;
-                    }
-                    if current.is_none() {
-                        current = Some((alias.to_string(), HostBlock::new()));
-                    }
+                flush_block(&mut current, out);
+                // Host 可跟多个模式，逐个生成条目；含通配符/否定的跳过
+                let aliases: Vec<String> = value
+                    .split_whitespace()
+                    .filter(|a| !a.contains('*') && !a.contains('?') && !a.starts_with('!'))
+                    .map(|a| a.to_string())
+                    .collect();
+                if !aliases.is_empty() {
+                    current = Some((aliases, HostBlock::new()));
                 }
             }
             "match" => {
                 // Match 块无法静态解析，终止当前 Host 块
-                if let Some(block) = current.take() {
-                    out.push(block);
-                }
+                flush_block(&mut current, out);
             }
             _ => {
                 if let Some((_, block)) = current.as_mut() {
@@ -90,8 +91,15 @@ fn read_config_file(path: &Path, depth: u8, out: &mut Vec<(String, HostBlock)>) 
             }
         }
     }
-    if let Some(block) = current.take() {
-        out.push(block);
+    flush_block(&mut current, out);
+}
+
+/// 把当前 Host 块按别名展开为多条 (alias, block) 推入结果
+fn flush_block(current: &mut Option<(Vec<String>, HostBlock)>, out: &mut Vec<(String, HostBlock)>) {
+    if let Some((aliases, block)) = current.take() {
+        for alias in aliases {
+            out.push((alias, block.clone()));
+        }
     }
 }
 
@@ -136,6 +144,9 @@ pub fn import() -> Vec<Profile> {
                 },
                 key_path,
                 source: "ssh_config".into(),
+                note: None,
+                keepalive: None,
+                timeout: None,
             }
         })
         .collect()

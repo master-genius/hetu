@@ -84,6 +84,44 @@ export function confirmDialog(title: string, message: string): Promise<boolean> 
   });
 }
 
+/** 同名文件覆盖确认。返回本次选择；带 all 表示对后续同名文件沿用该选择。 */
+export type OverwriteChoice = "overwrite" | "skip";
+export interface OverwriteDecision {
+  choice: OverwriteChoice;
+  all: boolean;
+}
+
+export function confirmOverwriteDialog(name: string, dir: string): Promise<OverwriteDecision> {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = `
+      <div class="modal small">
+        <h3>目标已存在同名文件</h3>
+        <p class="modal-msg"></p>
+        <label class="check overwrite-all"><input type="checkbox"> 对后续同名文件都如此</label>
+        <div class="modal-actions">
+          <button class="btn" data-act="skip">跳过</button>
+          <button class="btn primary" data-act="overwrite">覆盖</button>
+        </div>
+      </div>`;
+    overlay.querySelector(".modal-msg")!.textContent = `“${name}” 在 ${dir} 中已存在。`;
+    const allInput = overlay.querySelector(".overwrite-all input") as HTMLInputElement;
+    const done = (choice: OverwriteChoice) => {
+      overlay.remove();
+      resolve({ choice, all: allInput.checked });
+    };
+    overlay.querySelector('[data-act="overwrite"]')!.addEventListener("click", () => done("overwrite"));
+    overlay.querySelector('[data-act="skip"]')!.addEventListener("click", () => done("skip"));
+    // 背景点击 = 跳过（保守，不误覆盖）
+    overlay.addEventListener("mousedown", (e) => {
+      if (e.target === overlay) done("skip");
+    });
+    document.body.appendChild(overlay);
+    (overlay.querySelector('[data-act="overwrite"]') as HTMLElement).focus();
+  });
+}
+
 export function toast(message: string, isError = false) {
   const el = document.createElement("div");
   el.className = "toast" + (isError ? " error" : "");
@@ -222,7 +260,9 @@ export function updateTransfer(e: TransferProgressEvent) {
   row.querySelector(".t-name")!.textContent = `${e.direction === "upload" ? "↑" : "↓"} ${e.name}`;
   (row.querySelector(".t-fill") as HTMLElement).style.width = `${pct}%`;
   row.querySelector(".t-pct")!.textContent = `${pct}%`;
-  if (e.done >= e.total && e.total > 0) {
+  // 完成即移除。done>=total 在末次事件成立；空文件/空目录 total=0 时 0>=0 亦成立，
+  // 故不能再加 total>0 的条件，否则空传输的进度行会永久残留。
+  if (e.done >= e.total) {
     const r = row;
     window.setTimeout(() => {
       r.remove();

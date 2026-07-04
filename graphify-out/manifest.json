@@ -10,13 +10,13 @@
     "semantic_hash": ""
   },
   "/root/source/superssh/package.json": {
-    "mtime": 1783180371.8608282,
-    "ast_hash": "fec519858d98054da390bce1b07c3270",
+    "mtime": 1783185967.88398,
+    "ast_hash": "1439299b1924ab1a3a7b0019be5b8ca0",
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/tauri.conf.json": {
-    "mtime": 1783181886.041573,
-    "ast_hash": "3163615b6cad48eb9b03757750f5035d",
+    "mtime": 1783185973.479909,
+    "ast_hash": "b93e23a28f5d1e6c49a423ec90652eb2",
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/build.rs": {
@@ -25,28 +25,28 @@
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/gen/schemas/desktop-schema.json": {
-    "mtime": 1783180891.3118505,
-    "ast_hash": "ec3b20f93642397b2c5333f780503049",
+    "mtime": 1783187835.8303869,
+    "ast_hash": "dc59ead19edf34a66f279bf976e49d94",
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/gen/schemas/capabilities.json": {
-    "mtime": 1783181999.0391428,
-    "ast_hash": "be7e24362cf6f0aee3bedcaa3f413b64",
+    "mtime": 1783187835.8303869,
+    "ast_hash": "98acf09ac4b2fea4c4a458626a405bac",
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json": {
-    "mtime": 1783180891.2998507,
-    "ast_hash": "6a860735641c7b9240c9e7a5eb75a002",
+    "mtime": 1783187835.814387,
+    "ast_hash": "454d1fddc834b2829e7d7d5841c96198",
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/gen/schemas/linux-schema.json": {
-    "mtime": 1783180891.3118505,
-    "ast_hash": "ec3b20f93642397b2c5333f780503049",
+    "mtime": 1783187835.8303869,
+    "ast_hash": "dc59ead19edf34a66f279bf976e49d94",
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/capabilities/default.json": {
-    "mtime": 1783181887.921532,
-    "ast_hash": "b2c382441b30f4c22f51d95bdeb342c9",
+    "mtime": 1783187817.8108165,
+    "ast_hash": "0115324702b2563f75042d24e8e24bf3",
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/src/error.rs": {
@@ -55,28 +55,28 @@
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/src/main.rs": {
-    "mtime": 1783180578.6052547,
-    "ast_hash": "2cd45c8af1e02ec304d228f618babd03",
+    "mtime": 1783185967.3519866,
+    "ast_hash": "6c6029bef0918cdd28f2dd2149ad73ab",
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/src/settings.rs": {
-    "mtime": 1783183829.948904,
-    "ast_hash": "6b5d12bf4e52084b78775992bd078c72",
+    "mtime": 1783187748.288512,
+    "ast_hash": "4ccf4e3e874002d328d8c89f635e5a70",
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/src/sshcfg.rs": {
-    "mtime": 1783180431.683794,
-    "ast_hash": "8594b16226d685cdf3f7934508995ccb",
+    "mtime": 1783187576.6170008,
+    "ast_hash": "34896e24aa63cfb55552413bcd01c932",
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/src/local.rs": {
-    "mtime": 1783183300.5817022,
-    "ast_hash": "88bcbd5b0441db1dac47019febc5f83a",
+    "mtime": 1783185731.754751,
+    "ast_hash": "09e0c013110aff3c1d1267c6c2a90e06",
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/src/lib.rs": {
-    "mtime": 1783183360.820754,
-    "ast_hash": "bbd59a009973b1033dcff563eba62013",
+    "mtime": 1783187804.0791466,
+    "ast_hash": "71c6cb270c9b56331a0c80b8ee50092d",
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/src/ssh/mod.rs": {
@@ -85,13 +85,13 @@
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/src/ssh/sftp.rs": {
-    "mtime": 1783183338.4011092,
-    "ast_hash": "f54854a9893641c95c6d5e67925758e9",
+    "mtime": 1783185449.9932413,
+    "ast_hash": "9b4d8cb1acb99d3c1a91d2e59ff65a5a",
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/src/ssh/conn.rs": {
-    "mtime": 1783181074.3126884,
-    "ast_hash": "98c0f4fadfc546662eb9789c1bc1f904",
+    "mtime": 1783187413.5297859,
+    "ast_hash": "e8f0c93255eb6edc2a391af91c5f2dc6",
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/src/ssh/pane.rs": {
@@ -100,13 +100,13 @@
     "semantic_hash": ""
   },
   "/root/source/superssh/src/ui.ts": {
-    "mtime": 1783180818.549108,
-    "ast_hash": "4974328ddf1824f1eb475913a844f409",
+    "mtime": 1783186552.6357646,
+    "ast_hash": "d73ca141544a1d7ccf802ed6200c4445",
     "semantic_hash": ""
   },
   "/root/source/superssh/src/pane.ts": {
-    "mtime": 1783184462.7056596,
-    "ast_hash": "d116e4d2cdc30d72107b5de546211181",
+    "mtime": 1783187011.6367097,
+    "ast_hash": "d4c80a1e51425b630f0d7b96513b6178",
     "semantic_hash": ""
   },
   "/root/source/superssh/src/layout.ts": {
@@ -115,13 +115,13 @@
     "semantic_hash": ""
   },
   "/root/source/superssh/src/ipc.ts": {
-    "mtime": 1783183476.218891,
-    "ast_hash": "af30eab2caf87f8b95196047d319dcd7",
+    "mtime": 1783187857.541874,
+    "ast_hash": "a632d7a2e581c0bf4dd60c0790160aba",
     "semantic_hash": ""
   },
   "/root/source/superssh/src/tabs.ts": {
-    "mtime": 1783184450.7258756,
-    "ast_hash": "ddab0215e00229c36aa1acbb458d96a8",
+    "mtime": 1783186947.8097064,
+    "ast_hash": "3dcd03fc4aae746fd75983a447791e4e",
     "semantic_hash": ""
   },
   "/root/source/superssh/src/settings.ts": {
@@ -130,38 +130,38 @@
     "semantic_hash": ""
   },
   "/root/source/superssh/src/types.ts": {
-    "mtime": 1783183484.6907518,
-    "ast_hash": "e5652ddf30fa95de22544e5dbfe28c5b",
+    "mtime": 1783187837.9543364,
+    "ast_hash": "212c52f4ba4e88740f784e2af0bf43dc",
     "semantic_hash": ""
   },
   "/root/source/superssh/src/explorer.ts": {
-    "mtime": 1783183857.1844306,
-    "ast_hash": "93b51ae17fcbbcb0c4f8d71954a3574d",
+    "mtime": 1783185987.0797355,
+    "ast_hash": "00a8a1bdc9bd826edd28e1cb73703af4",
     "semantic_hash": ""
   },
   "/root/source/superssh/src/themes.ts": {
-    "mtime": 1783182794.7912555,
-    "ast_hash": "983e3eca5e7be49a61d6eb0a2460f486",
+    "mtime": 1783185996.6636128,
+    "ast_hash": "47612fc8409fa72d6e79c1605c795f2b",
     "semantic_hash": ""
   },
   "/root/source/superssh/src/main.ts": {
-    "mtime": 1783184480.9813297,
-    "ast_hash": "166cb0ff3108ba5a3d022e3ceca4a4f2",
+    "mtime": 1783187958.839546,
+    "ast_hash": "d0be1539b910108fbf916a809b886e8a",
     "semantic_hash": ""
   },
   "/root/source/superssh/src/dialogs.ts": {
-    "mtime": 1783183600.172833,
-    "ast_hash": "80561486e6afb55239df81e56acda06c",
+    "mtime": 1783187874.7174718,
+    "ast_hash": "6e3510897036a2e717f55af0e0162bb6",
     "semantic_hash": ""
   },
   "/root/source/superssh/README.md": {
-    "mtime": 1783184510.9447885,
-    "ast_hash": "429c653a38eb17b1ed3c211776cb9f90",
+    "mtime": 1783187984.6389687,
+    "ast_hash": "9173ed3d6d70fed88847b4200f58fa75",
     "semantic_hash": ""
   },
   "/root/source/superssh/index.html": {
-    "mtime": 1783184499.9049878,
-    "ast_hash": "f6c9325b369c47292601ef53be549802",
+    "mtime": 1783187520.7625737,
+    "ast_hash": "6f8a96027a42f3b0afac24e0b414ca8e",
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/icons/icon.png": {

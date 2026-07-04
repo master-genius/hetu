@@ -9,10 +9,10 @@ import { formatSize, showMenu, toast } from "./ui";
 import type { LocalEntry } from "./types";
 
 /** 拖拽数据的自定义 MIME（区分应用内拖拽与 OS 文件拖入） */
-export const DND_MIME = "application/x-superssh-paths";
+export const DND_MIME = "application/x-hetushell-paths";
 
 type ViewMode = "list" | "tiles";
-const VIEW_KEY = "superssh-explorer-view";
+const VIEW_KEY = "hetushell-explorer-view";
 
 /** 按扩展名归类的类型图标（展示在名称前） */
 const ICON_MAP: Array<[RegExp, string]> = [
@@ -28,6 +28,18 @@ const ICON_MAP: Array<[RegExp, string]> = [
   [/\.(rs|ts|tsx|js|jsx|py|go|java|c|cpp|h|hpp|cs|rb|php|swift|kt|lua|vue|css|scss|html)$/i, "💻"],
   [/\.(key|pem|pub|crt|cer|p12)$/i, "🔑"],
 ];
+
+/** 上一级目录，兼容 POSIX('/') 与 Windows('\\') 分隔符 */
+function parentDir(path: string): string {
+  const win = path.includes("\\") && !path.includes("/");
+  const sep = win ? "\\" : "/";
+  const trimmed = path.replace(/[/\\]+$/, "");
+  const idx = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  if (idx < 0) return path;
+  // Windows 盘符根 "C:" → 保留为 "C:\\"
+  if (win && /^[A-Za-z]:$/.test(trimmed.slice(0, idx))) return trimmed.slice(0, idx) + "\\";
+  return trimmed.slice(0, idx) || sep;
+}
 
 function iconFor(entry: LocalEntry): string {
   if (entry.isDir) return "📁";
@@ -66,8 +78,7 @@ export class Explorer {
     this.viewBtn = this.element.querySelector(".ex-view") as HTMLButtonElement;
 
     this.element.querySelector(".ex-up")!.addEventListener("click", () => {
-      const parent = this.cwd.replace(/\/+$/, "").split("/").slice(0, -1).join("/") || "/";
-      void this.navigate(parent);
+      void this.navigate(parentDir(this.cwd));
     });
     this.element.querySelector(".ex-refresh")!.addEventListener("click", () => void this.load());
     this.viewBtn.addEventListener("click", () => {

@@ -1705,6 +1705,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "hetushell"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "dirs",
+ "glob",
+ "portable-pty",
+ "russh",
+ "russh-sftp",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-dialog",
+ "tauri-plugin-window-state",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+ "window-vibrancy",
+]
+
+[[package]]
 name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4114,28 +4137,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
-name = "superssh"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "dirs",
- "glob",
- "portable-pty",
- "russh",
- "russh-sftp",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-dialog",
- "thiserror 2.0.18",
- "tokio",
- "uuid",
- "window-vibrancy",
-]
-
-[[package]]
 name = "swift-rs"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4441,6 +4442,21 @@ dependencies = [
  "thiserror 2.0.18",
  "toml 1.1.2+spec-1.1.0",
  "url",
+]
+
+[[package]]
+name = "tauri-plugin-window-state"
+version = "2.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73736611e14142408d15353e21e3cca2f12a3cfb523ad0ce85999b6d2ef1a704"
+dependencies = [
+ "bitflags 2.13.0",
+ "log",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

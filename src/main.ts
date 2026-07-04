@@ -1,4 +1,4 @@
-/** SuperSSH 前端入口：装配标签页、事件路由、上传下载、快捷键 */
+/** HetuShell 前端入口：装配标签页、事件路由、上传下载、快捷键 */
 
 import "@xterm/xterm/css/xterm.css";
 import "./fonts.css";
@@ -13,7 +13,8 @@ import { Pane } from "./pane";
 import { DND_MIME, Explorer } from "./explorer";
 import { showConnectDialog, showSettingsDialog } from "./dialogs";
 import {
-  confirmDialog, formatSize, showFileTooltip, showMenu, showPreview, toast, updateTransfer,
+  confirmDialog, confirmOverwriteDialog, formatSize, showFileTooltip, showMenu, showPreview,
+  toast, updateTransfer,
 } from "./ui";
 import type { ConnParams } from "./types";
 
@@ -35,8 +36,34 @@ async function bootstrap() {
 
   // ---------- 连接与标签页 ----------
 
+  // 连接元信息（供「标识连接」浮层与会话恢复用），键为 connId。不含任何机密。
+  interface ConnInfo {
+    local: boolean;
+    name: string;
+    host: string;
+    port: number;
+    user: string;
+    auth: "key" | "password";
+    keyPath?: string | null;
+  }
+  const connMeta = new Map<string, ConnInfo>();
+  connMeta.set("local", { local: true, name: "本地终端", host: "local", port: 0, user: "", auth: "key" });
+
+  const recordConn = (connId: string, params: ConnParams) => {
+    connMeta.set(connId, {
+      local: false,
+      name: params.name,
+      host: params.host,
+      port: params.port,
+      user: params.user,
+      auth: params.auth,
+      keyPath: params.keyPath ?? null,
+    });
+  };
+
   const connectAndOpenTab = async (params: ConnParams) => {
     const connId = await api.sshConnect(params);
+    recordConn(connId, params);
     await tabs.createTab(connId, params);
   };
 
@@ -50,6 +77,23 @@ async function bootstrap() {
   };
   const openLocalTab = async () => {
     await tabs.createTab("local", LOCAL_PARAMS);
+  };
+
+  /**
+   * 在指定 pane 内打开/切换连接（右键菜单与顶部连接图标共用）：
+   * 弹出连接选择，选 SSH 则建连后就地切换该 pane，选“本地终端”则切回本地。
+   */
+  const connectInPane = (tab: Tab, pane: Pane) => {
+    showConnectDialog(
+      async (params) => {
+        const connId = await api.sshConnect(params);
+        recordConn(connId, params);
+        await tabs.switchPaneConnection(tab, pane, connId, params.name);
+      },
+      async () => {
+        await tabs.switchPaneConnection(tab, pane, "local", "本地终端");
+      },
+    );
   };
 
   // “+” 行为由设置决定：默认直接开本地终端；连接图标始终弹连接选择
@@ -79,7 +123,7 @@ async function bootstrap() {
       );
       if (!ok) return;
     }
-    await tabs.closeTab(tab, true);
+    await tabs.closeTab(tab);
   };
 
   // ---------- Pane 事件装配 ----------
@@ -89,8 +133,10 @@ async function bootstrap() {
       tab.activePaneId = pane.id;
     };
     pane.onSplitRequest = (dir) => void tabs.splitActive(dir, pane);
+    pane.onFocusNeighbor = (dir) => focusNeighbor(dir);
     pane.onTooltip = showFileTooltip;
     pane.onPreview = async (path) => {
+      if (pane.isLocal) return; // 本地终端无 SFTP，双击不预览
       try {
         const meta = await api.sftpStat(pane.connId, path);
         if (meta.isDir) return; // 目录不预览
@@ -107,22 +153,34 @@ async function bootstrap() {
     pane.onContextMenu = (e, word) => {
       const path = word ? pane.resolvePath(word) : null;
       const sel = pane.term.getSelection();
+      // 本地终端没有 SFTP：预览/下载/上传不可用（避免调用 SSH-only 命令报误导性错误）
+      const remote = !pane.isLocal;
       showMenu(e.clientX, e.clientY, [
         { label: "复制", disabled: !sel, action: () => void pane.copyText(sel) },
         { label: "粘贴", action: () => void pane.pasteFromClipboard() },
         { separator: true, label: "" },
+        // 已连接 → 切换连接；本地终端 → 打开连接。均作用于本 pane。
         {
-          label: word ? `预览 “${truncate(word)}”` : "预览",
-          disabled: !path,
-          action: () => path && pane.onPreview?.(path),
+          label: remote ? "切换连接…" : "打开连接…",
+          action: () => connectInPane(tab, pane),
         },
-        {
-          label: word ? `下载 “${truncate(word)}”` : "下载",
-          disabled: !path,
-          action: () => path && void downloadFile(pane, path),
-        },
-        { label: "上传文件到当前目录", action: () => void uploadViaDialog() },
         { separator: true, label: "" },
+        ...(remote
+          ? [
+              {
+                label: word ? `预览 “${truncate(word)}”` : "预览",
+                disabled: !path,
+                action: () => path && pane.onPreview?.(path),
+              },
+              {
+                label: word ? `下载 “${truncate(word)}”` : "下载",
+                disabled: !path,
+                action: () => path && void downloadFile(pane, path),
+              },
+              { label: "上传文件到当前目录", action: () => void uploadViaDialog() },
+              { separator: true, label: "" },
+            ]
+          : []),
         { label: "向右切分 (Ctrl+Alt+R)", action: () => void tabs.splitActive("row", pane) },
         { label: "向下切分 (Ctrl+Alt+D)", action: () => void tabs.splitActive("col", pane) },
         {
@@ -199,12 +257,52 @@ async function bootstrap() {
       toast("本地终端无需上传，直接在本机操作文件即可", true);
       return;
     }
-    const dir = dirOverride ?? target.cwd ?? target.homeDir;
+    // dirOverride（拖到某目录名上）最精确；否则用 pane 的已知 cwd，再退到 home。
+    let dir: string | null;
+    let guessed = false;
+    if (dirOverride) {
+      dir = dirOverride;
+    } else {
+      const u = target.uploadDir();
+      dir = u.dir;
+      guessed = u.guessed;
+    }
     if (!dir) {
       toast("尚未获取远端目录，请稍候重试", true);
       return;
     }
+    // cwd 未由 OSC7 上报时，上传落到 home 目录——明确告知，避免用户以为传到了当前目录
+    if (guessed) {
+      const ok = await confirmDialog(
+        "确认上传目录",
+        `未能获取该终端的当前工作目录（shell 未上报 OSC7）。\n将上传到用户主目录：${dir}\n\n继续吗？`,
+      );
+      if (!ok) return;
+    }
+    // 同名文件处理：默认直接覆盖；开启「提示确认」后按项询问，可选「后续都如此」。
+    const confirmOverwrite = getSettings().confirmOverwrite;
+    let bulk: "overwrite" | "skip" | null = null; // 记住「全部」选择
+
+    const basename = (p: string) => p.replace(/[/\\]+$/, "").split(/[/\\]/).pop() ?? p;
+
     for (const p of paths) {
+      const name = basename(p);
+      if (confirmOverwrite && bulk !== "overwrite") {
+        // 探测远端是否已有同名项（stat 成功即存在）
+        const exists = await api.sftpStat(target.connId, `${dir}/${name}`).then(() => true).catch(() => false);
+        if (exists) {
+          let decision: "overwrite" | "skip" | null = bulk;
+          if (!decision) {
+            const d = await confirmOverwriteDialog(name, dir);
+            if (d.all) bulk = d.choice;
+            decision = d.choice;
+          }
+          if (decision === "skip") {
+            toast(`已跳过 ${name}`);
+            continue;
+          }
+        }
+      }
       try {
         await api.sftpUpload(target.connId, p, dir, crypto.randomUUID());
         toast(`已上传到 ${dir}`);
@@ -350,16 +448,21 @@ async function bootstrap() {
   document.getElementById("btn-max")!.addEventListener("click", () => void win.toggleMaximize());
   document.getElementById("btn-close")!.addEventListener("click", async () => {
     const busy = tabs.tabs.some((t) => tabs.hasBusyPane(t));
-    if (busy) {
-      const ok = await confirmDialog("退出 SuperSSH", "有标签页中可能有程序正在运行，确定退出吗？");
-      if (!ok) return;
-    }
+    const ok = await confirmDialog(
+      "退出 HetuShell",
+      busy ? "有标签页中可能有程序正在运行，确定退出吗？" : "确定要退出 HetuShell 吗？",
+    );
+    if (!ok) return;
     await win.close();
   });
 
-  document.getElementById("btn-connect")!.addEventListener("click", () =>
-    showConnectDialog(connectAndOpenTab, openLocalTab),
-  );
+  // 顶部连接图标：默认针对当前聚焦的终端（就地打开/切换连接）；无终端时才新建标签页
+  document.getElementById("btn-connect")!.addEventListener("click", () => {
+    const tab = tabs.active;
+    const pane = tabs.activePane();
+    if (tab && pane) connectInPane(tab, pane);
+    else showConnectDialog(connectAndOpenTab, openLocalTab);
+  });
 
   // ---------- 本地文件管理器面板（右侧浮动 45%，每标签页独立实例） ----------
 
@@ -381,7 +484,58 @@ async function bootstrap() {
     explorerPanel.style.display = "";
     void tab.explorer.init();
   };
-  tabs.onLayoutChange = syncExplorerPanel;
+  // 会话快照：每个标签页取其首个 pane 的连接（不含机密），防抖写入 session.json
+  const snapshotSession = () => {
+    const snap = tabs.tabs.map((tab) => {
+      const first = tab.layout.panes()[0];
+      const info = first ? connMeta.get(first.connId) : undefined;
+      if (!info || info.local) return { local: true, name: info?.name ?? "本地终端" };
+      return {
+        local: false,
+        name: info.name,
+        host: info.host,
+        port: info.port,
+        user: info.user,
+        auth: info.auth,
+        keyPath: info.keyPath ?? null,
+      };
+    });
+    void api.sessionSet(snap).catch(() => {});
+  };
+  let saveTimer: number | undefined;
+  const scheduleSaveSession = () => {
+    window.clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(snapshotSession, 500);
+  };
+
+  tabs.onLayoutChange = () => {
+    syncExplorerPanel();
+    scheduleSaveSession();
+  };
+
+  // 标识连接：当前标签页每个终端中央浮层显示 连接名 + 地址，5 秒后淡出
+  const identifyPanes = () => {
+    const tab = tabs.active;
+    if (!tab) return;
+    for (const pane of tab.layout.panes()) {
+      const meta =
+        connMeta.get(pane.connId) ??
+        (pane.isLocal ? { name: "本地终端", host: "local" } : { name: "连接", host: "" });
+      pane.element.querySelector(".pane-identify")?.remove();
+      const el = document.createElement("div");
+      el.className = "pane-identify";
+      el.innerHTML = `<b></b><span></span>`;
+      el.querySelector("b")!.textContent = meta.name;
+      el.querySelector("span")!.textContent = meta.host;
+      pane.element.appendChild(el);
+      requestAnimationFrame(() => el.classList.add("show"));
+      window.setTimeout(() => {
+        el.classList.remove("show");
+        window.setTimeout(() => el.remove(), 300);
+      }, 5000);
+    }
+  };
+  document.getElementById("btn-identify")!.addEventListener("click", identifyPanes);
 
   document.getElementById("btn-explorer")!.addEventListener("click", () => {
     const tab = tabs.active;
@@ -411,9 +565,63 @@ async function bootstrap() {
     }
   });
 
+  // ---------- 分屏焦点导航（Alt+方向键）----------
+
+  /** 按几何方位把焦点移到最近的相邻分屏 */
+  const focusNeighbor = (dir: "left" | "right" | "up" | "down") => {
+    const tab = tabs.active;
+    const cur = tabs.activePane();
+    if (!tab || !cur) return;
+    const panes = tab.layout.panes();
+    if (panes.length < 2) return;
+    const r = cur.element.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    let best: Pane | null = null;
+    let bestScore = Infinity;
+    for (const p of panes) {
+      if (p === cur) continue;
+      const pr = p.element.getBoundingClientRect();
+      const dx = pr.left + pr.width / 2 - cx;
+      const dy = pr.top + pr.height / 2 - cy;
+      let valid = false;
+      let primary = 0;
+      let offset = 0;
+      switch (dir) {
+        case "left": valid = dx < -1; primary = -dx; offset = Math.abs(dy); break;
+        case "right": valid = dx > 1; primary = dx; offset = Math.abs(dy); break;
+        case "up": valid = dy < -1; primary = -dy; offset = Math.abs(dx); break;
+        case "down": valid = dy > 1; primary = dy; offset = Math.abs(dx); break;
+      }
+      if (!valid) continue;
+      // 方向距离为主，垂直/水平偏移为辅，选最贴合目标方位的分屏
+      const score = primary + offset * 2;
+      if (score < bestScore) {
+        bestScore = score;
+        best = p;
+      }
+    }
+    if (best) {
+      tab.activePaneId = best.id;
+      best.focus();
+    }
+  };
+
   // ---------- 快捷键 ----------
 
   window.addEventListener("keydown", (e) => {
+    // Alt+方向键：切换分屏焦点（焦点在终端内时由 xterm 自定义键处理器拦截，这里兜底焦点在外）
+    if (e.altKey && !e.ctrlKey && !e.shiftKey) {
+      const map: Record<string, "left" | "right" | "up" | "down"> = {
+        ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down",
+      };
+      const dir = map[e.code];
+      if (dir) {
+        e.preventDefault();
+        focusNeighbor(dir);
+        return;
+      }
+    }
     // Ctrl+Alt+R / D：切分（终端焦点内由 xterm 自定义键处理器拦截，这里覆盖焦点在外的情况）
     if (e.ctrlKey && e.altKey && !e.shiftKey) {
       if (e.code === "KeyR") {
@@ -441,8 +649,28 @@ async function bootstrap() {
     }
   });
 
-  // 启动即进入本地终端；SSH 连接通过 “+” 新建标签页选择
-  await openLocalTab();
+  // 启动：若开启「记住最后的会话」则恢复上次的标签页并自动连接；否则开一个本地终端
+  const session = getSettings().restoreSession ? await api.sessionGet().catch(() => []) : [];
+  for (const st of session) {
+    try {
+      if (st.local) {
+        await openLocalTab();
+      } else {
+        await connectAndOpenTab({
+          name: st.name,
+          host: st.host ?? "",
+          port: st.port ?? 22,
+          user: st.user ?? "root",
+          auth: (st.auth ?? "key") as "key" | "password",
+          keyPath: st.keyPath ?? undefined,
+        });
+      }
+    } catch (err) {
+      // 需要密码/口令或主机不可达时无法静默重连——提示后跳过该项
+      toast(`自动连接「${st.name}」失败：${err}`, true);
+    }
+  }
+  if (tabs.tabs.length === 0) await openLocalTab(); // 无可恢复项时的兜底
 }
 
 function truncate(s: string, n = 24): string {

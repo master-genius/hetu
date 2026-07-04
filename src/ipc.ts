@@ -10,6 +10,7 @@ import type {
   PaneOutputEvent,
   Preview,
   Profile,
+  SessionTab,
   Settings,
   TransferProgressEvent,
 } from "./types";
@@ -21,6 +22,9 @@ export const api = {
   profilesList: () => invoke<Profile[]>("profiles_list"),
   profileSave: (profile: Profile) => invoke<void>("profile_save", { profile }),
   profileDelete: (id: string) => invoke<void>("profile_delete", { id }),
+
+  sessionGet: () => invoke<SessionTab[]>("session_get"),
+  sessionSet: (tabs: SessionTab[]) => invoke<void>("session_set", { tabs }),
 
   sshConnect: (params: ConnParams) => invoke<string>("ssh_connect", { params }),
   sshDisconnect: (connId: string) => invoke<void>("ssh_disconnect", { connId }),

@@ -52,6 +52,6 @@ jobs:
         with:
           # 推 tag 时创建同名 Release 草稿并上传全部安装包
           tagName: ${{ github.ref_name }}
-          releaseName: "SuperSSH ${{ github.ref_name }}"
+          releaseName: "HetuShell ${{ github.ref_name }}"
           releaseDraft: true
           prerelease: false

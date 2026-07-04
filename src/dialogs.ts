@@ -47,6 +47,14 @@ export function showConnectDialog(
           <div class="auth-pass" style="display:none">
             <label>密码 <input name="password" type="password" autocomplete="off"></label>
           </div>
+          <details class="advanced">
+            <summary>高级选项</summary>
+            <label>备注 / 标记 <input name="note" placeholder="生产环境 · 华东节点" spellcheck="false"></label>
+            <div class="row">
+              <label class="grow">保活间隔（秒）<input name="keepalive" type="number" min="1" max="3600" placeholder="15"></label>
+              <label class="grow">连接超时（秒）<input name="timeout" type="number" min="1" max="600" placeholder="20"></label>
+            </div>
+          </details>
           <div class="modal-actions">
             <button type="button" class="btn save-profile">保存连接项</button>
             <span class="grow"></span>
@@ -80,6 +88,9 @@ export function showConnectDialog(
     field("user").value = p.user;
     authSel.value = p.auth;
     field("keyPath").value = p.keyPath ?? "";
+    field("note").value = p.note ?? "";
+    field("keepalive").value = p.keepalive != null ? String(p.keepalive) : "";
+    field("timeout").value = p.timeout != null ? String(p.timeout) : "";
     syncAuthUI();
   };
 
@@ -106,9 +117,12 @@ export function showConnectDialog(
     for (const p of profiles) {
       const item = document.createElement("div");
       item.className = "profile-item";
-      item.innerHTML = `<b></b><small></small><span class="badge"></span>`;
+      item.innerHTML = `<b></b><small></small><em class="note"></em><span class="badge"></span>`;
       item.querySelector("b")!.textContent = p.name;
       item.querySelector("small")!.textContent = `${p.user}@${p.host}:${p.port}`;
+      const noteEl = item.querySelector(".note") as HTMLElement;
+      if (p.note) noteEl.textContent = p.note;
+      else noteEl.remove();
       item.querySelector(".badge")!.textContent = p.source === "ssh_config" ? "ssh config" : "已保存";
       item.addEventListener("click", () => {
         itemsEl.querySelectorAll(".profile-item").forEach((i) => i.classList.remove("selected"));
@@ -127,6 +141,11 @@ export function showConnectDialog(
     if (typeof picked === "string") field("keyPath").value = picked;
   });
 
+  const numOrUndef = (n: string): number | undefined => {
+    const v = parseInt(field(n).value, 10);
+    return Number.isFinite(v) && v > 0 ? v : undefined;
+  };
+
   const paramsFromForm = (): ConnParams | null => {
     const name = field("name").value.trim() || field("host").value.trim();
     const host = field("host").value.trim();
@@ -141,6 +160,8 @@ export function showConnectDialog(
       keyPath: field("keyPath").value.trim() || undefined,
       passphrase: field("passphrase").value || undefined,
       password: field("password").value || undefined,
+      keepalive: numOrUndef("keepalive"),
+      timeout: numOrUndef("timeout"),
     };
   };
 
@@ -161,6 +182,9 @@ export function showConnectDialog(
       auth: p.auth,
       keyPath: p.keyPath ?? null,
       source: "manual",
+      note: field("note").value.trim() || null,
+      keepalive: p.keepalive ?? null,
+      timeout: p.timeout ?? null,
     };
     await api.profileSave(profile);
     toast("连接项已保存");
@@ -219,11 +243,14 @@ export function showSettingsDialog() {
       <div class="settings-body">
         <section>
           <h4>字体</h4>
-          <label>主字体 <input name="fontFamily"></label>
-          <label>CJK 字体 <input name="cjkFontFamily"></label>
+          <p class="section-desc">未安装的字体自动回退到内置 JetBrains Mono NL / Noto Sans SC。</p>
           <div class="row">
-            <label>字号 <input name="fontSize" type="number" min="8" max="32"></label>
-            <label>字重
+            <label class="grow">主字体（英文 / 代码）<input name="fontFamily" spellcheck="false"></label>
+            <label class="grow">CJK 字体（中日韩）<input name="cjkFontFamily" spellcheck="false"></label>
+          </div>
+          <div class="row">
+            <label class="narrow">字号 <input name="fontSize" type="number" min="8" max="32"></label>
+            <label class="grow">字重
               <select name="fontWeight">
                 <option value="100">100 Thin</option>
                 <option value="200">200 ExtraLight</option>
@@ -236,32 +263,37 @@ export function showSettingsDialog() {
         </section>
         <section>
           <h4>主题</h4>
-          <div class="row">
-            <label class="grow">当前主题 <select name="theme"></select></label>
+          <p class="section-desc">内置 16 套暗色、11 套亮色，可基于任一主题派生自定义配色。点击色板即可切换。</p>
+          <div class="theme-picker-head">
+            <span>配色主题</span>
             <button type="button" class="btn new-theme">基于当前新建</button>
           </div>
-          <div class="row">
+          <div class="theme-groups"></div>
+          <div class="row" style="margin-top:10px">
             <label class="check grow"><input name="titlebarFollow" type="checkbox"> 标题栏颜色跟随主题</label>
-            <label>标题栏颜色 <input name="titlebarColor" type="color"></label>
+            <label class="narrow">自定义 <input name="titlebarColor" type="color"></label>
           </div>
           <div class="theme-editor" style="display:none"></div>
         </section>
         <section>
           <h4>窗口</h4>
-          <label>背景不透明度 <input name="opacity" type="range" min="0.3" max="1" step="0.01">
-            <span class="opacity-val"></span></label>
-          <label class="check"><input name="blur" type="checkbox"> 毛玻璃虚化（透明时保持内容清晰）</label>
+          <p class="section-desc">半透明与毛玻璃效果依赖系统合成器（macOS / Windows / KDE 等）。</p>
+          <label>背景不透明度 <span class="opacity-val"></span>
+            <input name="opacity" type="range" min="0.3" max="1" step="0.01"></label>
+          <label class="check"><input name="blur" type="checkbox"> 毛玻璃虚化（透明时仍保持终端内容清晰）</label>
         </section>
         <section>
           <h4>行为</h4>
-          <label>新建标签页（“+” 按钮）
+          <label>点击“+”新建标签页时
             <select name="newTabMode">
               <option value="local">直接打开本地终端</option>
               <option value="dialog">弹出连接选择</option>
             </select>
           </label>
-          <label class="check"><input name="autoReconnect" type="checkbox"> 断开后自动重连（默认开启）</label>
-          <label class="check"><input name="copyOnSelect" type="checkbox"> 选中即复制</label>
+          <label class="check"><input name="autoReconnect" type="checkbox"> 连接断开后自动重连</label>
+          <label class="check"><input name="copyOnSelect" type="checkbox"> 选中文本即复制到剪贴板</label>
+          <label class="check"><input name="confirmOverwrite" type="checkbox"> 上传遇同名文件时提示确认（默认直接覆盖）</label>
+          <label class="check"><input name="restoreSession" type="checkbox"> 记住最后的会话（下次启动自动重开并连接）</label>
         </section>
       </div>
       <div class="modal-actions">
@@ -283,10 +315,15 @@ export function showSettingsDialog() {
   (overlay.querySelector('[name="newTabMode"]') as HTMLSelectElement).value = s.newTabMode;
   input("autoReconnect").checked = s.autoReconnect;
   input("copyOnSelect").checked = s.copyOnSelect;
+  input("confirmOverwrite").checked = s.confirmOverwrite;
+  input("restoreSession").checked = s.restoreSession;
 
-  const themeSel = overlay.querySelector('[name="theme"]') as HTMLSelectElement;
-  const refreshThemeOptions = () => {
-    themeSel.textContent = "";
+  // 当前选中主题 id（由色板卡片维护，切换主题仅 patch theme，不动透明度/模糊）
+  let selectedThemeId = s.theme;
+
+  const groupsEl = overlay.querySelector(".theme-groups") as HTMLElement;
+  const renderThemeGroups = () => {
+    groupsEl.textContent = "";
     const themes = allThemes(getSettings().customThemes);
     const groups: Array<[string, (t: ThemeDef) => boolean]> = [
       ["暗色", (t) => t.base === "dark" && BUILTIN_THEMES.includes(t)],
@@ -296,19 +333,26 @@ export function showSettingsDialog() {
     for (const [label, filter] of groups) {
       const matched = themes.filter(filter);
       if (matched.length === 0) continue;
-      const og = document.createElement("optgroup");
-      og.label = label;
+      const groupLabel = document.createElement("div");
+      groupLabel.className = "theme-group-label";
+      groupLabel.textContent = label;
+      groupsEl.appendChild(groupLabel);
+      const grid = document.createElement("div");
+      grid.className = "theme-grid";
       for (const t of matched) {
-        const opt = document.createElement("option");
-        opt.value = t.id;
-        opt.textContent = t.name;
-        og.appendChild(opt);
+        grid.appendChild(makeThemeCard(t, t.id === selectedThemeId, () => selectTheme(t.id)));
       }
-      themeSel.appendChild(og);
+      groupsEl.appendChild(grid);
     }
-    themeSel.value = getSettings().theme;
   };
-  refreshThemeOptions();
+
+  const selectTheme = (id: string) => {
+    selectedThemeId = id;
+    // 仅切主题，opacity/blur/其它设置保持不变
+    void updateSettings({ theme: id });
+    renderThemeGroups();
+    syncTitlebarUI();
+  };
 
   // 标题栏颜色：默认跟随主题，取消勾选后可单独取色
   const followInput = input("titlebarFollow");
@@ -317,9 +361,10 @@ export function showSettingsDialog() {
     followInput.checked = !getSettings().titlebarColor;
     titlebarPicker.value =
       getSettings().titlebarColor ??
-      (resolveTheme(themeSel.value, getSettings().customThemes).colors.background ?? "#10151c").slice(0, 7);
+      (resolveTheme(selectedThemeId, getSettings().customThemes).colors.background ?? "#10151c").slice(0, 7);
     titlebarPicker.disabled = followInput.checked;
   };
+  renderThemeGroups();
   syncTitlebarUI();
   followInput.addEventListener("change", () => {
     titlebarPicker.disabled = followInput.checked;
@@ -331,7 +376,7 @@ export function showSettingsDialog() {
       cjkFontFamily: input("cjkFontFamily").value,
       fontSize: parseInt(input("fontSize").value, 10) || 14,
       fontWeight: (overlay.querySelector('[name="fontWeight"]') as HTMLSelectElement).value,
-      theme: themeSel.value,
+      theme: selectedThemeId,
       titlebarColor: input("titlebarFollow").checked ? null : input("titlebarColor").value,
       opacity: parseFloat(input("opacity").value),
       blur: input("blur").checked,
@@ -339,6 +384,8 @@ export function showSettingsDialog() {
         .value as "local" | "dialog",
       autoReconnect: input("autoReconnect").checked,
       copyOnSelect: input("copyOnSelect").checked,
+      confirmOverwrite: input("confirmOverwrite").checked,
+      restoreSession: input("restoreSession").checked,
     });
   };
 
@@ -353,7 +400,7 @@ export function showSettingsDialog() {
   // 基于当前主题新建自定义主题
   const editor = q<HTMLElement>(".theme-editor");
   overlay.querySelector(".new-theme")!.addEventListener("click", () => {
-    const base = resolveTheme(themeSel.value, getSettings().customThemes);
+    const base = resolveTheme(selectedThemeId, getSettings().customThemes);
     const draft: ThemeDef = {
       id: crypto.randomUUID(),
       name: `${base.name} · 自定义`,
@@ -362,8 +409,10 @@ export function showSettingsDialog() {
     };
     renderThemeEditor(editor, draft, async () => {
       const custom = [...getSettings().customThemes, draft];
+      selectedThemeId = draft.id;
       await updateSettings({ customThemes: custom, theme: draft.id });
-      refreshThemeOptions();
+      renderThemeGroups();
+      syncTitlebarUI();
       editor.style.display = "none";
       toast("自定义主题已保存并启用");
     });
@@ -375,6 +424,41 @@ export function showSettingsDialog() {
   overlay.addEventListener("mousedown", (e) => {
     if (e.target === overlay) close();
   });
+}
+
+/** 主题配色示例卡片：背景 + 前景示意文字 + 一排 ANSI 色板 */
+function makeThemeCard(theme: ThemeDef, selected: boolean, onClick: () => void): HTMLElement {
+  const c = theme.colors;
+  const card = document.createElement("button");
+  card.type = "button";
+  card.className = "theme-card" + (selected ? " selected" : "");
+  card.style.background = c.background ?? "#000";
+  card.style.color = c.foreground ?? "#fff";
+  card.title = theme.name;
+
+  const preview = document.createElement("div");
+  preview.className = "tc-preview";
+  // 提示符 + 命令样例，用前景/绿/蓝色呈现，直观看出对比度
+  preview.innerHTML =
+    `<span style="color:${c.green ?? c.foreground}">➜</span> ` +
+    `<span style="color:${c.blue ?? c.foreground}">~/hetu</span> ` +
+    `<span style="color:${c.foreground}">ls</span>`;
+
+  const chips = document.createElement("div");
+  chips.className = "tc-chips";
+  for (const key of ["red", "green", "yellow", "blue", "magenta", "cyan"]) {
+    const chip = document.createElement("span");
+    chip.style.background = c[key] ?? "#888";
+    chips.appendChild(chip);
+  }
+
+  const name = document.createElement("div");
+  name.className = "tc-name";
+  name.textContent = theme.name;
+
+  card.append(preview, chips, name);
+  card.addEventListener("click", onClick);
+  return card;
 }
 
 function renderThemeEditor(container: HTMLElement, draft: ThemeDef, onSave: () => void) {

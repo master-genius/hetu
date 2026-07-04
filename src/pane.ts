@@ -36,7 +36,8 @@ function wordRangeAt(line: string, col: number): { word: string; start: number; 
 
 export class Pane {
   readonly id: string;
-  readonly connId: string;
+  /** 所属连接 id（可就地切换：断开旧 channel、指向新连接、重开 shell） */
+  connId: string;
   readonly term: Terminal;
   readonly element: HTMLElement;
   cwd: string | null = null;
@@ -51,6 +52,8 @@ export class Pane {
   onFocus: (() => void) | null = null;
   /** 请求以本 pane 为目标切分（row=左右两个，col=上下两个） */
   onSplitRequest: ((dir: "row" | "col") => void) | null = null;
+  /** 请求把焦点移到相邻分屏（Alt+方向键） */
+  onFocusNeighbor: ((dir: "left" | "right" | "up" | "down") => void) | null = null;
   onPreview: ((path: string) => void) | null = null;
   onTooltip: ((meta: FileMeta | null, x: number, y: number) => void) | null = null;
   onContextMenu: ((e: MouseEvent, word: string | null) => void) | null = null;
@@ -126,6 +129,20 @@ export class Pane {
           return false;
         }
       }
+      // Alt+方向键：切换分屏焦点（拦截，避免透传成 shell 的按词移动）
+      if (e.altKey && !e.ctrlKey && !e.shiftKey) {
+        const map: Record<string, "left" | "right" | "up" | "down"> = {
+          ArrowLeft: "left",
+          ArrowRight: "right",
+          ArrowUp: "up",
+          ArrowDown: "down",
+        };
+        const dir = map[e.code];
+        if (dir) {
+          this.onFocusNeighbor?.(dir);
+          return false;
+        }
+      }
       return true;
     });
 
@@ -186,11 +203,38 @@ export class Pane {
     }
     await api.paneOpen(this.connId, this.id, this.term.cols, this.term.rows);
     if (!this.homeDir) {
+      // 仅记录 home 作为兜底；不写入 cwd——cwd 只反映 OSC7 上报的真实工作目录，
+      // 以便上传等操作能区分“已知目录”与“home 猜测”，避免静默传错位置。
       api.remoteHome(this.connId).then((h) => {
         this.homeDir = h;
-        if (!this.cwd) this.cwd = h;
       }).catch(() => {});
     }
+  }
+
+  /**
+   * 就地切换到另一条连接：关闭旧 channel、清空主机相关状态、指向新连接并重开 shell。
+   * newConnId 需已建立（SSH）或为 "local"。
+   */
+  async switchConnection(newConnId: string): Promise<void> {
+    await api.paneClose(this.id).catch(() => {});
+    this.connId = newConnId;
+    this.cwd = null;
+    this.homeDir = null;
+    this.statCache.clear();
+    this.term.reset();
+    await this.open();
+    this.focus();
+  }
+
+  /** cwd 是否由 shell（OSC7）真实上报，而非 home 兜底猜测 */
+  get cwdKnown(): boolean {
+    return this.cwd !== null;
+  }
+
+  /** 上传/写入操作的目标目录：已知 cwd 优先，否则 home 兜底并标记为 guessed */
+  uploadDir(): { dir: string | null; guessed: boolean } {
+    if (this.cwd) return { dir: this.cwd, guessed: false };
+    return { dir: this.homeDir, guessed: true };
   }
 
   write(dataB64: string) {

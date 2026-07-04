@@ -35,6 +35,12 @@ pub struct ConnParams {
     pub key_path: Option<String>,
     #[serde(default)]
     pub passphrase: Option<String>,
+    /// 保活间隔（秒），None 用默认 15s
+    #[serde(default)]
+    pub keepalive: Option<u64>,
+    /// 连接超时（秒），None 用默认 20s
+    #[serde(default)]
+    pub timeout: Option<u64>,
 }
 
 /// 一条 SSH 连接。分屏/标签内的每个 pane 在此连接上开独立 channel，复用 TCP。
@@ -59,20 +65,33 @@ impl ClientHandler {
         Self { host, port }
     }
 
-    fn hosts_db() -> HashMap<String, String> {
-        known_hosts_path()
-            .ok()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+    /// 读取指纹库。文件不存在 → 空库（Ok）；文件损坏/无法解析 → Err（视为致命，
+    /// 由调用方拒绝连接，绝不静默清空重新信任）。
+    fn load_hosts_db() -> std::result::Result<HashMap<String, String>, ()> {
+        let path = match known_hosts_path() {
+            Ok(p) => p,
+            Err(_) => return Ok(HashMap::new()),
+        };
+        match std::fs::read_to_string(&path) {
+            Ok(s) => serde_json::from_str(&s).map_err(|_| ()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+            Err(_) => Err(()),
+        }
     }
 
+    /// 原子写入（临时文件 + rename），避免崩溃写坏文件。
     fn save_hosts_db(db: &HashMap<String, String>) {
         if let (Ok(path), Ok(json)) = (known_hosts_path(), serde_json::to_string_pretty(db)) {
-            let _ = std::fs::write(path, json);
+            let tmp = path.with_extension("json.tmp");
+            if std::fs::write(&tmp, json).is_ok() {
+                let _ = std::fs::rename(&tmp, &path);
+            }
         }
     }
 }
+
+/// 串行化 known_hosts 的整个「读-判-写」，避免并发连接互相覆盖已固定指纹。
+static HOSTS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 impl client::Handler for ClientHandler {
     type Error = russh::Error;
@@ -83,7 +102,13 @@ impl client::Handler for ClientHandler {
     ) -> std::result::Result<bool, Self::Error> {
         let key = format!("{}:{}", self.host, self.port);
         let fp = server_public_key.fingerprint(HashAlg::Sha256).to_string();
-        let mut db = Self::hosts_db();
+        // 持锁期间全为同步文件 IO，无 .await，不会阻塞异步执行器
+        let _guard = HOSTS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut db = match Self::load_hosts_db() {
+            Ok(db) => db,
+            // 指纹库损坏：安全起见拒绝连接，而非清空后重新信任（否则等于放行 MITM）
+            Err(()) => return Ok(false),
+        };
         match db.get(&key) {
             Some(known) if *known == fp => Ok(true),
             Some(_) => Ok(false), // 指纹变化，拒绝连接（防中间人）
@@ -117,21 +142,25 @@ fn expand_tilde(path: &str) -> String {
 /// 建立连接并按指定方式认证。只尝试一次、只用一份凭据。
 pub async fn establish(params: &ConnParams) -> Result<client::Handle<ClientHandler>> {
     let config = Arc::new(client::Config {
-        keepalive_interval: Some(Duration::from_secs(15)),
+        keepalive_interval: Some(Duration::from_secs(params.keepalive.unwrap_or(15).max(1))),
         ..Default::default()
     });
-    let mut handle = client::connect(
+    let connect_fut = client::connect(
         config,
         (params.host.as_str(), params.port),
         ClientHandler::new(params.host.clone(), params.port),
-    )
-    .await
-    .map_err(|e| match e {
-        russh::Error::UnknownKey => {
-            Error::msg("服务器主机指纹与上次记录不一致，已拒绝连接（可能存在中间人攻击）。若确认服务器已重装，请在设置目录删除 known_hosts.json 中对应条目。")
-        }
-        other => Error::Ssh(other),
-    })?;
+    );
+    // 连接超时：默认 20s，避免不可达主机长时间挂起
+    let timeout = Duration::from_secs(params.timeout.unwrap_or(20).max(1));
+    let mut handle = match tokio::time::timeout(timeout, connect_fut).await {
+        Err(_) => return Err(Error::msg(format!("连接超时（超过 {} 秒）", timeout.as_secs()))),
+        Ok(r) => r.map_err(|e| match e {
+            russh::Error::UnknownKey => {
+                Error::msg("服务器主机指纹与上次记录不一致，已拒绝连接（可能存在中间人攻击）。若确认服务器已重装，请在设置目录删除 known_hosts.json 中对应条目。")
+            }
+            other => Error::Ssh(other),
+        })?,
+    };
 
     match params.auth.as_str() {
         "password" => {
@@ -201,6 +230,15 @@ impl Connection {
                 );
                 match establish(&self.params).await {
                     Ok(h) => {
+                        // establish 可能耗时数秒，期间用户可能已主动断开（ssh_disconnect
+                        // 置 auto_reconnect=false 并移出注册表）。若如此，立即优雅关闭这条
+                        // 新建的已认证会话，避免泄漏一个无人引用、无法断开的幽灵连接。
+                        if !self.auto_reconnect.load(Ordering::SeqCst) {
+                            let _ = h
+                                .disconnect(russh::Disconnect::ByApplication, "bye", "zh")
+                                .await;
+                            break;
+                        }
                         *self.handle.lock().await = Some(h);
                         *self.sftp.lock().await = None; // 旧 SFTP 会话随连接失效
                         let _ = app.emit(

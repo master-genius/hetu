@@ -1,4 +1,4 @@
-//! SuperSSH Tauri 后端：应用状态、command 注册、窗口毛玻璃效果。
+//! HetuShell Tauri 后端：应用状态、command 注册、窗口毛玻璃效果。
 
 mod error;
 mod local;
@@ -15,15 +15,17 @@ use tauri::Manager;
 use tokio::sync::{mpsc, Mutex};
 
 use error::{Error, Result};
-use settings::{Profile, Settings};
+use settings::{Profile, SessionTab, Settings};
 use ssh::conn::{ConnParams, Connection};
 use ssh::pane::{PaneCmd, PaneCtl};
 
-/// 全局状态：连接注册表 + pane 注册表 + 设置
+/// 全局状态：连接注册表 + pane 注册表 + 设置 + 连接项
 pub struct AppState {
     conns: Mutex<HashMap<String, Arc<Connection>>>,
     panes: Mutex<HashMap<String, PaneCtl>>,
     settings: Mutex<Settings>,
+    /// 连接项存于独立文件 profiles.json，与 settings 分离
+    profiles: Mutex<Vec<Profile>>,
 }
 
 type State<'a> = tauri::State<'a, AppState>;
@@ -47,34 +49,47 @@ async fn settings_get(state: State<'_>) -> Result<Settings> {
 
 #[tauri::command]
 async fn settings_set(state: State<'_>, settings: Settings) -> Result<()> {
+    // 连接项已独立到 profiles.json，settings 不再包含它们，无需特殊保护
     settings::save(&settings)?;
     *state.settings.lock().await = settings;
     Ok(())
 }
 
-// ---------- 连接配置 ----------
+// ---------- 连接配置（独立文件 profiles.json）----------
 
 /// 手动保存的 profile + ~/.ssh/config 导入的 profile 合并列表
 #[tauri::command]
 async fn profiles_list(state: State<'_>) -> Result<Vec<Profile>> {
-    let mut list = state.settings.lock().await.profiles.clone();
+    let mut list = state.profiles.lock().await.clone();
     list.extend(sshcfg::import());
     Ok(list)
 }
 
 #[tauri::command]
 async fn profile_save(state: State<'_>, profile: Profile) -> Result<()> {
-    let mut s = state.settings.lock().await;
-    s.profiles.retain(|p| p.id != profile.id);
-    s.profiles.push(profile);
-    settings::save(&s)
+    let mut profiles = state.profiles.lock().await;
+    profiles.retain(|p| p.id != profile.id);
+    profiles.push(profile);
+    settings::save_profiles(&profiles)
 }
 
 #[tauri::command]
 async fn profile_delete(state: State<'_>, id: String) -> Result<()> {
-    let mut s = state.settings.lock().await;
-    s.profiles.retain(|p| p.id != id);
-    settings::save(&s)
+    let mut profiles = state.profiles.lock().await;
+    profiles.retain(|p| p.id != id);
+    settings::save_profiles(&profiles)
+}
+
+// ---------- 会话（独立文件 session.json）----------
+
+#[tauri::command]
+fn session_get() -> Vec<SessionTab> {
+    settings::load_session()
+}
+
+#[tauri::command]
+fn session_set(tabs: Vec<SessionTab>) -> Result<()> {
+    settings::save_session(&tabs)
 }
 
 // ---------- 连接生命周期 ----------
@@ -124,12 +139,20 @@ async fn pane_open(
 ) -> Result<()> {
     let conn = get_conn(&state, &conn_id).await?;
     let (tx, rx) = mpsc::unbounded_channel();
-    ssh::pane::open(app, conn, pane_id.clone(), cols, rows, rx).await?;
-    state
+    // 先登记 PaneCtl 再启动任务：既避免任务在插入前就 emit pane-closed 造成漏删，
+    // 也在重连复用同一 pane_id 时先关闭旧 channel 任务，杜绝两个任务并发向同一 pane 推流。
+    if let Some(old) = state
         .panes
         .lock()
         .await
-        .insert(pane_id, PaneCtl { tx, conn_id });
+        .insert(pane_id.clone(), PaneCtl { tx, conn_id })
+    {
+        let _ = old.tx.send(PaneCmd::Close);
+    }
+    if let Err(e) = ssh::pane::open(app, conn, pane_id.clone(), cols, rows, rx).await {
+        state.panes.lock().await.remove(&pane_id); // 打开失败，回收占位
+        return Err(e);
+    }
     Ok(())
 }
 
@@ -144,14 +167,20 @@ async fn pane_open_local(
     rows: u32,
 ) -> Result<()> {
     let (tx, rx) = mpsc::unbounded_channel();
-    local::open(app, pane_id.clone(), cols, rows, rx)?;
-    state.panes.lock().await.insert(
-        pane_id,
+    // 同 pane_open：先登记占位（必要时关闭旧任务），再启动本地 PTY
+    if let Some(old) = state.panes.lock().await.insert(
+        pane_id.clone(),
         PaneCtl {
             tx,
             conn_id: "local".into(),
         },
-    );
+    ) {
+        let _ = old.tx.send(PaneCmd::Close);
+    }
+    if let Err(e) = local::open(app, pane_id.clone(), cols, rows, rx) {
+        state.panes.lock().await.remove(&pane_id);
+        return Err(e);
+    }
     Ok(())
 }
 
@@ -254,10 +283,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        // 记住并恢复窗口大小/位置
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(AppState {
             conns: Mutex::new(HashMap::new()),
             panes: Mutex::new(HashMap::new()),
             settings: Mutex::new(settings::load()),
+            profiles: Mutex::new(settings::load_profiles()),
         })
         .setup(|app| {
             let window = app.get_webview_window("main").expect("main window");
@@ -281,6 +313,8 @@ pub fn run() {
             profiles_list,
             profile_save,
             profile_delete,
+            session_get,
+            session_set,
             ssh_connect,
             ssh_disconnect,
             pane_open,

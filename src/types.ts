@@ -9,6 +9,12 @@ export interface Profile {
   auth: "key" | "password";
   keyPath?: string | null;
   source: "manual" | "ssh_config";
+  /** 备注/标记，便于查找与展示 */
+  note?: string | null;
+  /** 保活间隔（秒） */
+  keepalive?: number | null;
+  /** 连接超时（秒） */
+  timeout?: number | null;
 }
 
 export interface ThemeDef {
@@ -33,7 +39,21 @@ export interface Settings {
   newTabMode: "local" | "dialog";
   autoReconnect: boolean;
   copyOnSelect: boolean;
-  profiles: Profile[];
+  /** 上传遇同名文件时提示确认；false 表示直接覆盖 */
+  confirmOverwrite: boolean;
+  /** 记住最后的会话：下次启动自动重开并连接 */
+  restoreSession: boolean;
+}
+
+/** 会话中一个标签页的可持久化描述（不含任何机密） */
+export interface SessionTab {
+  local: boolean;
+  name: string;
+  host?: string | null;
+  port?: number | null;
+  user?: string | null;
+  auth?: "key" | "password" | null;
+  keyPath?: string | null;
 }
 
 export interface ConnParams {
@@ -45,6 +65,8 @@ export interface ConnParams {
   password?: string;
   keyPath?: string;
   passphrase?: string;
+  keepalive?: number;
+  timeout?: number;
 }
 
 export interface FileMeta {

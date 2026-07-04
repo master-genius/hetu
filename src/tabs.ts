@@ -140,7 +140,8 @@ export class TabManager {
       toast(`已达到最大切分层级（${TabManager.MAX_SPLIT_DEPTH} 级）`, true);
       return;
     }
-    const pane = new Pane(crypto.randomUUID(), tab.connId);
+    // 复用被切分 pane 的连接（可能已就地切换过，未必等于 tab.connId）
+    const pane = new Pane(crypto.randomUUID(), target.connId);
     this.onPaneCreated?.(pane, tab);
     tab.layout.split(target, dir, pane);
     tab.activePaneId = pane.id;
@@ -148,16 +149,56 @@ export class TabManager {
     pane.focus();
   }
 
+  /** 就地把某 pane 切换到另一条连接（含本地终端），并回收旧连接、更新标签标题 */
+  async switchPaneConnection(
+    tab: Tab,
+    pane: Pane,
+    newConnId: string,
+    name: string,
+  ): Promise<void> {
+    const oldConn = pane.connId;
+    if (oldConn === newConnId) {
+      pane.focus();
+      return;
+    }
+    await pane.switchConnection(newConnId);
+    // 单 pane 标签：标题跟随新连接；多 pane 分屏不改名，避免误导
+    if (tab.layout.panes().length === 1) {
+      tab.title = name;
+      const label = tab.el.querySelector("span");
+      if (label) label.textContent = name;
+      tab.connId = newConnId;
+    }
+    this.gcConnections([oldConn]);
+    this.onLayoutChange?.();
+  }
+
+  /** 某连接是否仍被任一 pane 使用 */
+  connInUse(connId: string): boolean {
+    return this.tabs.some((t) => t.layout.panes().some((p) => p.connId === connId));
+  }
+
+  /** 回收不再被任何 pane 引用的连接（本地终端无需断开） */
+  gcConnections(candidates: string[]): void {
+    for (const cid of new Set(candidates)) {
+      if (cid !== "local" && !this.connInUse(cid)) {
+        void api.sshDisconnect(cid).catch(() => {});
+      }
+    }
+  }
+
   /** 关闭一个 pane；若是最后一个则整标签页关闭 */
   async closePane(tab: Tab, pane: Pane): Promise<void> {
+    const oldConn = pane.connId;
     const remaining = tab.layout.close(pane);
     if (!remaining) {
-      await this.closeTab(tab, true);
+      await this.closeTab(tab);
       return;
     }
     if (tab.activePaneId === pane.id) {
       tab.activePaneId = tab.layout.panes()[0]?.id ?? "";
     }
+    this.gcConnections([oldConn]);
     this.activePane(tab)?.focus();
   }
 
@@ -166,19 +207,17 @@ export class TabManager {
     return tab.layout.panes().some((p) => p.busy);
   }
 
-  async closeTab(tab: Tab, force = false): Promise<void> {
-    if (!force && this.hasBusyPane(tab)) {
-      throw new Error("busy"); // 由调用方弹确认框
-    }
+  /** 关闭标签页。忙碌确认由调用方（main.ts requestCloseTab / requestClosePane）负责。 */
+  async closeTab(tab: Tab): Promise<void> {
+    // 收集该标签页各 pane 使用的连接（可能因就地切换而多于一个）
+    const conns = tab.layout.panes().map((p) => p.connId);
     tab.layout.panes().forEach((p) => p.dispose());
     tab.el.remove();
     tab.banner?.remove();
     tab.layout.container.remove();
     this.tabs = this.tabs.filter((t) => t.id !== tab.id);
-    // 若该连接不再被任何标签页使用，断开它（本地终端无连接可断）
-    if (tab.connId !== "local" && !this.tabs.some((t) => t.connId === tab.connId)) {
-      void api.sshDisconnect(tab.connId).catch(() => {});
-    }
+    // 断开不再被任何 pane 引用的连接
+    this.gcConnections(conns);
     if (this.activeTabId === tab.id) {
       const next = this.tabs[this.tabs.length - 1];
       if (next) this.activate(next.id);

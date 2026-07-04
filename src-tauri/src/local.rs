@@ -59,9 +59,10 @@ pub fn home_dir() -> String {
 // ---------- 本地 PTY ----------
 
 fn size(cols: u32, rows: u32) -> PtySize {
+    // 钳制到合法范围：0 或 >u16 都会让 curses 应用错乱，避免 `as u16` 直接回绕
     PtySize {
-        rows: rows as u16,
-        cols: cols as u16,
+        rows: rows.clamp(1, u16::MAX as u32) as u16,
+        cols: cols.clamp(1, u16::MAX as u32) as u16,
         pixel_width: 0,
         pixel_height: 0,
     }

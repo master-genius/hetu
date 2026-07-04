@@ -32,7 +32,7 @@ function t(
 // ---------- 暗色（16） ----------
 
 const DARK: ThemeDef[] = [
-  t("dark", "SuperSSH 暗色（默认）", "dark", "#d8dee9", "#10151c", "#88c0d0", "#3b4a5a80", [
+  t("dark", "HetuShell 暗色（默认）", "dark", "#d8dee9", "#10151c", "#88c0d0", "#3b4a5a80", [
     "#1c2430", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd", "#56b6c2", "#c8ccd4",
     "#5c6773", "#ef7c86", "#a9d48a", "#f0cf8f", "#74bcf7", "#d48ae8", "#68c8d4", "#eceff4",
   ]),
@@ -101,7 +101,7 @@ const DARK: ThemeDef[] = [
 // ---------- 亮色（11） ----------
 
 const LIGHT: ThemeDef[] = [
-  t("light", "SuperSSH 亮色（默认）", "light", "#383a42", "#fafafa", "#526eff", "#c4d2e880", [
+  t("light", "HetuShell 亮色（默认）", "light", "#383a42", "#fafafa", "#526eff", "#c4d2e880", [
     "#383a42", "#e45649", "#50a14f", "#c18401", "#4078f2", "#a626a4", "#0184bc", "#a0a1a7",
     "#696c77", "#f26d5f", "#5fb85e", "#d99a12", "#5487f5", "#bb40b8", "#0699d6", "#ffffff",
   ]),
