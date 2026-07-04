@@ -11,11 +11,8 @@ import type { ConnParams, Profile, Settings, ThemeDef } from "./types";
 
 // 推荐字体（字重并入名字）；用户可在此基础上从系统字体中另选。
 const MONO_FONTS = [
-  "JetBrains Mono NL Light",
-  "JetBrains Mono NL",
-  "JetBrains Mono NL Medium",
-  "JetBrains Mono Light",
-  "JetBrains Mono",
+  "JetBrains Mono NL Light", // 内置（Light）
+  "JetBrains Mono NL", // 内置（Regular）
   "Cascadia Code",
   "Fira Code",
   "Source Code Pro",
@@ -341,7 +338,7 @@ export function showSettingsDialog() {
             <input name="opacity" type="range" min="0.3" max="1" step="0.01"></label>
           <label class="check"><input name="blur" type="checkbox"> 毛玻璃虚化（透明时仍保持终端内容清晰）</label>
           <label>模糊程度 <span class="blur-val"></span>
-            <input name="blurAmount" type="range" min="0" max="80" step="1"></label>
+            <input name="blurAmount" type="range" min="0" max="100" step="1"></label>
           <div class="settings-field">
             <span>界面圆角</span>
             <div class="radius-picker"></div>
@@ -442,8 +439,9 @@ export function showSettingsDialog() {
 
   // 字体下拉：推荐字体（字重并入名字）在上，系统字体经 list_fonts 异步注入到分隔线下方
   const toOpts = (names: string[]) => names.map((n) => ({ value: n, label: n }));
-  const monoFontSel = customSelect(toOpts(MONO_FONTS), s.fontFamily, () => commit());
-  const cjkFontSel = customSelect(toOpts(CJK_FONTS), s.cjkFontFamily, () => commit());
+  // 字体列表可能很长：限高 280px 可滚动，弹框紧凑、顶部内置默认字体始终可见
+  const monoFontSel = customSelect(toOpts(MONO_FONTS), s.fontFamily, () => commit(), 280);
+  const cjkFontSel = customSelect(toOpts(CJK_FONTS), s.cjkFontFamily, () => commit(), 280);
   q<HTMLElement>('.cs-mount[data-cs="fontFamily"]').appendChild(monoFontSel.el);
   q<HTMLElement>('.cs-mount[data-cs="cjkFontFamily"]').appendChild(cjkFontSel.el);
   // 异步注入系统字体：推荐组 + 分隔线 + 系统字体（去掉与推荐重复者）

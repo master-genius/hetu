@@ -109,9 +109,9 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            // 字重并入字体名（如 "…Light"），不再全局强制字重；CJK 用常规字重避免过细。
+            // 字重并入字体名（如 "…Light"），不再全局强制字重；内置等宽/CJK 默认均用 Light。
             font_family: "JetBrains Mono NL Light".into(),
-            cjk_font_family: "Noto Sans CJK SC".into(),
+            cjk_font_family: "Noto Sans CJK SC Light".into(),
             font_size: 14,
             // 保留字段仅为兼容；终端一律用 normal，字重由所选字体名承载
             font_weight: "normal".into(),
@@ -240,10 +240,27 @@ pub fn save_session(tabs: &[SessionTab]) -> Result<()> {
 
 pub fn load() -> Settings {
     // 与 profiles/session 共用损坏恢复策略（解析失败备份为 .bak 后回默认值）
-    match settings_path() {
+    let mut s = match settings_path() {
         Ok(p) => read_json_or_default(&p),
         Err(_) => Settings::default(),
+    };
+    migrate(&mut s);
+    s
+}
+
+/// 兼容旧配置：1.0.0 的字体默认三元组（等宽/CJK 未定制、且用全局字重 300）
+/// 升级到「字重并入名字」的新 Light 默认，使旧用户也能得到内置 Light 字体并在名字上体现。
+fn migrate(s: &mut Settings) {
+    if s.font_family == "JetBrains Mono NL"
+        && s.cjk_font_family == "Noto Sans SC"
+        && (s.font_weight == "300" || s.font_weight == "normal")
+    {
+        let d = Settings::default();
+        s.font_family = d.font_family;
+        s.cjk_font_family = d.cjk_font_family;
     }
+    // 终端不再全局施加字重，统一归一化为 normal（字重由字体名承载）
+    s.font_weight = "normal".into();
 }
 
 pub fn save(settings: &Settings) -> Result<()> {

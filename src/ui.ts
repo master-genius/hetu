@@ -19,6 +19,7 @@ export function customSelect(
   options: CSOption[],
   initial: string,
   onChange?: (value: string) => void,
+  menuMaxHeight?: number,
 ): CustomSelect {
   let value = initial;
   let opts = options;
@@ -60,6 +61,7 @@ export function customSelect(
           : { separator: true, label: "" },
       ),
       rect.width,
+      menuMaxHeight,
     );
   });
 
@@ -89,11 +91,22 @@ export interface MenuItem {
 
 let menuEl: HTMLElement | null = null;
 
-export function showMenu(x: number, y: number, items: MenuItem[], minWidth?: number) {
+export function showMenu(
+  x: number,
+  y: number,
+  items: MenuItem[],
+  minWidth?: number,
+  maxHeight?: number,
+) {
   hideMenu();
   menuEl = document.createElement("div");
   menuEl.className = "ctx-menu";
   if (minWidth) menuEl.style.minWidth = `${minWidth}px`;
+  // 超长列表（如系统字体）限高并滚动，避免菜单溢出屏幕导致顶部项（内置默认）被推出可视区
+  if (maxHeight) {
+    menuEl.style.maxHeight = `${maxHeight}px`;
+    menuEl.style.overflowY = "auto";
+  }
   for (const item of items) {
     if (item.separator) {
       const sep = document.createElement("div");

@@ -30,10 +30,13 @@ const PREVIEW_MAX_BYTES = 512 * 1024;
 async function bootstrap() {
   await loadSettings();
 
-  // 等内置字体就绪再创建终端，避免 xterm 用回退字体测量出错误的单元格宽度
+  // 等内置字体就绪再创建终端，避免 xterm 用回退字体测量出错误的单元格宽度。
+  // 覆盖默认字体名（含「字重并入名字」别名），确保首帧用正确字体测量单元格。
   await Promise.allSettled([
-    document.fonts.load('300 14px "JetBrains Mono NL"'),
+    document.fonts.load('normal 14px "JetBrains Mono NL Light"'),
+    document.fonts.load('bold 14px "JetBrains Mono NL Light"'),
     document.fonts.load('400 14px "JetBrains Mono NL"'),
+    document.fonts.load('normal 14px "Noto Sans CJK SC"'),
     document.fonts.load('300 14px "Noto Sans SC"'),
   ]);
 

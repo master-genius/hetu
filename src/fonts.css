@@ -41,3 +41,53 @@
   font-style: normal;
   font-display: swap;
 }
+
+/* ——— 「字重并入名字」别名 ———
+   终端统一以 font-weight:normal 渲染，字重改由所选「字体名」承载。
+   下列别名把设置里的推荐项映射到内置字体，保证离线默认可用、且各字重可分别选择。 */
+
+/* 主字体：JetBrains Mono NL Light（normal→Light，bold→Bold，italic→LightItalic，保留真实加粗） */
+@font-face {
+  font-family: "JetBrains Mono NL Light";
+  src: url("./assets/fonts/JetBrainsMonoNL-Light.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono NL Light";
+  src: url("./assets/fonts/JetBrainsMonoNL-LightItalic.woff2") format("woff2");
+  font-weight: normal;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono NL Light";
+  src: url("./assets/fonts/JetBrainsMonoNL-Bold.woff2") format("woff2");
+  font-weight: bold;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* CJK：Noto Sans CJK SC 家族别名（常规 / Light / Medium 分别指向可变字体的对应字重） */
+@font-face {
+  font-family: "Noto Sans CJK SC";
+  src: url("./assets/fonts/NotoSansSC.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Noto Sans CJK SC Light";
+  src: url("./assets/fonts/NotoSansSC.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Noto Sans CJK SC Medium";
+  src: url("./assets/fonts/NotoSansSC.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
