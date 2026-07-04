@@ -118,12 +118,12 @@ export function confirmDialog(title: string, message: string): Promise<boolean> 
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.innerHTML = `
-      <div class="modal small">
+      <div class="modal small confirm">
         <h3></h3>
         <p class="modal-msg"></p>
-        <div class="modal-actions">
-          <button class="btn" data-act="cancel">取消</button>
+        <div class="modal-actions center">
           <button class="btn primary" data-act="ok">确定</button>
+          <button class="btn" data-act="cancel">取消</button>
         </div>
       </div>`;
     overlay.querySelector("h3")!.textContent = title;

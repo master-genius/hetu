@@ -5,6 +5,8 @@ use base64::Engine;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::Serialize;
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 
@@ -68,6 +70,32 @@ fn size(cols: u32, rows: u32) -> PtySize {
     }
 }
 
+/// 某可执行文件是否能在 PATH 中找到
+#[cfg(windows)]
+fn on_path(exe: &str) -> bool {
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&paths).any(|dir| dir.join(exe).is_file())
+}
+
+/// 本机默认 shell：
+/// - Windows：优先 PowerShell 7（pwsh.exe），否则系统自带 Windows PowerShell（powershell.exe）
+/// - macOS / Linux：系统默认 shell（$SHELL），兜底 /bin/bash
+#[cfg(windows)]
+fn default_shell() -> String {
+    if on_path("pwsh.exe") {
+        "pwsh.exe".into()
+    } else {
+        "powershell.exe".into()
+    }
+}
+
+#[cfg(not(windows))]
+fn default_shell() -> String {
+    std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into())
+}
+
 /// 打开本地 PTY pane。控制线程处理输入/resize/关闭，读线程转发输出。
 pub fn open(
     app: AppHandle,
@@ -81,11 +109,7 @@ pub fn open(
         .openpty(size(cols, rows))
         .map_err(|e| Error::msg(format!("创建本地 PTY 失败: {e}")))?;
 
-    let shell = if cfg!(windows) {
-        std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into())
-    } else {
-        std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into())
-    };
+    let shell = default_shell();
     let mut cmd = CommandBuilder::new(&shell);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
@@ -108,9 +132,14 @@ pub fn open(
         .map_err(|e| Error::msg(format!("PTY writer 失败: {e}")))?;
     let master = pair.master;
 
-    // 读线程：PTY 输出 → 前端。EOF（shell 退出或 master 关闭）时通知前端收起 pane。
+    // 主动关闭标志：区分「用户主动关闭/切换连接」与「shell 自己退出」。
+    // 前者不应让前端把 pane 当作退出而关闭（否则切换连接会误关当前终端）。
+    let deliberate = Arc::new(AtomicBool::new(false));
+
+    // 读线程：PTY 输出 → 前端。EOF 时通知前端；exited 仅在 shell 自行退出时为 true。
     let app_out = app.clone();
     let pane_out = pane_id.clone();
+    let deliberate_r = deliberate.clone();
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
         loop {
@@ -127,9 +156,10 @@ pub fn open(
                 }
             }
         }
+        let exited = !deliberate_r.load(Ordering::SeqCst);
         let _ = app_out.emit(
             "pane-closed",
-            serde_json::json!({ "paneId": pane_out, "exited": true }),
+            serde_json::json!({ "paneId": pane_out, "exited": exited }),
         );
     });
 
@@ -145,7 +175,11 @@ pub fn open(
                 Some(PaneCmd::Resize { cols, rows }) => {
                     let _ = master.resize(size(cols, rows));
                 }
-                Some(PaneCmd::Close) | None => break,
+                // 主动关闭/发送端 drop：标记为非退出，随后让读线程 EOF 时据此上报
+                Some(PaneCmd::Close) | None => {
+                    deliberate.store(true, Ordering::SeqCst);
+                    break;
+                }
             }
         }
         let _ = child.kill();

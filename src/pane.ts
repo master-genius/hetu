@@ -42,12 +42,16 @@ export class Pane {
   readonly element: HTMLElement;
   cwd: string | null = null;
   homeDir: string | null = null;
+  /** 远端 shell 的 PID（连接时经隐形 OSC 标记捕获），用于 /proc 读实时 cwd */
+  shellPid: number | null = null;
   lastOutputAt = 0;
   private fit: FitAddon;
   private resizeObserver: ResizeObserver;
   private hoverTimer: number | undefined;
   private statCache = new Map<string, { meta: FileMeta | null; at: number }>();
   private disposed = false;
+  /** 当前 Ctrl 悬停命中的远端路径（用于手形光标 / Ctrl+单击下载 / Ctrl+拖拽） */
+  private ctrlHoverPath: string | null = null;
 
   onFocus: (() => void) | null = null;
   /** 全局快捷键分发：返回 true 表示已处理（不透传给 shell） */
@@ -55,6 +59,10 @@ export class Pane {
   onPreview: ((path: string) => void) | null = null;
   onTooltip: ((meta: FileMeta | null, x: number, y: number) => void) | null = null;
   onContextMenu: ((e: MouseEvent, word: string | null) => void) | null = null;
+  /** Ctrl+单击终端中的文件/目录（下载） */
+  onCtrlClick: ((path: string) => void) | null = null;
+  /** Ctrl+拖拽终端中的文件/目录（拖到文件管理器下载） */
+  onCtrlDragStart: ((path: string, e: DragEvent) => void) | null = null;
 
   constructor(id: string, connId: string) {
     this.id = id;
@@ -96,6 +104,13 @@ export class Pane {
       return true;
     });
 
+    // OSC 5379（私有）：连接时注入的隐形标记，捕获远端 shell PID，用于 /proc 读实时 cwd
+    this.term.parser.registerOscHandler(5379, (data) => {
+      const pid = parseInt(data, 10);
+      if (Number.isFinite(pid) && pid > 0) this.shellPid = pid;
+      return true;
+    });
+
     // 复制即选中（可配置）
     this.term.onSelectionChange(() => {
       const sel = this.term.getSelection();
@@ -122,15 +137,33 @@ export class Pane {
       }, 10);
     });
 
-    // 悬停元信息（防抖 400ms）
+    // 悬停元信息（防抖 400ms）+ Ctrl 悬停链接态
     this.element.addEventListener("mousemove", (e) => {
       window.clearTimeout(this.hoverTimer);
       this.onTooltip?.(null, e.clientX, e.clientY);
+      this.updateCtrlHover(e);
       this.hoverTimer = window.setTimeout(() => void this.hoverStat(e), 400);
     });
     this.element.addEventListener("mouseleave", () => {
       window.clearTimeout(this.hoverTimer);
       this.onTooltip?.(null, 0, 0);
+      this.clearCtrlHover();
+    });
+
+    // Ctrl+单击文件/目录 → 下载（若未拖拽）
+    this.element.addEventListener("click", (e) => {
+      if (e.ctrlKey && this.ctrlHoverPath) {
+        e.preventDefault();
+        this.onCtrlClick?.(this.ctrlHoverPath);
+      }
+    });
+    // Ctrl+拖拽文件/目录 → 拖到文件管理器下载到对应目录
+    this.element.addEventListener("dragstart", (e) => {
+      if (this.ctrlHoverPath && this.onCtrlDragStart) {
+        this.onCtrlDragStart(this.ctrlHoverPath, e);
+      } else {
+        e.preventDefault();
+      }
     });
 
     this.element.addEventListener("contextmenu", (e) => {
@@ -164,14 +197,44 @@ export class Pane {
       await api.paneOpenLocal(this.id, this.term.cols, this.term.rows);
       return;
     }
+    // 每次（重）打开远端 shell 都是新进程：PID 变、cwd 回到 home，需重新捕获追踪
+    this.shellPid = null;
+    this.cwd = null;
     await api.paneOpen(this.connId, this.id, this.term.cols, this.term.rows);
     if (!this.homeDir) {
-      // 仅记录 home 作为兜底；不写入 cwd——cwd 只反映 OSC7 上报的真实工作目录，
+      // 仅记录 home 作为兜底；不写入 cwd——cwd 只反映真实上报的工作目录，
       // 以便上传等操作能区分“已知目录”与“home 猜测”，避免静默传错位置。
       api.remoteHome(this.connId).then((h) => {
         this.homeDir = h;
       }).catch(() => {});
     }
+    this.injectCwdTracker();
+  }
+
+  /**
+   * 注入一次隐形标记，让远端 shell 用 OSC 5379 上报自己的 PID（任何 shell 都有 $$）。
+   * printf 直接输出控制序列（不显示为文本），并用光标上移+清行擦掉命令行回显，尽量无痕。
+   * 之后需要 cwd 时按需 realpath /proc/PID/cwd（见 uploadDir）。
+   */
+  private injectCwdTracker() {
+    if (this.isLocal || this.shellPid || !getSettings().trackRemoteCwd) return;
+    // 组装发送给 shell 的命令文本（这些是"敲入"的字符；printf 再把 \033 转成 ESC 字节）。
+    // 用常量拼接避免反斜杠数目算错。printf 输出：OSC(上报 PID) + 光标上移+清行(擦掉回显)。
+    const ESC = "\\033"; // 4 个字符 \0 3 3 → shell → printf → ESC
+    const cmd =
+      " printf '" +
+      ESC + "]5379;%s" + // OSC 私有码 + PID 占位
+      ESC + "\\\\" + //   ESC + \\ → ST（ESC \），结束 OSC
+      ESC + "[1A" + //    光标上移一行（到命令回显行）
+      ESC + "[2K" + //    清除整行（擦掉回显的命令）
+      "\\r" + //          回车到行首
+      "' \"$$\"\n"; //    传入 $$（shell 自身 PID）并回车执行
+    // 稍等 shell 就绪再发，使自清除相对首个提示符生效
+    window.setTimeout(() => {
+      if (!this.disposed && !this.shellPid) {
+        void api.paneInput(this.id, b64encode(cmd)).catch(() => {});
+      }
+    }, 450);
   }
 
   /**
@@ -183,6 +246,7 @@ export class Pane {
     this.connId = newConnId;
     this.cwd = null;
     this.homeDir = null;
+    this.shellPid = null; // 旧主机的 shell PID 不能用于新连接的 /proc 读取
     this.statCache.clear();
     this.term.reset();
     await this.open();
@@ -194,9 +258,16 @@ export class Pane {
     return this.cwd !== null;
   }
 
-  /** 上传/写入操作的目标目录：已知 cwd 优先，否则 home 兜底并标记为 guessed */
-  uploadDir(): { dir: string | null; guessed: boolean } {
+  /**
+   * 上传/下载的目标目录，按可靠性优先：
+   * 1) OSC7 上报的 cwd；2) 经 shell PID 从 /proc 读到的实时 cwd；3) home 兜底（guessed）。
+   */
+  async uploadDir(): Promise<{ dir: string | null; guessed: boolean }> {
     if (this.cwd) return { dir: this.cwd, guessed: false };
+    if (this.shellPid) {
+      const cwd = await api.remoteCwd(this.connId, this.shellPid).catch(() => null);
+      if (cwd) return { dir: cwd, guessed: false };
+    }
     return { dir: this.homeDir, guessed: true };
   }
 
@@ -288,6 +359,26 @@ export class Pane {
   /** 鼠标位置 → 该处的词 */
   wordUnderMouse(e: MouseEvent): string | null {
     return this.wordRangeAtPoint(e.clientX, e.clientY)?.word ?? null;
+  }
+
+  /** Ctrl 悬停在文件/目录词上时：手形光标 + 可拖拽（仅远程 pane 有意义） */
+  private updateCtrlHover(e: MouseEvent) {
+    if (this.isLocal || !e.ctrlKey) {
+      this.clearCtrlHover();
+      return;
+    }
+    const word = this.wordUnderMouse(e);
+    const path = word ? this.resolvePath(word.replace(/\/$/, "")) : null;
+    this.ctrlHoverPath = path;
+    this.element.classList.toggle("ctrl-link", !!path);
+    this.element.draggable = !!path;
+  }
+
+  private clearCtrlHover() {
+    if (this.ctrlHoverPath === null && !this.element.draggable) return;
+    this.ctrlHoverPath = null;
+    this.element.classList.remove("ctrl-link");
+    this.element.draggable = false;
   }
 
   /** stat（带 5s 缓存），失败返回 null */

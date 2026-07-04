@@ -34,6 +34,10 @@
   from { opacity: 0; transform: translateY(8px) scale(0.985); }
   to { opacity: 1; transform: none; }
 }
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 @keyframes menu-in {
   from { opacity: 0; transform: translateY(-4px) scale(0.97); }
   to { opacity: 1; transform: none; }
@@ -64,6 +68,9 @@ body {
   background: var(--bg-rgba);
   backdrop-filter: var(--blur);
   -webkit-backdrop-filter: var(--blur);
+  /* 整窗圆角随圆角级别变化（直角时为 0）；透明窗口下四角露出桌面，形成圆角窗口观感 */
+  border-radius: var(--radius-modal);
+  overflow: hidden;
 }
 
 /* ---------- 标题栏：左侧操作图标 + 拖拽区 + 右侧窗口控制 ---------- */
@@ -152,16 +159,15 @@ body {
   background: color-mix(in srgb, var(--term-fg) 9%, transparent);
 }
 
-/* 圆角样式：选中指示条在顶部，下方与终端融为一体 */
+/* 圆角样式：选中指示条在顶部、与标签同宽，下方与终端融为一体 */
 .tab.active::after {
   content: "";
   position: absolute;
   top: 0;
-  left: 8%;
-  right: 8%;
+  left: 0;
+  right: 0;
   height: 2px;
   background: var(--accent);
-  border-radius: 2px;
 }
 
 /* 直角样式：标签也是直角，指示条回到底部 */
@@ -243,6 +249,13 @@ body {
   position: absolute;
   inset: 0;
   padding: 4px;
+}
+
+/* 非活动标签：保持尺寸、仅隐藏，切换瞬时无重排/重绘闪烁 */
+.layout-root.tab-hidden {
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 0;
 }
 
 
@@ -355,6 +368,13 @@ body {
 
 .pane .xterm {
   height: 100%;
+}
+
+/* Ctrl 悬停在文件/目录上：手形光标，提示可点击下载 / 拖拽到文件管理器 */
+.pane.ctrl-link,
+.pane.ctrl-link .xterm-screen,
+.pane.ctrl-link .xterm-rows {
+  cursor: pointer !important;
 }
 
 /* xterm 背景交给应用层（透明），viewport 不要遮挡毛玻璃 */
@@ -547,14 +567,15 @@ body {
   position: fixed;
   z-index: 200;
   min-width: 180px;
-  background: var(--chrome-rgba);
-  backdrop-filter: blur(16px);
-  border: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
+  background: color-mix(in srgb, var(--term-bg) 62%, transparent);
+  backdrop-filter: blur(26px) saturate(1.6);
+  -webkit-backdrop-filter: blur(26px) saturate(1.6);
+  border: 1px solid color-mix(in srgb, var(--term-fg) 16%, transparent);
   border-radius: var(--radius);
   padding: 4px;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
   transform-origin: top left;
-  animation: menu-in 0.12s ease;
+  animation: fade-in 0.1s ease;
 }
 
 .ctx-item {
@@ -613,16 +634,20 @@ body {
 }
 
 .modal {
-  background: var(--chrome-rgba);
-  backdrop-filter: blur(20px);
-  border: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
+  /* 真·毛玻璃：背景很透明 + 背后强模糊。弹窗挂在 body（非嵌套于 #app 的 backdrop-filter），
+     只有一层 backdrop-filter，性能可接受；入场只做透明度渐显、不缩放，避免多帧重算模糊。 */
+  background: color-mix(in srgb, var(--term-bg) 58%, transparent);
+  backdrop-filter: blur(34px) saturate(1.7);
+  -webkit-backdrop-filter: blur(34px) saturate(1.7);
+  border: 1px solid color-mix(in srgb, var(--term-fg) 18%, transparent);
   border-radius: var(--radius-modal);
   padding: 20px;
   max-width: min(860px, 92vw);
   max-height: 86vh;
   overflow: auto;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
-  animation: modal-in 0.19s cubic-bezier(0.2, 0.7, 0.3, 1);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 color-mix(in srgb, var(--term-fg) 12%, transparent);
+  animation: fade-in 0.14s ease;
 }
 
 .modal h3 {
@@ -639,7 +664,33 @@ body {
 }
 
 .modal.small {
-  width: 380px;
+  width: 400px;
+}
+
+/* 确认框：更宽松的布局、居中文本、按钮居中（确定在左） */
+.modal.confirm {
+  padding: 24px 26px;
+  text-align: center;
+}
+
+.modal.confirm h3 {
+  margin-bottom: 12px;
+}
+
+.modal.confirm .modal-msg {
+  margin-bottom: 4px;
+  white-space: pre-line;
+}
+
+.modal-actions.center {
+  justify-content: center;
+  gap: 14px;
+  margin-top: 22px;
+}
+
+.modal-actions.center .btn {
+  min-width: 96px;
+  padding: 8px 18px;
 }
 
 .modal-msg {
@@ -1041,28 +1092,42 @@ input[type="checkbox"] {
   position: relative;
 }
 
-.tc-del {
+/* 自定义主题卡片右上角操作条：编辑 + 删除（悬停显现） */
+.tc-actions {
   position: absolute;
   top: 3px;
-  right: 5px;
-  width: 16px;
-  height: 16px;
-  line-height: 14px;
-  text-align: center;
-  border-radius: 4px;
-  font-size: 13px;
+  right: 4px;
+  display: flex;
+  gap: 3px;
   opacity: 0;
-  background: color-mix(in srgb, #e06c75 70%, transparent);
-  color: #fff;
   transition: opacity 0.12s;
 }
 
-.theme-card:hover .tc-del {
-  opacity: 0.9;
+.theme-card:hover .tc-actions {
+  opacity: 1;
 }
 
-.tc-del:hover {
-  opacity: 1 !important;
+.tc-act {
+  width: 16px;
+  height: 16px;
+  line-height: 15px;
+  text-align: center;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #fff;
+}
+
+.tc-edit {
+  background: color-mix(in srgb, var(--accent) 80%, black);
+}
+
+.tc-del {
+  background: color-mix(in srgb, #e06c75 78%, transparent);
+  font-size: 13px;
+}
+
+.tc-act:hover {
+  filter: brightness(1.15);
 }
 
 /* 快捷键编辑行 */

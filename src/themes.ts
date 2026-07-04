@@ -100,6 +100,26 @@ const DARK: ThemeDef[] = [
     "#292d3e", "#f07178", "#c3e88d", "#ffcb6b", "#82aaff", "#c792ea", "#89ddff", "#d0d0d0",
     "#676e95", "#f07178", "#c3e88d", "#ffcb6b", "#82aaff", "#c792ea", "#89ddff", "#ffffff",
   ]),
+  t("tomorrow-night", "Tomorrow Night", "dark", "#c5c8c6", "#1d1f21", "#c5c8c6", "#37383980", [
+    "#1d1f21", "#cc6666", "#b5bd68", "#f0c674", "#81a2be", "#b294bb", "#8abeb7", "#c5c8c6",
+    "#969896", "#cc6666", "#b5bd68", "#f0c674", "#81a2be", "#b294bb", "#8abeb7", "#ffffff",
+  ]),
+  t("oceanic-next", "Oceanic Next", "dark", "#c0c5ce", "#1b2b34", "#c0c5ce", "#33455080", [
+    "#1b2b34", "#ec5f67", "#99c794", "#fac863", "#6699cc", "#c594c5", "#5fb3b3", "#c0c5ce",
+    "#65737e", "#ec5f67", "#99c794", "#fac863", "#6699cc", "#c594c5", "#5fb3b3", "#d8dee9",
+  ]),
+  t("snazzy", "Snazzy", "dark", "#eff0eb", "#282a36", "#97979b", "#44475a90", [
+    "#282a36", "#ff5c57", "#5af78e", "#f3f99d", "#57c7ff", "#ff6ac1", "#9aedfe", "#f1f1f0",
+    "#686868", "#ff5c57", "#5af78e", "#f3f99d", "#57c7ff", "#ff6ac1", "#9aedfe", "#eff0eb",
+  ]),
+  t("cobalt2", "Cobalt2", "dark", "#ffffff", "#193549", "#ffc600", "#0d3a5880", [
+    "#000000", "#ff0000", "#38de21", "#ffe50a", "#1460d2", "#ff005d", "#00bbbb", "#bbbbbb",
+    "#555555", "#f40e17", "#3bd01d", "#edc809", "#5555ff", "#ff55ff", "#6ae3fa", "#ffffff",
+  ]),
+  t("zenburn", "Zenburn", "dark", "#dcdccc", "#3f3f3f", "#dcdccc", "#5f5f5f90", [
+    "#3f3f3f", "#cc9393", "#7f9f7f", "#e3ceab", "#8cd0d3", "#dc8cc3", "#93e0e3", "#dcdccc",
+    "#709080", "#dca3a3", "#bfebbf", "#f0dfaf", "#a2d7dd", "#ec93d3", "#b3ffff", "#ffffff",
+  ]),
 ];
 
 // ---------- 亮色（11） ----------

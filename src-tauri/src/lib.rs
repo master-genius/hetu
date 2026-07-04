@@ -269,6 +269,22 @@ async fn remote_home(state: State<'_>, conn_id: String) -> Result<String> {
     ssh::sftp::home(&conn).await
 }
 
+/// 通过 /proc/<pid>/cwd 读取远端 shell 实时工作目录
+#[tauri::command]
+async fn remote_cwd(state: State<'_>, conn_id: String, pid: u32) -> Result<String> {
+    let conn = get_conn(&state, &conn_id).await?;
+    ssh::sftp::proc_cwd(&conn, pid).await
+}
+
+/// 系统默认下载目录（Linux 尊重 XDG，macOS/Windows 为各自 Downloads），兜底 ~/Downloads
+#[tauri::command]
+fn default_download_dir() -> String {
+    dirs::download_dir()
+        .or_else(|| dirs::home_dir().map(|h| h.join("Downloads")))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
 // ---------- 本地文件系统（文件管理器面板） ----------
 
 #[tauri::command]
@@ -343,6 +359,8 @@ pub fn run() {
             sftp_download,
             sftp_upload,
             remote_home,
+            remote_cwd,
+            default_download_dir,
             local_list,
             local_home,
             read_key_file,

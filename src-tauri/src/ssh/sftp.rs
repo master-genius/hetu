@@ -407,6 +407,19 @@ pub async fn upload(
     }
 }
 
+/// 通过 /proc/<pid>/cwd 解析远端 shell 的实时工作目录（Linux）。
+/// realpath 解析该符号链接即得 shell 当前 cwd，无需 OSC7 或持续上报。
+pub async fn proc_cwd(conn: &Arc<Connection>, pid: u32) -> Result<String> {
+    let sftp = session(conn).await?;
+    match sftp.canonicalize(format!("/proc/{pid}/cwd")).await {
+        Ok(p) => Ok(p),
+        Err(e) => {
+            invalidate(conn).await;
+            Err(e.into())
+        }
+    }
+}
+
 /// 远端 home 目录（用于 cwd 兜底）
 pub async fn home(conn: &Arc<Connection>) -> Result<String> {
     let sftp = session(conn).await?;

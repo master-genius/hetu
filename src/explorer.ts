@@ -10,6 +10,8 @@ import type { LocalEntry } from "./types";
 
 /** 拖拽数据的自定义 MIME（区分应用内拖拽与 OS 文件拖入） */
 export const DND_MIME = "application/x-hetushell-paths";
+/** 从终端 Ctrl+拖拽远端文件到文件管理器 → 下载意图 */
+export const DL_MIME = "application/x-hetushell-download";
 
 type ViewMode = "list" | "tiles";
 const VIEW_KEY = "hetushell-explorer-view";
@@ -77,6 +79,8 @@ export class Explorer {
   cwd = "";
   /** 请求把本地路径上传到当前终端目录（由 main 装配） */
   onUploadRequest: ((paths: string[]) => void) | null = null;
+  /** 请求把远端文件下载到本地某目录（终端 Ctrl+拖拽进来时触发） */
+  onDownloadRequest: ((connId: string, remotePath: string, targetDir: string) => void) | null = null;
   private listEl: HTMLElement;
   private pathInput: HTMLInputElement;
   private viewBtn: HTMLButtonElement;
@@ -95,9 +99,30 @@ export class Explorer {
         <button class="btn ex-refresh" title="刷新">⟳</button>
       </div>
       <div class="ex-list"></div>
-      <div class="ex-hint">拖动条目到左侧终端即可上传；右键更多操作</div>`;
+      <div class="ex-hint">拖条目到左侧终端上传；从终端 Ctrl+拖文件到这里下载；右键更多操作</div>`;
     this.listEl = this.element.querySelector(".ex-list") as HTMLElement;
     this.pathInput = this.element.querySelector(".ex-path") as HTMLInputElement;
+
+    // 接收从终端 Ctrl+拖入的下载：拖到某文件夹行 → 下载到该文件夹，否则下载到当前目录
+    this.element.addEventListener("dragover", (e) => {
+      if (e.dataTransfer?.types.includes(DL_MIME)) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+      }
+    });
+    this.element.addEventListener("drop", (e) => {
+      const raw = e.dataTransfer?.getData(DL_MIME);
+      if (!raw) return;
+      e.preventDefault();
+      try {
+        const { connId, path } = JSON.parse(raw) as { connId: string; path: string };
+        const row = (e.target as HTMLElement).closest(".ex-row") as HTMLElement | null;
+        const targetDir = row?.dataset.dir || this.cwd;
+        this.onDownloadRequest?.(connId, path, targetDir);
+      } catch {
+        /* 载荷异常，忽略 */
+      }
+    });
     this.viewBtn = this.element.querySelector(".ex-view") as HTMLButtonElement;
 
     this.element.querySelector(".ex-up")!.addEventListener("click", () => {
@@ -167,6 +192,7 @@ export class Explorer {
       <span class="ex-meta">${mtime}</span>`;
     row.querySelector(".ex-name")!.textContent = entry.name;
     row.title = entry.path;
+    if (entry.isDir) row.dataset.dir = entry.path; // 拖入下载时作为目标目录
 
     row.addEventListener("dblclick", () => {
       if (entry.isDir) void this.navigate(entry.path);

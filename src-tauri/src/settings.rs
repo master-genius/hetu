@@ -93,6 +93,12 @@ pub struct Settings {
     pub copy_on_select: bool,
     /// 上传遇同名文件时提示确认；默认 false（直接覆盖）
     pub confirm_overwrite: bool,
+    /// 默认下载目录（空 = 自动，系统 Downloads）
+    pub download_dir: String,
+    /// 每次下载都询问保存位置
+    pub ask_download_location: bool,
+    /// 追踪远程工作目录（连接时注入隐形 PID 标记，用 /proc 读实时 cwd）
+    pub track_remote_cwd: bool,
     /// 记住最后的会话：下次启动自动重开并连接（默认关闭）
     pub restore_session: bool,
     /// 自定义快捷键：动作 → 组合键（仅存与默认不同的覆盖项）
@@ -123,6 +129,9 @@ impl Default for Settings {
             auto_reconnect: true,
             copy_on_select: true,
             confirm_overwrite: false,
+            download_dir: String::new(),
+            ask_download_location: false,
+            track_remote_cwd: true,
             restore_session: false,
             keybindings: std::collections::HashMap::new(),
         }

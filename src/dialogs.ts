@@ -296,7 +296,7 @@ export function showSettingsDialog() {
         </section>
         <section>
           <h4>主题</h4>
-          <p class="section-desc">内置 17 套暗色、11 套亮色，可基于任一主题派生自定义配色。点击色板即可切换。</p>
+          <p class="section-desc">内置 22 套暗色、11 套亮色（按名称排序），可基于任一主题派生自定义配色。点击色板即可切换。</p>
           <div class="theme-picker-head">
             <span>配色主题</span>
             <button type="button" class="btn new-theme">基于当前新建</button>
@@ -333,6 +333,18 @@ export function showSettingsDialog() {
           <label class="check"><input name="copyOnSelect" type="checkbox"> 选中文本即复制到剪贴板</label>
           <label class="check"><input name="confirmOverwrite" type="checkbox"> 上传遇同名文件时提示确认（默认直接覆盖）</label>
           <label class="check"><input name="restoreSession" type="checkbox"> 记住最后的会话（下次启动自动重开并连接）</label>
+          <label class="check"><input name="trackRemoteCwd" type="checkbox"> 追踪远程工作目录（连接时注入隐形标记，经 /proc 读实时目录）</label>
+        </section>
+        <section>
+          <h4>下载</h4>
+          <label>默认下载目录（空 = 系统 Downloads）
+            <div class="row">
+              <input name="downloadDir" class="grow" spellcheck="false" placeholder="留空自动">
+              <button type="button" class="btn browse-dl">浏览</button>
+            </div>
+          </label>
+          <label class="check"><input name="askDownloadLocation" type="checkbox"> 每次下载都询问保存位置</label>
+          <p class="section-desc">右键或 Ctrl+单击终端里的文件即可下载；Ctrl+拖到右侧文件管理器则下载到对应目录。</p>
         </section>
         <section>
           <h4>快捷键</h4>
@@ -367,12 +379,24 @@ export function showSettingsDialog() {
   input("tabFontFamily").value = s.tabFontFamily;
   input("tabFontSize").value = s.tabFontSize ? String(s.tabFontSize) : "";
   input("tabBarFill").checked = s.tabBarFill;
+  input("trackRemoteCwd").checked = s.trackRemoteCwd;
+  input("downloadDir").value = s.downloadDir;
+  input("askDownloadLocation").checked = s.askDownloadLocation;
+  overlay.querySelector(".browse-dl")!.addEventListener("click", async () => {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const picked = await open({ directory: true, title: "选择默认下载目录" });
+    if (typeof picked === "string") {
+      input("downloadDir").value = picked;
+      commit();
+    }
+  });
 
   // 圆角级别选择器：小图标（方形 → 大圆角），不显示文字
   let cornerRadius = s.cornerRadius;
   const radiusPicker = q<HTMLElement>(".radius-picker");
+  // 用宽于高的圆角矩形（而非正方形）呈现，rx 远小于半高，五级都清晰可辨、不会退化成圆
   const RADII: Array<{ v: Settings["cornerRadius"]; r: number }> = [
-    { v: "square", r: 0 }, { v: "xs", r: 2 }, { v: "sm", r: 4 }, { v: "md", r: 7 }, { v: "lg", r: 11 },
+    { v: "square", r: 0 }, { v: "xs", r: 2 }, { v: "sm", r: 4 }, { v: "md", r: 6 }, { v: "lg", r: 8 },
   ];
   const renderRadius = () => {
     radiusPicker.textContent = "";
@@ -381,7 +405,7 @@ export function showSettingsDialog() {
       b.type = "button";
       b.className = "radius-opt" + (v === cornerRadius ? " selected" : "");
       b.title = v;
-      b.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20"><rect x="4" y="4" width="16" height="16" rx="${r}" fill="none" stroke="currentColor" stroke-width="2"/></svg>`;
+      b.innerHTML = `<svg viewBox="0 0 30 24" width="26" height="21"><rect x="3" y="4" width="24" height="16" rx="${r}" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>`;
       b.addEventListener("click", () => {
         cornerRadius = v;
         renderRadius();
@@ -487,7 +511,8 @@ export function showSettingsDialog() {
     cancelCapture = cleanup;
     window.addEventListener("keydown", onKey, true);
   };
-  renderKeybinds();
+  // 重内容延后一帧渲染，让弹窗外壳先瞬间出现（消除卡顿感）
+  requestAnimationFrame(renderKeybinds);
   q<HTMLButtonElement>(".kb-reset").addEventListener("click", () => {
     kbOverrides = {};
     void updateSettings({ keybindings: {} });
@@ -516,12 +541,15 @@ export function showSettingsDialog() {
       const grid = document.createElement("div");
       grid.className = "theme-grid";
       const custom = label === "自定义";
-      for (const t of matched) {
+      // 按名称排序展示
+      const sorted = [...matched].sort((a, b) => a.name.localeCompare(b.name, "zh"));
+      for (const t of sorted) {
         const card = makeThemeCard(
           t,
           t.id === selectedThemeId,
           () => selectTheme(t.id),
           custom ? () => deleteTheme(t.id) : undefined,
+          custom ? () => editTheme(t) : undefined,
         );
         card.dataset.themeId = t.id;
         grid.appendChild(card);
@@ -556,6 +584,22 @@ export function showSettingsDialog() {
     syncTitlebarUI();
   };
 
+  // 编辑已保存的自定义主题：用其副本打开逐色编辑器，保存后原地更新（id 不变）
+  const editTheme = (theme: ThemeDef) => {
+    const editor = q<HTMLElement>(".theme-editor");
+    const draft: ThemeDef = { ...theme, colors: { ...theme.colors } };
+    renderThemeEditor(editor, draft, async () => {
+      const custom = getSettings().customThemes.map((t) => (t.id === draft.id ? draft : t));
+      selectedThemeId = draft.id;
+      await updateSettings({ customThemes: custom, theme: draft.id });
+      renderThemeGroups();
+      syncTitlebarUI();
+      editor.style.display = "none";
+      toast("主题已更新");
+    });
+    editor.style.display = "";
+  };
+
   // 标题栏颜色：默认跟随主题，取消勾选后可单独取色
   const followInput = input("titlebarFollow");
   const titlebarPicker = input("titlebarColor");
@@ -566,7 +610,7 @@ export function showSettingsDialog() {
       (resolveTheme(selectedThemeId, getSettings().customThemes).colors.background ?? "#10151c").slice(0, 7);
     titlebarPicker.disabled = followInput.checked;
   };
-  renderThemeGroups();
+  requestAnimationFrame(renderThemeGroups); // 28 张色板卡片延后一帧，弹窗先出现
   syncTitlebarUI();
   followInput.addEventListener("change", () => {
     titlebarPicker.disabled = followInput.checked;
@@ -592,6 +636,9 @@ export function showSettingsDialog() {
       tabBarFill: input("tabBarFill").checked,
       tabFontFamily: input("tabFontFamily").value,
       tabFontSize: parseInt(input("tabFontSize").value, 10) || 0,
+      trackRemoteCwd: input("trackRemoteCwd").checked,
+      downloadDir: input("downloadDir").value.trim(),
+      askDownloadLocation: input("askDownloadLocation").checked,
     });
   };
 
@@ -647,6 +694,7 @@ function makeThemeCard(
   selected: boolean,
   onClick: () => void,
   onDelete?: () => void,
+  onEdit?: () => void,
 ): HTMLElement {
   const c = theme.colors;
   const card = document.createElement("button");
@@ -656,16 +704,32 @@ function makeThemeCard(
   card.style.color = c.foreground ?? "#fff";
   card.title = theme.name;
 
-  if (onDelete) {
-    const del = document.createElement("span");
-    del.className = "tc-del";
-    del.textContent = "×";
-    del.title = "删除此自定义主题";
-    del.addEventListener("click", (e) => {
-      e.stopPropagation();
-      onDelete();
-    });
-    card.appendChild(del);
+  if (onEdit || onDelete) {
+    const bar = document.createElement("div");
+    bar.className = "tc-actions";
+    if (onEdit) {
+      const edit = document.createElement("span");
+      edit.className = "tc-act tc-edit";
+      edit.textContent = "✎";
+      edit.title = "编辑此自定义主题";
+      edit.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onEdit();
+      });
+      bar.appendChild(edit);
+    }
+    if (onDelete) {
+      const del = document.createElement("span");
+      del.className = "tc-act tc-del";
+      del.textContent = "×";
+      del.title = "删除此自定义主题";
+      del.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onDelete();
+      });
+      bar.appendChild(del);
+    }
+    card.appendChild(bar);
   }
 
   const preview = document.createElement("div");

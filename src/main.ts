@@ -10,7 +10,7 @@ import { api, events } from "./ipc";
 import { loadSettings, getSettings, onSettingsChange, activeTheme, fontStack } from "./settings";
 import { TabManager, type Tab } from "./tabs";
 import { Pane } from "./pane";
-import { DND_MIME, Explorer } from "./explorer";
+import { DND_MIME, DL_MIME, Explorer } from "./explorer";
 import { type Action, matchAction, resolveBindings } from "./keybindings";
 import { showConnectDialog, showSettingsDialog } from "./dialogs";
 import {
@@ -135,6 +135,16 @@ async function bootstrap() {
     // 终端聚焦时的按键先经全局快捷键分发（命中则不透传给 shell）
     pane.onAppKey = (e) => dispatchShortcut(e, pane);
     pane.onTooltip = showFileTooltip;
+    // Ctrl+单击文件/目录 → 下载（默认 Downloads / 每次询问，按设置）
+    pane.onCtrlClick = (path) => void downloadFile(pane, path);
+    // Ctrl+拖拽文件/目录 → 携带下载意图，拖到文件管理器则下载到其目录
+    pane.onCtrlDragStart = (path, e) => {
+      e.dataTransfer?.setData(
+        DL_MIME,
+        JSON.stringify({ connId: pane.connId, path }),
+      );
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = "copy";
+    };
     pane.onPreview = async (path) => {
       if (pane.isLocal) return; // 本地终端无 SFTP，双击不预览
       try {
@@ -267,7 +277,7 @@ async function bootstrap() {
     if (dirOverride) {
       dir = dirOverride;
     } else {
-      const u = target.uploadDir();
+      const u = await target.uploadDir();
       dir = u.dir;
       guessed = u.guessed;
     }
@@ -423,21 +433,43 @@ async function bootstrap() {
 
   // ---------- 下载 ----------
 
-  const downloadFile = async (pane: Pane, remotePath: string) => {
+  /** 解析默认下载目录：设置里指定的优先，否则系统 Downloads */
+  const resolveDownloadDir = async (): Promise<string> => {
+    const s = getSettings().downloadDir.trim();
+    if (s) return s;
+    return api.defaultDownloadDir().catch(() => "");
+  };
+
+  /**
+   * 下载远端文件/目录。
+   * - targetDir 指定（拖到文件管理器某目录）→ 直接下载到该目录。
+   * - 否则按设置：勾选"每次询问"→ 弹保存对话框；否则默认下载目录（Downloads / 自定义）。
+   */
+  const downloadFile = async (pane: Pane, remotePath: string, targetDir?: string) => {
     try {
       const meta = await api.sftpStat(pane.connId, remotePath);
       const name = remotePath.replace(/\/+$/, "").split("/").pop() ?? remotePath;
-      const dialog = await import("@tauri-apps/plugin-dialog");
-      let local: string | null;
-      if (meta.isDir) {
-        // 目录：选择本地父目录，递归下载为其中的同名目录
-        local = await dialog.open({ directory: true, title: `选择 “${name}” 的保存位置` }) as string | null;
+      let local: string | null = null;
+
+      if (targetDir) {
+        // 拖到文件管理器：目录用父目录（递归为同名目录），文件用父目录 + 文件名
+        local = meta.isDir ? targetDir : `${targetDir.replace(/\/+$/, "")}/${name}`;
+      } else if (getSettings().askDownloadLocation) {
+        const dialog = await import("@tauri-apps/plugin-dialog");
+        local = meta.isDir
+          ? ((await dialog.open({ directory: true, title: `选择 “${name}” 的保存位置` })) as string | null)
+          : await dialog.save({ defaultPath: name, title: "保存到本地" });
       } else {
-        local = await dialog.save({ defaultPath: name, title: "保存到本地" });
+        const dir = await resolveDownloadDir();
+        if (!dir) {
+          toast("未能确定下载目录，请在设置中指定", true);
+          return;
+        }
+        local = meta.isDir ? dir : `${dir.replace(/\/+$/, "")}/${name}`;
       }
       if (!local) return;
       await api.sftpDownload(pane.connId, remotePath, local, crypto.randomUUID());
-      toast(`已下载到 ${meta.isDir ? `${local}/${name}` : local}`);
+      toast(`已下载到 ${meta.isDir ? `${local.replace(/\/+$/, "")}/${name}` : local}`);
     } catch (err) {
       toast(`下载失败: ${err}`, true);
     }
@@ -483,6 +515,10 @@ async function bootstrap() {
     if (!tab.explorer) {
       tab.explorer = new Explorer();
       tab.explorer.onUploadRequest = (paths) => void uploadFiles(paths);
+      tab.explorer.onDownloadRequest = (connId, path, targetDir) => {
+        const found = tabs.panesByConn(connId)[0];
+        if (found) void downloadFile(found.pane, path, targetDir);
+      };
     }
     if (explorerPanel.firstChild !== tab.explorer.element) {
       explorerPanel.textContent = "";
@@ -659,27 +695,32 @@ async function bootstrap() {
   // 启动：若开启「记住最后的会话」则恢复上次的标签页并自动连接；否则开一个本地终端。
   // 远程连接只恢复来自已保存连接项（含密钥）的会话；临时/手输、密码认证（未存密码）的一律跳过。
   const session = getSettings().restoreSession ? await api.sessionGet().catch(() => []) : [];
-  if (session.length > 0) {
+  if (session.length === 0) {
+    await openLocalTab();
+    snapshotSession();
+  } else {
     restoring = true;
     const profiles = session.some((s) => !s.local && s.profileId)
       ? await api.profilesList().catch(() => [] as Awaited<ReturnType<typeof api.profilesList>>)
       : [];
+    // 本地终端立即打开（秒开）；SSH 连接**并行在后台建立、不阻塞界面**——
+    // 任何一个连接慢/挂起都不会卡死整个应用，其它标签页照常可用。
+    const pending: Promise<unknown>[] = [];
     for (const st of session) {
-      try {
-        if (st.local) {
-          await openLocalTab();
-          continue;
-        }
-        if (!st.profileId) continue; // 临时/手输连接，未保存为连接项 → 不恢复
-        const p = profiles.find((pr) => pr.id === st.profileId);
-        if (!p) continue; // 连接项已删除
-        // 密码认证不存密码、密钥认证缺密钥内容/路径 → 无法静默连接，跳过
-        const hasKey = !!(p.keyData || p.keyPath);
-        if (p.auth !== "key" || !hasKey) {
-          toast(`「${p.name}」未保存凭据，跳过自动连接`);
-          continue;
-        }
-        await connectAndOpenTab(
+      if (st.local) {
+        await openLocalTab();
+        continue;
+      }
+      if (!st.profileId) continue; // 临时/手输连接，未保存为连接项 → 不恢复
+      const p = profiles.find((pr) => pr.id === st.profileId);
+      if (!p) continue; // 连接项已删除
+      const hasKey = !!(p.keyData || p.keyPath);
+      if (p.auth !== "key" || !hasKey) {
+        toast(`「${p.name}」未保存凭据，跳过自动连接`);
+        continue;
+      }
+      pending.push(
+        connectAndOpenTab(
           {
             name: p.name,
             host: p.host,
@@ -692,15 +733,16 @@ async function bootstrap() {
             timeout: p.timeout ?? undefined,
           },
           p.id,
-        );
-      } catch (err) {
-        toast(`自动连接「${st.name}」失败：${err}`, true);
-      }
+        ).catch((err) => toast(`自动连接「${st.name}」失败：${err}`, true)),
+      );
     }
-    restoring = false;
+    // 不 await：界面已可交互；后台连接全部结束后再解除 restoring 并落盘一次
+    void Promise.allSettled(pending).then(() => {
+      restoring = false;
+      if (tabs.tabs.length === 0) void openLocalTab();
+      snapshotSession();
+    });
   }
-  if (tabs.tabs.length === 0) await openLocalTab(); // 无可恢复项时的兜底
-  snapshotSession(); // 恢复完成后落一次盘，反映真实的当前会话
 }
 
 function truncate(s: string, n = 24): string {

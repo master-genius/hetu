@@ -138,19 +138,19 @@ export class TabManager {
     for (const t of this.tabs) {
       const active = t.id === tabId;
       t.el.classList.toggle("active", active);
-      t.layout.container.style.display = active ? "" : "none";
-      if (active && !this.content.contains(t.layout.container)) {
+      // 用 visibility 隐藏而非 display:none：非活动标签的终端**保持原尺寸、画布不塌缩**，
+      // 切回时无需从 0×0 重新布局/重绘，彻底消除「大字闪烁」。所有容器常驻 DOM、绝对定位
+      // 叠放，切换只是切可见性——瞬时、零重绘。
+      t.layout.container.classList.toggle("tab-hidden", !active);
+      if (!this.content.contains(t.layout.container)) {
         this.content.appendChild(t.layout.container);
       }
       if (t.banner) t.banner.style.display = active ? "" : "none";
     }
     // 仅一个标签页时隐藏标签栏（新建标签页由工具栏「+」或快捷键触发）
     this.tabBar.classList.toggle("single", this.tabs.length < 2);
-    // 同步 refit（强制布局），让终端在本帧就以正确尺寸绘制，避免切回标签时先以旧尺寸
-    // 绘一帧造成的「大字闪烁」；随后再 rAF 聚焦。
-    const pane = this.activePane();
-    pane?.refit();
     requestAnimationFrame(() => {
+      const pane = this.activePane();
       pane?.refit();
       pane?.focus();
     });

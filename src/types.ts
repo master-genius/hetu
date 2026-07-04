@@ -53,6 +53,12 @@ export interface Settings {
   copyOnSelect: boolean;
   /** 上传遇同名文件时提示确认；false 表示直接覆盖 */
   confirmOverwrite: boolean;
+  /** 默认下载目录（空 = 自动，系统 Downloads） */
+  downloadDir: string;
+  /** 每次下载都询问保存位置 */
+  askDownloadLocation: boolean;
+  /** 追踪远程工作目录（注入隐形 PID 标记 + /proc 读实时 cwd） */
+  trackRemoteCwd: boolean;
   /** 记住最后的会话：下次启动自动重开并连接 */
   restoreSession: boolean;
   /** 自定义快捷键：动作 → 组合键（仅存覆盖项） */

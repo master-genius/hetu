@@ -17,7 +17,7 @@
 
 ### 终端体验
 - **自定义标题栏**：无系统边框，左侧为操作图标（上传/分屏/设置），右侧为最小化/最大化/关闭，下方是标签栏；标题栏空白区可拖动窗口。
-- **本地终端**：启动即打开本机 shell（bash），无需连接；新建标签页对话框最上方固定"本地终端"入口。
+- **本地终端**：启动即打开本机 shell，无需连接；新建标签页对话框最上方固定"本地终端"入口。默认 shell 按平台选择：Linux/macOS 用系统默认（`$SHELL`），**Windows 用 PowerShell**（优先 PowerShell 7 `pwsh`，否则系统自带 `powershell.exe`）。
 - 多标签页；新建标签页时选择连接项。**标签页不显示关闭按钮**（防误触），右键菜单关闭；检测到疑似运行中的程序时弹出确认。
 - **分屏**（水平/垂直，可拖拽调整比例），分屏**复用当前连接**（同一 TCP 连接上开新 channel）。
 - 现代复制粘贴：选中即复制（可关）、Ctrl+Shift+C/V、右键菜单。
@@ -32,7 +32,7 @@
 
 ### 外观
 - **字体随应用内置分发**（woff2 内嵌，无需系统安装）：`JetBrains Mono NL`（Light/Regular/Bold + 斜体）+ `Noto Sans SC` 可变字体（CJK，100–900 全字重）；两者均为 SIL OFL 协议。主字体/CJK 字体/字号/字重均可改为任意本机字体。
-- **内置 28 套主流主题**：暗色 17（One Dark、Dracula、Nord、Gruvbox、Solarized、Tokyo Night、Catppuccin Mocha、Monokai、GitHub Dark、Ayu、Rosé Pine、Rosé Pine Moon、Kanagawa、Everforest、Night Owl、Palenight…）+ 亮色 11（Solarized Light、GitHub Light、Catppuccin Latte、Gruvbox Light、Rosé Pine Dawn、One Light…）；可**基于任一主题新建自定义主题**（逐色编辑），全部持久化。
+- **内置 33 套主流主题**：暗色 22（One Dark、Dracula、Nord、Gruvbox、Solarized、Tokyo Night、Catppuccin Mocha、Monokai、GitHub Dark、Ayu、Rosé Pine、Rosé Pine Moon、Kanagawa、Everforest、Night Owl、Palenight、Tomorrow Night、Oceanic Next、Snazzy、Cobalt2、Zenburn…）+ 亮色 11（Solarized Light、GitHub Light、Catppuccin Latte、Gruvbox Light、Rosé Pine Dawn、One Light…），按名称排序；可**基于任一主题新建、编辑、删除自定义主题**（逐色编辑），全部持久化。
 - **标题栏颜色默认跟随主题**，也可在设置中单独取色。
 - **背景透明度**可调 + **毛玻璃虚化**：macOS（vibrancy）/ Windows（acrylic）原生模糊；应用内另有 backdrop 层，即使很透明也能看清终端内容。Linux 下窗口级模糊取决于合成器（KDE 可为透明窗口配置模糊规则）。
 
@@ -49,7 +49,10 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-也可在 GitHub 页面 Actions → release → Run workflow 手动触发。
+也可在 GitHub 页面 Actions → release → Run workflow 手动触发。CI 会在四个环境并行构建：
+Ubuntu（deb/rpm/AppImage）、Windows（msi/nsis exe，自动携带 WebView2 引导安装）、
+macOS Apple Silicon 与 macOS Intel（各出 dmg/app）。Windows/macOS 安装包**只能在对应系统上构建**
+（桌面包不支持交叉编译），这正是用 CI 的原因。
 
 ### 方式二：本地构建（需要 Rust 环境）
 
