@@ -8,14 +8,20 @@ export interface CustomSelect {
   el: HTMLElement;
   getValue(): string;
   setValue(v: string): void;
+  /** 动态替换选项（如系统字体异步加载完成后注入），保留当前值 */
+  setOptions(opts: CSOption[]): void;
 }
 
+/** 下拉选项：可选项或分隔线（用于「自带默认 —— 系统字体」分组） */
+export type CSOption = { value: string; label: string } | { separator: true };
+
 export function customSelect(
-  options: Array<{ value: string; label: string }>,
+  options: CSOption[],
   initial: string,
   onChange?: (value: string) => void,
 ): CustomSelect {
   let value = initial;
+  let opts = options;
   const el = document.createElement("button");
   el.type = "button";
   el.className = "cs";
@@ -26,7 +32,11 @@ export function customSelect(
   caret.textContent = "▾";
   el.append(labelSpan, caret);
 
-  const labelOf = (v: string) => options.find((o) => o.value === v)?.label ?? v;
+  const isOpt = (o: CSOption): o is { value: string; label: string } => !("separator" in o);
+  const labelOf = (v: string) => {
+    const found = opts.find((o): o is { value: string; label: string } => isOpt(o) && o.value === v);
+    return found ? found.label : v;
+  };
   const render = () => (labelSpan.textContent = labelOf(value));
   render();
 
@@ -37,14 +47,18 @@ export function customSelect(
     showMenu(
       rect.left,
       rect.bottom + 2,
-      options.map((o) => ({
-        label: (o.value === value ? "✓ " : "  ") + o.label,
-        action: () => {
-          value = o.value;
-          render();
-          onChange?.(value);
-        },
-      })),
+      opts.map((o) =>
+        isOpt(o)
+          ? {
+              label: (o.value === value ? "✓ " : "  ") + o.label,
+              action: () => {
+                value = o.value;
+                render();
+                onChange?.(value);
+              },
+            }
+          : { separator: true, label: "" },
+      ),
       rect.width,
     );
   });
@@ -54,6 +68,10 @@ export function customSelect(
     getValue: () => value,
     setValue: (v: string) => {
       value = v;
+      render();
+    },
+    setOptions: (next: CSOption[]) => {
+      opts = next;
       render();
     },
   };

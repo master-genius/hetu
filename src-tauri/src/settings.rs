@@ -109,11 +109,12 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            // 字体随应用内置分发（woff2 内嵌前端），无需系统安装；用户可改为任意本机字体
-            font_family: "JetBrains Mono NL".into(),
-            cjk_font_family: "Noto Sans SC".into(),
+            // 字重并入字体名（如 "…Light"），不再全局强制字重；CJK 用常规字重避免过细。
+            font_family: "JetBrains Mono NL Light".into(),
+            cjk_font_family: "Noto Sans CJK SC".into(),
             font_size: 14,
-            font_weight: "300".into(),
+            // 保留字段仅为兼容；终端一律用 normal，字重由所选字体名承载
+            font_weight: "normal".into(),
             // 默认：暗色主题 + 半透明毛玻璃背景
             theme: "dark".into(),
             titlebar_color: None,

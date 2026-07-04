@@ -3,11 +3,38 @@
 import { api } from "./ipc";
 import { getSettings, updateSettings } from "./settings";
 import { allThemes, BUILTIN_THEMES, resolveTheme } from "./themes";
-import { customSelect, toast } from "./ui";
+import { customSelect, toast, type CSOption } from "./ui";
 import {
   ACTIONS, comboToLabel, DEFAULT_KEYBINDINGS, eventToCombo, resolveBindings, type Action,
 } from "./keybindings";
 import type { ConnParams, Profile, Settings, ThemeDef } from "./types";
+
+// 推荐字体（字重并入名字）；用户可在此基础上从系统字体中另选。
+const MONO_FONTS = [
+  "JetBrains Mono NL Light",
+  "JetBrains Mono NL",
+  "JetBrains Mono NL Medium",
+  "JetBrains Mono Light",
+  "JetBrains Mono",
+  "Cascadia Code",
+  "Fira Code",
+  "Source Code Pro",
+  "Hack",
+  "Consolas",
+  "Menlo",
+  "monospace",
+];
+const CJK_FONTS = [
+  "Noto Sans CJK SC",
+  "Noto Sans CJK SC Light",
+  "Noto Sans CJK SC Medium",
+  "Noto Sans SC",
+  "Source Han Sans SC",
+  "Microsoft YaHei",
+  "PingFang SC",
+  "WenQuanYi Micro Hei",
+  "sans-serif",
+];
 
 // ---------- 连接对话框 ----------
 
@@ -280,14 +307,13 @@ export function showSettingsDialog() {
       <div class="settings-body">
         <section>
           <h4>字体</h4>
-          <p class="section-desc">未安装的字体自动回退到内置 JetBrains Mono NL / Noto Sans SC。</p>
+          <p class="section-desc">字重并入字体名（如 JetBrains Mono NL Light）。列表顶部为推荐字体，分隔线下为本机已装字体；等宽与 CJK 可各自选择。</p>
           <div class="row">
-            <label class="grow">主字体（英文 / 代码）<input name="fontFamily" spellcheck="false"></label>
-            <label class="grow">CJK 字体（中日韩）<input name="cjkFontFamily" spellcheck="false"></label>
+            <label class="grow">主字体（英文 / 代码）<span class="cs-mount" data-cs="fontFamily"></span></label>
+            <label class="grow">CJK 字体（中日韩）<span class="cs-mount" data-cs="cjkFontFamily"></span></label>
           </div>
           <div class="row">
             <label class="narrow">字号 <input name="fontSize" type="number" min="8" max="32"></label>
-            <label class="grow">字重 <span class="cs-mount" data-cs="fontWeight"></span></label>
           </div>
           <div class="row">
             <label class="grow">标签页字体（空=同主字体）<input name="tabFontFamily" spellcheck="false" placeholder="同主字体"></label>
@@ -364,8 +390,6 @@ export function showSettingsDialog() {
   const q = <T extends HTMLElement>(sel: string) => overlay.querySelector(sel) as T;
   const input = (n: string) => overlay.querySelector(`[name="${n}"]`) as HTMLInputElement;
 
-  input("fontFamily").value = s.fontFamily;
-  input("cjkFontFamily").value = s.cjkFontFamily;
   input("fontSize").value = String(s.fontSize);
   input("opacity").value = String(s.opacity);
   q<HTMLElement>(".opacity-val").textContent = `${Math.round(s.opacity * 100)}%`;
@@ -416,19 +440,26 @@ export function showSettingsDialog() {
   };
   renderRadius();
 
-  // 自定义下拉替代原生 select（避免白底弹出）
-  const fontWeightSel = customSelect(
-    [
-      { value: "100", label: "100 Thin" },
-      { value: "200", label: "200 ExtraLight" },
-      { value: "300", label: "300 Light" },
-      { value: "400", label: "400 Regular" },
-      { value: "500", label: "500 Medium" },
-    ],
-    s.fontWeight,
-    () => commit(),
-  );
-  q<HTMLElement>('.cs-mount[data-cs="fontWeight"]').appendChild(fontWeightSel.el);
+  // 字体下拉：推荐字体（字重并入名字）在上，系统字体经 list_fonts 异步注入到分隔线下方
+  const toOpts = (names: string[]) => names.map((n) => ({ value: n, label: n }));
+  const monoFontSel = customSelect(toOpts(MONO_FONTS), s.fontFamily, () => commit());
+  const cjkFontSel = customSelect(toOpts(CJK_FONTS), s.cjkFontFamily, () => commit());
+  q<HTMLElement>('.cs-mount[data-cs="fontFamily"]').appendChild(monoFontSel.el);
+  q<HTMLElement>('.cs-mount[data-cs="cjkFontFamily"]').appendChild(cjkFontSel.el);
+  // 异步注入系统字体：推荐组 + 分隔线 + 系统字体（去掉与推荐重复者）
+  void api
+    .listFonts()
+    .then((sys) => {
+      const build = (defaults: string[]): CSOption[] => {
+        const extra = sys.filter((f) => !defaults.includes(f));
+        return extra.length
+          ? [...toOpts(defaults), { separator: true }, ...toOpts(extra)]
+          : toOpts(defaults);
+      };
+      monoFontSel.setOptions(build(MONO_FONTS));
+      cjkFontSel.setOptions(build(CJK_FONTS));
+    })
+    .catch(() => {});
   const newTabModeSel = customSelect(
     [
       { value: "local", label: "直接打开本地终端" },
@@ -618,10 +649,10 @@ export function showSettingsDialog() {
 
   const commit = () => {
     void updateSettings({
-      fontFamily: input("fontFamily").value,
-      cjkFontFamily: input("cjkFontFamily").value,
+      fontFamily: monoFontSel.getValue(),
+      cjkFontFamily: cjkFontSel.getValue(),
       fontSize: parseInt(input("fontSize").value, 10) || 14,
-      fontWeight: fontWeightSel.getValue(),
+      fontWeight: "normal",
       theme: selectedThemeId,
       titlebarColor: input("titlebarFollow").checked ? null : input("titlebarColor").value,
       opacity: parseFloat(input("opacity").value),

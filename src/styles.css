@@ -229,6 +229,22 @@ body {
   background: color-mix(in srgb, var(--term-fg) 10%, transparent);
 }
 
+/* 远程文件按钮：无活跃连接时置灰不可点；点亮/激活态用强调色区别于默认图标色 */
+.tool-btn.disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
+.tool-btn.disabled:hover {
+  background: none;
+}
+
+.tool-btn.active {
+  color: var(--accent);
+  opacity: 1;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
 /* ---------- 内容区 / 分屏 ---------- */
 
 #content-wrap {
@@ -430,10 +446,54 @@ body {
   pointer-events: auto;
 }
 
+/* 远程文件面板：镜像到左侧，与右侧本地面板对向摆放，便于互相拖拽 */
+#remote-panel {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  bottom: 4px;
+  width: 45%;
+  z-index: 60;
+  background: var(--chrome-rgba);
+  backdrop-filter: blur(18px);
+  border: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
+  border-radius: var(--radius);
+  box-shadow: 8px 0 24px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  transform: translateX(calc(-100% - 8px));
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.3, 1), opacity 0.18s ease;
+}
+
+#remote-panel.open {
+  transform: none;
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .explorer {
   display: flex;
   flex-direction: column;
   height: 100%;
+}
+
+/* 面板顶部标题：本地显示“本地”，远程显示“连接名 · host” */
+.ex-title {
+  padding: 8px 10px 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--term-fg);
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-bottom: 1px solid color-mix(in srgb, var(--term-fg) 8%, transparent);
+}
+
+/* 远程面板标题用强调色，凸显“远端”身份 */
+.explorer-remote .ex-title {
+  color: var(--accent);
 }
 
 .ex-head {

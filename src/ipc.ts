@@ -7,6 +7,7 @@ import type {
   ConnStateEvent,
   FileMeta,
   LocalEntry,
+  RemoteEntry,
   PaneOutputEvent,
   Preview,
   Profile,
@@ -46,9 +47,12 @@ export const api = {
   sftpUpload: (connId: string, localPath: string, remoteDir: string, transferId: string) =>
     invoke<string>("sftp_upload", { connId, localPath, remoteDir, transferId }),
   remoteHome: (connId: string) => invoke<string>("remote_home", { connId }),
+  remoteList: (connId: string, path: string) =>
+    invoke<RemoteEntry[]>("sftp_list", { connId, path }),
   remoteCwd: (connId: string, pid: number) => invoke<string>("remote_cwd", { connId, pid }),
   defaultDownloadDir: () => invoke<string>("default_download_dir"),
 
+  listFonts: () => invoke<string[]>("list_fonts"),
   localList: (dir: string) => invoke<LocalEntry[]>("local_list", { dir }),
   localHome: () => invoke<string>("local_home"),
   readKeyFile: (path: string) => invoke<string>("read_key_file", { path }),

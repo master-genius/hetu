@@ -10,7 +10,13 @@ import { api, events } from "./ipc";
 import { loadSettings, getSettings, onSettingsChange, activeTheme, fontStack } from "./settings";
 import { TabManager, type Tab } from "./tabs";
 import { Pane } from "./pane";
-import { DND_MIME, DL_MIME, Explorer } from "./explorer";
+import {
+  DND_MIME,
+  DL_MIME,
+  Explorer,
+  localBackend,
+  type ExplorerBackend,
+} from "./explorer";
 import { type Action, matchAction, resolveBindings } from "./keybindings";
 import { showConnectDialog, showSettingsDialog } from "./dialogs";
 import {
@@ -59,6 +65,8 @@ async function bootstrap() {
   // 连接被回收（断开）时同步清除其元信息，避免 connMeta 随连接次数无界增长
   tabs.onConnClosed = (connId) => {
     connMeta.delete(connId);
+    remoteExplorers.delete(connId);
+    refreshPanels();
   };
 
   const connectAndOpenTab = async (
@@ -134,7 +142,10 @@ async function bootstrap() {
 
   tabs.onPaneCreated = (pane, tab) => {
     pane.onFocus = () => {
+      const switched = tab.activePaneId !== pane.id;
       tab.activePaneId = pane.id;
+      // 焦点在不同连接的终端间切换时，远程面板/按钮需跟随聚焦终端的连接
+      if (switched && tab === tabs.active) refreshPanels();
     };
     // 终端聚焦时的按键先经全局快捷键分发（命中则不透传给 shell）
     pane.onAppKey = (e) => dispatchShortcut(e, pane);
@@ -525,7 +536,7 @@ async function bootstrap() {
       return;
     }
     if (!tab.explorer) {
-      tab.explorer = new Explorer();
+      tab.explorer = new Explorer(localBackend());
       tab.explorer.onUploadRequest = (paths) => void uploadFiles(paths);
       tab.explorer.onDownloadRequest = (connId, path, targetDir) => {
         const found = tabs.panesByConn(connId)[0];
@@ -538,6 +549,81 @@ async function bootstrap() {
     }
     explorerPanel.classList.add("open");
     void tab.explorer.init();
+  };
+
+  // ---------- 远程文件管理器面板（左侧浮动 45%，每连接独立实例） ----------
+
+  const remotePanel = document.getElementById("remote-panel")!;
+  const remoteBtn = document.getElementById("btn-remote") as HTMLButtonElement;
+  const remoteExplorers = new Map<string, Explorer>();
+
+  /** 构造某连接的远程数据源；初始目录由 syncRemotePanel 用实时 cwd 注入 */
+  const remoteBackend = (connId: string): ExplorerBackend => {
+    const info = connMeta.get(connId);
+    return {
+      kind: "remote",
+      connId,
+      label: info ? `${info.name} · ${info.host}` : "远程",
+      list: (dir) => api.remoteList(connId, dir),
+      home: () => api.remoteHome(connId),
+    };
+  };
+
+  /** 当前聚焦终端所属的活跃 SSH 连接 id；本地终端返回 null */
+  const focusedConnId = (): string | null => {
+    const pane = tabs.activePane();
+    return pane && !pane.isLocal ? pane.connId : null;
+  };
+
+  const syncRemotePanel = () => {
+    const tab = tabs.active;
+    const connId = focusedConnId();
+    if (!tab || !tab.remoteOpen || !connId) {
+      remotePanel.classList.remove("open");
+      return;
+    }
+    let ex = remoteExplorers.get(connId);
+    if (!ex) {
+      ex = new Explorer(remoteBackend(connId));
+      ex.onDownloadRequest = (cid, path, targetDir) => {
+        const found = tabs.panesByConn(cid)[0];
+        if (found) void downloadFile(found.pane, path, targetDir || undefined);
+      };
+      ex.onUploadHere = (localPaths, remoteDir) => {
+        const found = tabs.panesByConn(connId)[0];
+        if (!found) {
+          toast("连接已断开", true);
+          return;
+        }
+        const inst = ex!;
+        void uploadFiles(localPaths, found.pane, remoteDir).then(() => inst.load().catch(() => {}));
+      };
+      remoteExplorers.set(connId, ex);
+    }
+    if (remotePanel.firstChild !== ex.element) {
+      remotePanel.textContent = "";
+      remotePanel.appendChild(ex.element);
+    }
+    remotePanel.classList.add("open");
+    // 初始目录取该连接终端的实时 cwd（/proc）；已初始化则不再改动用户当前浏览目录
+    const inst = ex;
+    const pane = tabs.panesByConn(connId)[0]?.pane;
+    if (pane) void pane.currentDir().then(({ dir }) => void inst.init(dir ?? undefined));
+    else void inst.init();
+  };
+
+  /** 远程按钮点亮/禁用：仅当聚焦终端有活跃 SSH 连接时可用（点亮态用强调色） */
+  const updateRemoteBtn = () => {
+    const on = !!focusedConnId();
+    remoteBtn.classList.toggle("disabled", !on);
+    remoteBtn.classList.toggle("active", on && !!tabs.active?.remoteOpen);
+  };
+
+  /** 统一刷新左右两个文件面板与远程按钮态 */
+  const refreshPanels = () => {
+    syncExplorerPanel();
+    syncRemotePanel();
+    updateRemoteBtn();
   };
   // 会话快照：每个标签页取其首个 pane 的连接来源（连接项 id，不含机密），防抖写入 session.json。
   // 恢复期间 restoring=true 时跳过，避免在标签页尚未全部重建时把会话写成半截而丢失。
@@ -560,7 +646,7 @@ async function bootstrap() {
   };
 
   tabs.onLayoutChange = () => {
-    syncExplorerPanel();
+    refreshPanels();
     scheduleSaveSession();
   };
 
@@ -595,6 +681,19 @@ async function bootstrap() {
     syncExplorerPanel();
   });
 
+  remoteBtn.addEventListener("click", () => {
+    const tab = tabs.active;
+    if (!tab) return;
+    // 无活跃 SSH 连接（本地终端聚焦）时按钮为禁用态，点击无效
+    if (!focusedConnId()) {
+      toast("当前终端未连接远程主机", true);
+      return;
+    }
+    tab.remoteOpen = !tab.remoteOpen;
+    syncRemotePanel();
+    updateRemoteBtn();
+  });
+
   document.getElementById("btn-upload")!.addEventListener("click", () => void uploadViaDialog());
   document.getElementById("btn-split-h")!.addEventListener("click", () => void tabs.splitActive("row"));
   document.getElementById("btn-split-v")!.addEventListener("click", () => void tabs.splitActive("col"));
@@ -609,7 +708,7 @@ async function bootstrap() {
       for (const pane of tab.layout.panes()) {
         pane.term.options.fontFamily = fontStack();
         pane.term.options.fontSize = s.fontSize;
-        pane.term.options.fontWeight = s.fontWeight as never;
+        pane.term.options.fontWeight = "normal" as never;
         pane.term.options.theme = colors as never;
         pane.refit();
       }

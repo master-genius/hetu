@@ -18,6 +18,9 @@
           <button id="btn-explorer" class="tool-btn" title="本地文件管理器">
             <svg viewBox="0 0 20 20" width="16" height="16" fill="none"><path d="M2.5 6A1.5 1.5 0 014 4.5h3.4L9 6.2h5A1.5 1.5 0 0115.5 7.7V14A1.5 1.5 0 0114 15.5H4A1.5 1.5 0 012.5 14V6z" fill="currentColor" opacity="0.9"/></svg>
           </button>
+          <button id="btn-remote" class="tool-btn disabled" title="远程文件管理器（当前终端已连接时可用）">
+            <svg viewBox="0 0 20 20" width="16" height="16" fill="none"><path d="M2.5 6A1.5 1.5 0 014 4.5h3.4L9 6.2h5A1.5 1.5 0 0115.5 7.7V14A1.5 1.5 0 0114 15.5H4A1.5 1.5 0 012.5 14V6z" fill="currentColor" opacity="0.9"/><circle cx="14.5" cy="12.4" r="3.1" fill="var(--bg, #1b1e26)" stroke="currentColor" stroke-width="1.1"/><path d="M14.5 10.8v3.2M12.9 12.4h3.2" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
+          </button>
           <button id="btn-upload" class="tool-btn" title="上传文件到当前目录">
             <svg viewBox="0 0 16 16" width="15" height="15"><path fill="currentColor" d="M8 1l4 4h-2.5v5h-3V5H4l4-4zM3 13h10v1.5H3V13z"/></svg>
           </button>
@@ -49,6 +52,7 @@
       </header>
       <nav id="tab-bar"></nav>
       <main id="content-wrap">
+        <aside id="remote-panel"></aside>
         <div id="content"></div>
         <aside id="explorer-panel"></aside>
       </main>

@@ -88,6 +88,50 @@ pub async fn stat(conn: &Arc<Connection>, path: &str) -> Result<FileMeta> {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RemoteEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    pub is_link: bool,
+    pub size: u64,
+    pub mtime: Option<u32>,
+}
+
+/// 列出远端目录条目（read_dir 迭代器已自动跳过 . 与 ..）。
+/// 排序：目录在前，随后按名称不区分大小写升序，观感与本地面板一致。
+pub async fn list(conn: &Arc<Connection>, path: &str) -> Result<Vec<RemoteEntry>> {
+    let sftp = session(conn).await?;
+    let rd = match sftp.read_dir(path).await {
+        Ok(rd) => rd,
+        Err(e) => {
+            invalidate(conn).await;
+            return Err(e.into());
+        }
+    };
+    let mut out: Vec<RemoteEntry> = rd
+        .map(|entry| {
+            let attrs = entry.metadata();
+            let mode = attrs.permissions.unwrap_or(0);
+            RemoteEntry {
+                name: entry.file_name(),
+                path: entry.path(),
+                is_dir: attrs.is_dir(),
+                is_link: mode & 0o170000 == 0o120000,
+                size: attrs.size.unwrap_or(0),
+                mtime: attrs.mtime,
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    Ok(out)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Preview {
     pub data: String, // base64
     pub size: u64,

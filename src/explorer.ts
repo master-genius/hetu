@@ -1,7 +1,8 @@
 /**
- * 本地文件资源管理器（右侧浮动面板内容）。
- * 每个标签页持有独立实例——目录位置等状态随标签页保留。
- * 条目可拖拽到左侧终端上传，或右键选择上传。
+ * 文件资源管理器（右侧浮动面板内容），后端可插拔：
+ * - local  ：列本机文件；行可拖到终端/远程面板上传，右键上传到终端目录。
+ * - remote ：列某 SSH 连接的远端文件；行可拖到本地面板下载；接收本地条目拖入上传。
+ * 每个实例保留自身目录状态（本地按标签页、远程按连接）。
  */
 
 import { api } from "./ipc";
@@ -10,8 +11,39 @@ import type { LocalEntry } from "./types";
 
 /** 拖拽数据的自定义 MIME（区分应用内拖拽与 OS 文件拖入） */
 export const DND_MIME = "application/x-hetushell-paths";
-/** 从终端 Ctrl+拖拽远端文件到文件管理器 → 下载意图 */
+/** 从终端/远程面板 Ctrl+拖拽远端文件 → 下载意图 */
 export const DL_MIME = "application/x-hetushell-download";
+
+/** 面板渲染所需的最小条目形状（本地/远端条目均满足） */
+export interface FsEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  size: number;
+  mtime: number | null;
+}
+
+/** 数据源适配器：屏蔽本地与远端的差异，供 Explorer 复用同一套渲染/交互 */
+export interface ExplorerBackend {
+  kind: "local" | "remote";
+  /** 远端连接 id（remote 专有，用于拖拽载荷与上传目标）；local 为 null */
+  connId: string | null;
+  /** 顶部标题：local 显示“本地”，remote 显示“连接名 · host” */
+  label: string;
+  list(dir: string): Promise<FsEntry[]>;
+  home(): Promise<string>;
+}
+
+/** 本地数据源 */
+export function localBackend(): ExplorerBackend {
+  return {
+    kind: "local",
+    connId: null,
+    label: "本地",
+    list: (dir) => api.localList(dir) as Promise<LocalEntry[]>,
+    home: () => api.localHome(),
+  };
+}
 
 type ViewMode = "list" | "tiles";
 const VIEW_KEY = "hetushell-explorer-view";
@@ -66,7 +98,7 @@ function parentDir(path: string): string {
   return trimmed.slice(0, idx) || sep;
 }
 
-function iconFor(entry: LocalEntry): string {
+function iconFor(entry: FsEntry): string {
   if (entry.isDir) return folderSvg();
   for (const [re, color] of CATEGORY) {
     if (re.test(entry.name)) return fileSvg(color);
@@ -76,22 +108,32 @@ function iconFor(entry: LocalEntry): string {
 
 export class Explorer {
   readonly element: HTMLElement;
+  readonly backend: ExplorerBackend;
   cwd = "";
-  /** 请求把本地路径上传到当前终端目录（由 main 装配） */
+  /** [local] 请求把本地路径上传到当前终端目录（由 main 装配） */
   onUploadRequest: ((paths: string[]) => void) | null = null;
-  /** 请求把远端文件下载到本地某目录（终端 Ctrl+拖拽进来时触发） */
+  /** [local] 请求把远端文件下载到本地某目录（终端/远程面板 Ctrl+拖入时触发） */
   onDownloadRequest: ((connId: string, remotePath: string, targetDir: string) => void) | null = null;
+  /** [remote] 请求把本地文件上传到本连接的某远端目录（本地条目拖入时触发） */
+  onUploadHere: ((localPaths: string[], remoteDir: string) => void) | null = null;
   private listEl: HTMLElement;
   private pathInput: HTMLInputElement;
+  private titleEl: HTMLElement;
   private viewBtn: HTMLButtonElement;
   private view: ViewMode;
   private initialized = false;
 
-  constructor() {
+  constructor(backend: ExplorerBackend) {
+    this.backend = backend;
     this.view = (localStorage.getItem(VIEW_KEY) as ViewMode) || "list";
     this.element = document.createElement("div");
-    this.element.className = "explorer";
+    this.element.className = `explorer explorer-${backend.kind}`;
+    const hint =
+      backend.kind === "local"
+        ? "拖条目到终端/远程面板上传；从终端 Ctrl+拖文件到这里下载；右键更多操作"
+        : "拖条目到本地面板下载；把本地条目拖到这里上传；右键更多操作";
     this.element.innerHTML = `
+      <div class="ex-title"></div>
       <div class="ex-head">
         <button class="btn ex-up" title="上一级">↑</button>
         <input class="ex-path" spellcheck="false">
@@ -99,32 +141,16 @@ export class Explorer {
         <button class="btn ex-refresh" title="刷新">⟳</button>
       </div>
       <div class="ex-list"></div>
-      <div class="ex-hint">拖条目到左侧终端上传；从终端 Ctrl+拖文件到这里下载；右键更多操作</div>`;
+      <div class="ex-hint">${hint}</div>`;
     this.listEl = this.element.querySelector(".ex-list") as HTMLElement;
     this.pathInput = this.element.querySelector(".ex-path") as HTMLInputElement;
+    this.titleEl = this.element.querySelector(".ex-title") as HTMLElement;
+    this.titleEl.textContent = backend.label;
+    this.titleEl.title = backend.label;
 
-    // 接收从终端 Ctrl+拖入的下载：拖到某文件夹行 → 下载到该文件夹，否则下载到当前目录
-    this.element.addEventListener("dragover", (e) => {
-      if (e.dataTransfer?.types.includes(DL_MIME)) {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "copy";
-      }
-    });
-    this.element.addEventListener("drop", (e) => {
-      const raw = e.dataTransfer?.getData(DL_MIME);
-      if (!raw) return;
-      e.preventDefault();
-      try {
-        const { connId, path } = JSON.parse(raw) as { connId: string; path: string };
-        const row = (e.target as HTMLElement).closest(".ex-row") as HTMLElement | null;
-        const targetDir = row?.dataset.dir || this.cwd;
-        this.onDownloadRequest?.(connId, path, targetDir);
-      } catch {
-        /* 载荷异常，忽略 */
-      }
-    });
+    this.installDrop();
+
     this.viewBtn = this.element.querySelector(".ex-view") as HTMLButtonElement;
-
     this.element.querySelector(".ex-up")!.addEventListener("click", () => {
       void this.navigate(parentDir(this.cwd));
     });
@@ -140,6 +166,37 @@ export class Explorer {
     });
   }
 
+  /** 面板级拖放：本地面板接收下载(DL_MIME)，远程面板接收上传(DND_MIME) */
+  private installDrop() {
+    const mime = this.backend.kind === "local" ? DL_MIME : DND_MIME;
+    this.element.addEventListener("dragover", (e) => {
+      if (e.dataTransfer?.types.includes(mime)) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+      }
+    });
+    this.element.addEventListener("drop", (e) => {
+      const raw = e.dataTransfer?.getData(mime);
+      if (!raw) return;
+      e.preventDefault();
+      const row = (e.target as HTMLElement).closest(".ex-row") as HTMLElement | null;
+      const targetDir = row?.dataset.dir || this.cwd;
+      try {
+        if (this.backend.kind === "local") {
+          // 远端文件拖入本地面板 → 下载到该目录/当前目录
+          const { connId, path } = JSON.parse(raw) as { connId: string; path: string };
+          this.onDownloadRequest?.(connId, path, targetDir);
+        } else {
+          // 本地条目拖入远程面板 → 上传到该远端目录/当前目录
+          const paths = JSON.parse(raw) as string[];
+          if (Array.isArray(paths) && paths.length) this.onUploadHere?.(paths, targetDir);
+        }
+      } catch {
+        /* 载荷异常，忽略 */
+      }
+    });
+  }
+
   /** 列表 ⇄ 平铺（大图标 + 文件名）切换 */
   private applyView() {
     this.listEl.classList.toggle("tiles", this.view === "tiles");
@@ -148,11 +205,11 @@ export class Explorer {
     this.viewBtn.title = this.view === "list" ? "切换为平铺视图" : "切换为列表视图";
   }
 
-  /** 首次显示时定位到本机 home */
-  async init(): Promise<void> {
+  /** 首次显示时定位目录：优先 initialDir（远程用终端实时 cwd），否则取 backend.home() */
+  async init(initialDir?: string): Promise<void> {
     if (this.initialized) return;
     this.initialized = true;
-    this.cwd = await api.localHome();
+    this.cwd = (initialDir && initialDir.trim()) || (await this.backend.home());
     await this.load();
   }
 
@@ -169,7 +226,7 @@ export class Explorer {
   }
 
   async load(): Promise<void> {
-    const entries = await api.localList(this.cwd);
+    const entries = await this.backend.list(this.cwd);
     this.pathInput.value = this.cwd;
     this.listEl.textContent = "";
     for (const entry of entries) {
@@ -180,7 +237,7 @@ export class Explorer {
     }
   }
 
-  private renderRow(entry: LocalEntry): HTMLElement {
+  private renderRow(entry: FsEntry): HTMLElement {
     const row = document.createElement("div");
     row.className = "ex-row";
     row.draggable = true;
@@ -192,14 +249,23 @@ export class Explorer {
       <span class="ex-meta">${mtime}</span>`;
     row.querySelector(".ex-name")!.textContent = entry.name;
     row.title = entry.path;
-    if (entry.isDir) row.dataset.dir = entry.path; // 拖入下载时作为目标目录
+    if (entry.isDir) row.dataset.dir = entry.path; // 拖入时作为目标目录
 
     row.addEventListener("dblclick", () => {
       if (entry.isDir) void this.navigate(entry.path);
     });
     row.addEventListener("dragstart", (e) => {
-      e.dataTransfer?.setData(DND_MIME, JSON.stringify([entry.path]));
-      e.dataTransfer?.setData("text/plain", entry.path);
+      if (this.backend.kind === "local") {
+        // 本地条目：上传源（携带本地路径）
+        e.dataTransfer?.setData(DND_MIME, JSON.stringify([entry.path]));
+        e.dataTransfer?.setData("text/plain", entry.path);
+      } else {
+        // 远端条目：下载源（携带 连接 + 远端路径）
+        e.dataTransfer?.setData(
+          DL_MIME,
+          JSON.stringify({ connId: this.backend.connId, path: entry.path }),
+        );
+      }
       if (e.dataTransfer) e.dataTransfer.effectAllowed = "copy";
       row.classList.add("dragging");
     });
@@ -207,11 +273,24 @@ export class Explorer {
     row.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       e.stopPropagation();
+      const items =
+        this.backend.kind === "local"
+          ? [
+              {
+                label: `上传 “${entry.name}” 到当前终端目录`,
+                action: () => this.onUploadRequest?.([entry.path]),
+              },
+            ]
+          : [
+              {
+                label: `下载 “${entry.name}” 到本地`,
+                action: () =>
+                  this.backend.connId &&
+                  this.onDownloadRequest?.(this.backend.connId, entry.path, ""),
+              },
+            ];
       showMenu(e.clientX, e.clientY, [
-        {
-          label: `上传 “${entry.name}” 到当前终端目录`,
-          action: () => this.onUploadRequest?.([entry.path]),
-        },
+        ...items,
         ...(entry.isDir
           ? [{ label: "进入目录", action: () => void this.navigate(entry.path) }]
           : []),

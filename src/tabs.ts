@@ -22,6 +22,8 @@ export interface Tab {
   /** 本地文件管理器：每标签页独立实例，目录状态各自保留（懒创建） */
   explorer: Explorer | null;
   explorerOpen: boolean;
+  /** 远程文件管理器面板是否打开（实例按连接缓存于 main.ts，非本标签页私有） */
+  remoteOpen: boolean;
   /** 会话恢复时的原始序号（用于后台并行连接完成后按保存顺序归位） */
   order?: number;
 }
@@ -101,6 +103,7 @@ export class TabManager {
       banner: null,
       explorer: null,
       explorerOpen: false,
+      remoteOpen: false,
       order,
     };
 

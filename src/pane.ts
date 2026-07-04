@@ -76,7 +76,8 @@ export class Pane {
       allowProposedApi: true,
       fontFamily: fontStack(),
       fontSize: s.fontSize,
-      fontWeight: s.fontWeight as never,
+      // 字重由字体名承载（如 "…Light"），终端统一 normal，避免把 Light 强加到 CJK
+      fontWeight: "normal" as never,
       cursorBlink: true,
       scrollback: 10000,
       theme: { ...activeTheme().colors, background: "#00000000" } as never,

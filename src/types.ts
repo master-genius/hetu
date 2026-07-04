@@ -127,6 +127,15 @@ export interface LocalEntry {
   mtime: number | null;
 }
 
+export interface RemoteEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  isLink: boolean;
+  size: number;
+  mtime: number | null;
+}
+
 export interface TransferProgressEvent {
   id: string;
   name: string;

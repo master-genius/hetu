@@ -264,6 +264,16 @@ async fn sftp_upload(
 }
 
 #[tauri::command]
+async fn sftp_list(
+    state: State<'_>,
+    conn_id: String,
+    path: String,
+) -> Result<Vec<ssh::sftp::RemoteEntry>> {
+    let conn = get_conn(&state, &conn_id).await?;
+    ssh::sftp::list(&conn, &path).await
+}
+
+#[tauri::command]
 async fn remote_home(state: State<'_>, conn_id: String) -> Result<String> {
     let conn = get_conn(&state, &conn_id).await?;
     ssh::sftp::home(&conn).await
@@ -283,6 +293,52 @@ fn default_download_dir() -> String {
         .or_else(|| dirs::home_dir().map(|h| h.join("Downloads")))
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default()
+}
+
+/// 系统已安装字体族列表（去重、排序）。Linux/macOS 走 fontconfig 的 `fc-list`；
+/// Windows 用 PowerShell 枚举。取不到时返回空表，前端仍展示内置默认字体分组。
+#[tauri::command]
+fn list_fonts() -> Vec<String> {
+    use std::collections::BTreeSet;
+    let mut set: BTreeSet<String> = BTreeSet::new();
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Ok(out) = std::process::Command::new("fc-list").args([":", "family"]).output() {
+            if out.status.success() {
+                for line in String::from_utf8_lossy(&out.stdout).lines() {
+                    // 每行形如 "Fam1,Fam2"（多语言别名）；逐一去空白收集
+                    for fam in line.split(',') {
+                        let f = fam.trim();
+                        if !f.is_empty() {
+                            set.insert(f.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let script = "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Drawing');\
+            (New-Object System.Drawing.Text.InstalledFontCollection).Families|ForEach-Object{$_.Name}";
+        if let Ok(out) = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", script])
+            .output()
+        {
+            if out.status.success() {
+                for line in String::from_utf8_lossy(&out.stdout).lines() {
+                    let f = line.trim();
+                    if !f.is_empty() {
+                        set.insert(f.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    set.into_iter().collect()
 }
 
 // ---------- 本地文件系统（文件管理器面板） ----------
@@ -355,12 +411,14 @@ pub fn run() {
             pane_resize,
             pane_close,
             sftp_stat,
+            sftp_list,
             sftp_preview,
             sftp_download,
             sftp_upload,
             remote_home,
             remote_cwd,
             default_download_dir,
+            list_fonts,
             local_list,
             local_home,
             read_key_file,
