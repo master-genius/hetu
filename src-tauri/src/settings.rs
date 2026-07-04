@@ -32,6 +32,9 @@ pub struct Profile {
     pub auth: String,
     #[serde(default)]
     pub key_path: Option<String>,
+    /// 私钥内容（PEM 文本），自存于 profiles.json，不依赖外部文件
+    #[serde(default)]
+    pub key_data: Option<String>,
     /// "manual" | "ssh_config"
     #[serde(default = "default_source")]
     pub source: String,

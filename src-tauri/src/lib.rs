@@ -276,6 +276,17 @@ fn local_home() -> String {
     local::home_dir()
 }
 
+/// 读取用户选择的私钥文件内容（填入连接对话框的密钥文本框，随后自存到 profiles.json）。
+/// 限制 256KB，避免误选大文件。
+#[tauri::command]
+fn read_key_file(path: String) -> Result<String> {
+    let meta = std::fs::metadata(&path)?;
+    if meta.len() > 256 * 1024 {
+        return Err(Error::msg("文件过大，看起来不是私钥文件"));
+    }
+    Ok(std::fs::read_to_string(&path)?)
+}
+
 // ---------- 应用入口 ----------
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -329,6 +340,7 @@ pub fn run() {
             remote_home,
             local_list,
             local_home,
+            read_key_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

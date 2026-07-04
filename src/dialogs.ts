@@ -36,13 +36,16 @@ export function showConnectDialog(
             </select>
           </label>
           <div class="auth-key">
-            <label>私钥路径
-              <div class="row">
-                <input name="keyPath" class="grow" placeholder="~/.ssh/id_ed25519">
-                <button type="button" class="btn browse-key">浏览</button>
-              </div>
+            <input name="keyPath" type="hidden">
+            <label>
+              <span class="key-label-row">私钥内容
+                <button type="button" class="btn tiny browse-key">从文件导入</button>
+              </span>
+              <textarea name="keyData" class="key-area" spellcheck="false" autocomplete="off"
+                placeholder="粘贴私钥内容（-----BEGIN OPENSSH PRIVATE KEY----- …），或点「从文件导入」"></textarea>
             </label>
             <label>私钥口令（可选）<input name="passphrase" type="password" autocomplete="off"></label>
+            <p class="hint">私钥内容会保存到应用自己的配置（profiles.json），不依赖你的文件路径。</p>
           </div>
           <div class="auth-pass" style="display:none">
             <label>密码 <input name="password" type="password" autocomplete="off"></label>
@@ -88,6 +91,7 @@ export function showConnectDialog(
     field("user").value = p.user;
     authSel.value = p.auth;
     field("keyPath").value = p.keyPath ?? "";
+    field("keyData").value = p.keyData ?? "";
     field("note").value = p.note ?? "";
     field("keepalive").value = p.keepalive != null ? String(p.keepalive) : "";
     field("timeout").value = p.timeout != null ? String(p.timeout) : "";
@@ -135,10 +139,19 @@ export function showConnectDialog(
   };
   void api.profilesList().then(renderProfiles).catch(() => renderProfiles([]));
 
+  // 从文件导入：读取私钥内容填入文本框（随后随连接项自存，不再依赖该文件路径）
   overlay.querySelector(".browse-key")!.addEventListener("click", async () => {
     const { open } = await import("@tauri-apps/plugin-dialog");
     const picked = await open({ multiple: false, title: "选择私钥文件" });
-    if (typeof picked === "string") field("keyPath").value = picked;
+    if (typeof picked !== "string") return;
+    try {
+      const content = await api.readKeyFile(picked);
+      field("keyData").value = content;
+      field("keyPath").value = ""; // 已内联内容，清除路径依赖
+      toast("已导入私钥内容");
+    } catch (err) {
+      toast(`读取私钥失败: ${err}`, true);
+    }
   });
 
   const numOrUndef = (n: string): number | undefined => {
@@ -158,6 +171,7 @@ export function showConnectDialog(
       user,
       auth: authSel.value as "key" | "password",
       keyPath: field("keyPath").value.trim() || undefined,
+      keyData: field("keyData").value.trim() || undefined,
       passphrase: field("passphrase").value || undefined,
       password: field("password").value || undefined,
       keepalive: numOrUndef("keepalive"),
@@ -181,6 +195,7 @@ export function showConnectDialog(
       user: p.user,
       auth: p.auth,
       keyPath: p.keyPath ?? null,
+      keyData: p.keyData ?? null,
       source: "manual",
       note: field("note").value.trim() || null,
       keepalive: p.keepalive ?? null,
@@ -201,8 +216,8 @@ export function showConnectDialog(
     e.preventDefault();
     const p = paramsFromForm();
     if (!p) return;
-    if (p.auth === "key" && !p.keyPath) {
-      toast("私钥认证需要指定私钥路径", true);
+    if (p.auth === "key" && !p.keyData && !p.keyPath) {
+      toast("私钥认证需要粘贴私钥内容或从文件导入", true);
       return;
     }
     if (p.auth === "password" && !p.password) {

@@ -33,6 +33,9 @@ pub struct ConnParams {
     pub password: Option<String>,
     #[serde(default)]
     pub key_path: Option<String>,
+    /// 私钥内容（PEM 文本）；优先于 key_path，自包含不依赖外部文件路径
+    #[serde(default)]
+    pub key_data: Option<String>,
     #[serde(default)]
     pub passphrase: Option<String>,
     /// 保活间隔（秒），None 用默认 15s
@@ -171,14 +174,18 @@ pub async fn establish(params: &ConnParams) -> Result<client::Handle<ClientHandl
             ensure_auth(handle.authenticate_password(&params.user, pw).await?)?;
         }
         _ => {
-            let path = params
-                .key_path
-                .as_deref()
-                .ok_or_else(|| Error::msg("未指定私钥文件"))?;
-            let key = russh::keys::load_secret_key(
-                expand_tilde(path),
-                params.passphrase.as_deref().filter(|s| !s.is_empty()),
-            )?;
+            let passphrase = params.passphrase.as_deref().filter(|s| !s.is_empty());
+            // 优先用自存的密钥内容（不依赖外部文件）；否则回退到路径（如 ssh_config 导入项）
+            let key = match params.key_data.as_deref().filter(|s| !s.trim().is_empty()) {
+                Some(pem) => russh::keys::decode_secret_key(pem, passphrase)?,
+                None => {
+                    let path = params
+                        .key_path
+                        .as_deref()
+                        .ok_or_else(|| Error::msg("未提供私钥内容或路径"))?;
+                    russh::keys::load_secret_key(expand_tilde(path), passphrase)?
+                }
+            };
             // RSA 密钥协商服务端支持的最优签名哈希（rsa-sha2-512/256）
             let hash = handle.best_supported_rsa_hash().await?.flatten();
             let auth_key = PrivateKeyWithHashAlg::new(Arc::new(key), hash);

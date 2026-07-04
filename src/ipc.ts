@@ -49,6 +49,7 @@ export const api = {
 
   localList: (dir: string) => invoke<LocalEntry[]>("local_list", { dir }),
   localHome: () => invoke<string>("local_home"),
+  readKeyFile: (path: string) => invoke<string>("read_key_file", { path }),
 };
 
 export const events = {

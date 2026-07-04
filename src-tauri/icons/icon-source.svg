@@ -1,0 +1,60 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#151c26"/>
+      <stop offset="1" stop-color="#0b0f15"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.4" r="0.55">
+      <stop offset="0" stop-color="#88c0d0" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#88c0d0" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="yang" cx="0.38" cy="0.32" r="0.75">
+      <stop offset="0" stop-color="#f4f8fb"/>
+      <stop offset="1" stop-color="#a6c5d1"/>
+    </radialGradient>
+  </defs>
+
+  <!-- 圆角方形终端底 -->
+  <rect width="1024" height="1024" rx="228" fill="url(#bg)"/>
+  <rect width="1024" height="1024" rx="228" fill="url(#glow)"/>
+  <rect x="6" y="6" width="1012" height="1012" rx="222" fill="none"
+        stroke="#88c0d0" stroke-opacity="0.16" stroke-width="4"/>
+
+  <!-- 河图星图：中心 + 八方，连线构成 * （河图黑白点，亦是 shell 通配符）。中心 y=440 -->
+  <g stroke="#88c0d0" stroke-opacity="0.5" stroke-width="7" stroke-linecap="round">
+    <!-- 四正连线（到白点/阳） -->
+    <line x1="512" y1="440" x2="512" y2="300"/>
+    <line x1="512" y1="440" x2="512" y2="580"/>
+    <line x1="512" y1="440" x2="372" y2="440"/>
+    <line x1="512" y1="440" x2="652" y2="440"/>
+    <!-- 四隅连线（到黑点/阴），略淡 -->
+    <g stroke-opacity="0.3">
+      <line x1="512" y1="440" x2="611" y2="341"/>
+      <line x1="512" y1="440" x2="413" y2="341"/>
+      <line x1="512" y1="440" x2="611" y2="539"/>
+      <line x1="512" y1="440" x2="413" y2="539"/>
+    </g>
+  </g>
+
+  <!-- 四隅黑点（阴/偶）：中空描边 -->
+  <g fill="#0b0f15" stroke="#587482" stroke-width="9">
+    <circle cx="611" cy="341" r="27"/>
+    <circle cx="413" cy="341" r="27"/>
+    <circle cx="611" cy="539" r="27"/>
+    <circle cx="413" cy="539" r="27"/>
+  </g>
+
+  <!-- 四正白点（阳/奇）+ 中宫，实心柔光 -->
+  <g fill="url(#yang)">
+    <circle cx="512" cy="300" r="33"/>
+    <circle cx="512" cy="580" r="33"/>
+    <circle cx="372" cy="440" r="33"/>
+    <circle cx="652" cy="440" r="33"/>
+    <circle cx="512" cy="440" r="42"/>
+  </g>
+
+  <!-- 终端提示符：青色尖括号 + 块光标，锚定「终端」身份 -->
+  <path d="M 402 700 L 470 744 L 402 788" fill="none" stroke="#88c0d0"
+        stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="516" y="722" width="106" height="46" rx="9" fill="#88c0d0"/>
+</svg>

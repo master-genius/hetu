@@ -8,6 +8,8 @@ export interface Profile {
   user: string;
   auth: "key" | "password";
   keyPath?: string | null;
+  /** 私钥内容（PEM），自存于 profiles.json，不依赖外部文件 */
+  keyData?: string | null;
   source: "manual" | "ssh_config";
   /** 备注/标记，便于查找与展示 */
   note?: string | null;
@@ -64,6 +66,7 @@ export interface ConnParams {
   auth: "key" | "password";
   password?: string;
   keyPath?: string;
+  keyData?: string;
   passphrase?: string;
   keepalive?: number;
   timeout?: number;
