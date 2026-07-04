@@ -112,8 +112,14 @@ export class Explorer {
   cwd = "";
   /** [local] 请求把本地路径上传到当前终端目录（由 main 装配） */
   onUploadRequest: ((paths: string[]) => void) | null = null;
-  /** [local] 请求把远端文件下载到本地某目录（终端/远程面板 Ctrl+拖入时触发） */
-  onDownloadRequest: ((connId: string, remotePath: string, targetDir: string) => void) | null = null;
+  /**
+   * [local] 请求把远端文件下载到本地某目录（终端/远程面板 Ctrl+拖入时触发）。
+   * srcPaneId：拖拽发起终端的 pane id——remotePath 若为相对词需针对该 pane 解析，
+   * 避免同一连接被分屏复用时错用其它 pane 的工作目录。
+   */
+  onDownloadRequest:
+    | ((connId: string, remotePath: string, targetDir: string, srcPaneId?: string) => void)
+    | null = null;
   /** [remote] 请求把本地文件上传到本连接的某远端目录（本地条目拖入时触发） */
   onUploadHere: ((localPaths: string[], remoteDir: string) => void) | null = null;
   private listEl: HTMLElement;
@@ -184,8 +190,12 @@ export class Explorer {
       try {
         if (this.backend.kind === "local") {
           // 远端文件拖入本地面板 → 下载到该目录/当前目录
-          const { connId, path } = JSON.parse(raw) as { connId: string; path: string };
-          this.onDownloadRequest?.(connId, path, targetDir);
+          const { connId, path, paneId } = JSON.parse(raw) as {
+            connId: string;
+            path: string;
+            paneId?: string;
+          };
+          this.onDownloadRequest?.(connId, path, targetDir, paneId);
         } else {
           // 本地条目拖入远程面板 → 上传到该远端目录/当前目录
           const paths = JSON.parse(raw) as string[];
@@ -209,8 +219,13 @@ export class Explorer {
   async init(initialDir?: string): Promise<void> {
     if (this.initialized) return;
     this.initialized = true;
-    this.cwd = (initialDir && initialDir.trim()) || (await this.backend.home());
-    await this.load();
+    try {
+      this.cwd = (initialDir && initialDir.trim()) || (await this.backend.home());
+      await this.load();
+    } catch (err) {
+      this.initialized = false; // 首次列目录失败：允许下次打开重试，并提示而非静默空白
+      toast(`无法打开${this.backend.kind === "remote" ? "远程" : ""}目录: ${err}`, true);
+    }
   }
 
   async navigate(dir: string): Promise<void> {

@@ -154,10 +154,11 @@ async function bootstrap() {
     pane.onCtrlClick = (path) => void downloadFile(pane, path);
     // Ctrl+拖拽文件/目录 → 携带下载意图，拖到文件管理器则下载到其目录
     pane.onCtrlDragStart = (word, e) => {
-      // 携带原始词，落到文件管理器时由 downloadFile 再异步解析为绝对路径
+      // 携带原始词 + 源 pane id：落点由 downloadFile 针对源 pane 异步解析为绝对路径，
+      // 保证同一连接分屏复用时仍用发起终端的工作目录。
       e.dataTransfer?.setData(
         DL_MIME,
-        JSON.stringify({ connId: pane.connId, path: word }),
+        JSON.stringify({ connId: pane.connId, paneId: pane.id, path: word }),
       );
       if (e.dataTransfer) e.dataTransfer.effectAllowed = "copy";
     };
@@ -538,9 +539,10 @@ async function bootstrap() {
     if (!tab.explorer) {
       tab.explorer = new Explorer(localBackend());
       tab.explorer.onUploadRequest = (paths) => void uploadFiles(paths);
-      tab.explorer.onDownloadRequest = (connId, path, targetDir) => {
-        const found = tabs.panesByConn(connId)[0];
-        if (found) void downloadFile(found.pane, path, targetDir);
+      tab.explorer.onDownloadRequest = (connId, path, targetDir, srcPaneId) => {
+        // 优先用拖拽发起的源 pane 解析相对路径，回退到该连接任一 pane
+        const src = (srcPaneId && tabs.findPane(srcPaneId)?.pane) || tabs.panesByConn(connId)[0]?.pane;
+        if (src) void downloadFile(src, path, targetDir);
       };
     }
     if (explorerPanel.firstChild !== tab.explorer.element) {
@@ -605,9 +607,11 @@ async function bootstrap() {
       remotePanel.appendChild(ex.element);
     }
     remotePanel.classList.add("open");
-    // 初始目录取该连接终端的实时 cwd（/proc）；已初始化则不再改动用户当前浏览目录
+    // 初始目录取聚焦终端的实时 cwd（/proc）；已初始化则不再改动用户当前浏览目录。
+    // connId 即 focusedConnId()，故聚焦 pane 必在此连接上；回退到该连接任一 pane。
     const inst = ex;
-    const pane = tabs.panesByConn(connId)[0]?.pane;
+    const active = tabs.activePane();
+    const pane = (active && active.connId === connId ? active : tabs.panesByConn(connId)[0]?.pane) || undefined;
     if (pane) void pane.currentDir().then(({ dir }) => void inst.init(dir ?? undefined));
     else void inst.init();
   };
