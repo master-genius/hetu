@@ -50,8 +50,8 @@ export class Pane {
   private hoverTimer: number | undefined;
   private statCache = new Map<string, { meta: FileMeta | null; at: number }>();
   private disposed = false;
-  /** 当前 Ctrl 悬停命中的远端路径（用于手形光标 / Ctrl+单击下载 / Ctrl+拖拽） */
-  private ctrlHoverPath: string | null = null;
+  /** 当前 Ctrl 悬停命中的词（原始相对/绝对词，下载时再异步解析为绝对路径） */
+  private ctrlHoverWord: string | null = null;
 
   onFocus: (() => void) | null = null;
   /** 全局快捷键分发：返回 true 表示已处理（不透传给 shell） */
@@ -130,10 +130,7 @@ export class Pane {
     this.element.addEventListener("dblclick", () => {
       window.setTimeout(() => {
         const sel = this.term.getSelection().trim();
-        if (sel && !sel.includes("\n")) {
-          const path = this.resolvePath(sel);
-          if (path) this.onPreview?.(path);
-        }
+        if (sel && !sel.includes("\n")) this.onPreview?.(sel);
       }, 10);
     });
 
@@ -152,15 +149,15 @@ export class Pane {
 
     // Ctrl+单击文件/目录 → 下载（若未拖拽）
     this.element.addEventListener("click", (e) => {
-      if (e.ctrlKey && this.ctrlHoverPath) {
+      if (e.ctrlKey && this.ctrlHoverWord) {
         e.preventDefault();
-        this.onCtrlClick?.(this.ctrlHoverPath);
+        this.onCtrlClick?.(this.ctrlHoverWord);
       }
     });
     // Ctrl+拖拽文件/目录 → 拖到文件管理器下载到对应目录
     this.element.addEventListener("dragstart", (e) => {
-      if (this.ctrlHoverPath && this.onCtrlDragStart) {
-        this.onCtrlDragStart(this.ctrlHoverPath, e);
+      if (this.ctrlHoverWord && this.onCtrlDragStart) {
+        this.onCtrlDragStart(this.ctrlHoverWord, e);
       } else {
         e.preventDefault();
       }
@@ -259,16 +256,38 @@ export class Pane {
   }
 
   /**
-   * 上传/下载的目标目录，按可靠性优先：
-   * 1) OSC7 上报的 cwd；2) 经 shell PID 从 /proc 读到的实时 cwd；3) home 兜底（guessed）。
+   * 当前工作目录，按可靠性优先：
+   * 1) OSC7 上报的 cwd；2) 经 shell PID 从 /proc 读到的实时 cwd；3) home 兜底。
+   * guessed=true 表示落到了 home 兜底（并非 shell 真实所在目录）。
    */
-  async uploadDir(): Promise<{ dir: string | null; guessed: boolean }> {
+  async currentDir(): Promise<{ dir: string | null; guessed: boolean }> {
     if (this.cwd) return { dir: this.cwd, guessed: false };
     if (this.shellPid) {
       const cwd = await api.remoteCwd(this.connId, this.shellPid).catch(() => null);
       if (cwd) return { dir: cwd, guessed: false };
     }
     return { dir: this.homeDir, guessed: true };
+  }
+
+  /** 上传目标目录（语义同 currentDir，保留原调用名） */
+  async uploadDir(): Promise<{ dir: string | null; guessed: boolean }> {
+    return this.currentDir();
+  }
+
+  /**
+   * 相对词 → 远端绝对路径（异步）。相对名基于实时 cwd（OSC7 → /proc → home），
+   * 因此即便 shell 未上报 OSC7，只要拿到远端 PID 也能拼出用户 `cd` 后的真实路径。
+   * 已是绝对路径（/ 或 ~/）则原样返回，故传入已解析的绝对路径亦幂等安全。
+   */
+  async resolveRemotePath(word: string): Promise<string | null> {
+    if (!word || word.includes("\n")) return null;
+    if (word.startsWith("/")) return word;
+    if (word.startsWith("~/")) {
+      return this.homeDir ? `${this.homeDir}/${word.slice(2)}` : null;
+    }
+    const { dir } = await this.currentDir();
+    if (!dir) return null;
+    return `${dir.replace(/\/$/, "")}/${word.replace(/^\.\//, "")}`;
   }
 
   write(dataB64: string) {
@@ -368,15 +387,17 @@ export class Pane {
       return;
     }
     const word = this.wordUnderMouse(e);
-    const path = word ? this.resolvePath(word.replace(/\/$/, "")) : null;
-    this.ctrlHoverPath = path;
-    this.element.classList.toggle("ctrl-link", !!path);
-    this.element.draggable = !!path;
+    // 样式判定用同步 resolvePath 尽力而为；实际下载路径在点击/拖放时再异步解析。
+    const w = word ? word.replace(/\/$/, "") : null;
+    const linkable = !!(w && this.resolvePath(w));
+    this.ctrlHoverWord = linkable ? w : null;
+    this.element.classList.toggle("ctrl-link", linkable);
+    this.element.draggable = linkable;
   }
 
   private clearCtrlHover() {
-    if (this.ctrlHoverPath === null && !this.element.draggable) return;
-    this.ctrlHoverPath = null;
+    if (this.ctrlHoverWord === null && !this.element.draggable) return;
+    this.ctrlHoverWord = null;
     this.element.classList.remove("ctrl-link");
     this.element.draggable = false;
   }

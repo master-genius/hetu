@@ -142,16 +142,19 @@ async function bootstrap() {
     // Ctrl+单击文件/目录 → 下载（默认 Downloads / 每次询问，按设置）
     pane.onCtrlClick = (path) => void downloadFile(pane, path);
     // Ctrl+拖拽文件/目录 → 携带下载意图，拖到文件管理器则下载到其目录
-    pane.onCtrlDragStart = (path, e) => {
+    pane.onCtrlDragStart = (word, e) => {
+      // 携带原始词，落到文件管理器时由 downloadFile 再异步解析为绝对路径
       e.dataTransfer?.setData(
         DL_MIME,
-        JSON.stringify({ connId: pane.connId, path }),
+        JSON.stringify({ connId: pane.connId, path: word }),
       );
       if (e.dataTransfer) e.dataTransfer.effectAllowed = "copy";
     };
-    pane.onPreview = async (path) => {
+    pane.onPreview = async (word) => {
       if (pane.isLocal) return; // 本地终端无 SFTP，双击不预览
       try {
+        const path = await pane.resolveRemotePath(word);
+        if (!path) return;
         const meta = await api.sftpStat(pane.connId, path);
         if (meta.isDir) return; // 目录不预览
         if ((meta.size ?? 0) > 20 * 1024 * 1024) {
@@ -165,7 +168,6 @@ async function bootstrap() {
       }
     };
     pane.onContextMenu = (e, word) => {
-      const path = word ? pane.resolvePath(word) : null;
       const sel = pane.term.getSelection();
       // 本地终端没有 SFTP：预览/下载/上传不可用（避免调用 SSH-only 命令报误导性错误）
       const remote = !pane.isLocal;
@@ -183,13 +185,13 @@ async function bootstrap() {
           ? [
               {
                 label: word ? `预览 “${truncate(word)}”` : "预览",
-                disabled: !path,
-                action: () => path && pane.onPreview?.(path),
+                disabled: !word,
+                action: () => word && void pane.onPreview?.(word),
               },
               {
                 label: word ? `下载 “${truncate(word)}”` : "下载",
-                disabled: !path,
-                action: () => path && void downloadFile(pane, path),
+                disabled: !word,
+                action: () => word && void downloadFile(pane, word),
               },
               { label: "上传文件到当前目录", action: () => void uploadViaDialog() },
               { separator: true, label: "" },
@@ -445,12 +447,18 @@ async function bootstrap() {
   };
 
   /**
-   * 下载远端文件/目录。
+   * 下载远端文件/目录。remoteSpec 可为相对词或绝对路径——相对词按实时 cwd 解析，
+   * 因此 shell 未上报 OSC7 时也能命中用户 `cd` 后的真实目录（经 /proc/PID）。
    * - targetDir 指定（拖到文件管理器某目录）→ 直接下载到该目录。
    * - 否则按设置：勾选"每次询问"→ 弹保存对话框；否则默认下载目录（Downloads / 自定义）。
    */
-  const downloadFile = async (pane: Pane, remotePath: string, targetDir?: string) => {
+  const downloadFile = async (pane: Pane, remoteSpec: string, targetDir?: string) => {
     try {
+      const remotePath = await pane.resolveRemotePath(remoteSpec);
+      if (!remotePath) {
+        toast("无法解析远端路径（未知当前目录）", true);
+        return;
+      }
       const meta = await api.sftpStat(pane.connId, remotePath);
       const name = remotePath.replace(/\/+$/, "").split("/").pop() ?? remotePath;
       let local: string | null = null;
