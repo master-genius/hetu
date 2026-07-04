@@ -248,18 +248,19 @@ pub fn load() -> Settings {
     s
 }
 
-/// 兼容旧配置：1.0.0 的字体默认三元组（等宽/CJK 未定制、且用全局字重 300）
-/// 升级到「字重并入名字」的新 Light 默认，使旧用户也能得到内置 Light 字体并在名字上体现。
+/// 兼容旧配置：1.0.0 以 font_weight="300" 存储全局字重，据此唯一识别旧配置
+/// （新版本一律存 "normal"，故不会误伤新用户主动选择的字体）。仅当旧配置的等宽/CJK
+/// 仍是 1.0.0 默认（未定制）时，升级到「字重并入名字」的新 Light 默认；随后归一化字重。
 fn migrate(s: &mut Settings) {
-    if s.font_family == "JetBrains Mono NL"
-        && s.cjk_font_family == "Noto Sans SC"
-        && (s.font_weight == "300" || s.font_weight == "normal")
-    {
+    if s.font_weight != "300" {
+        return; // 新配置（weight=normal）不动，避免反复覆盖用户选择
+    }
+    if s.font_family == "JetBrains Mono NL" && s.cjk_font_family == "Noto Sans SC" {
         let d = Settings::default();
         s.font_family = d.font_family;
         s.cjk_font_family = d.cjk_font_family;
     }
-    // 终端不再全局施加字重，统一归一化为 normal（字重由字体名承载）
+    // 终端不再全局施加字重，字重由字体名承载；归一化后此分支不再匹配
     s.font_weight = "normal".into();
 }
 
