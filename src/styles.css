@@ -496,6 +496,11 @@ body {
   justify-content: center;
 }
 
+/* 文件夹图标填充主题强调色（CSS fill 可靠解析 var()，SVG 属性不一定） */
+.ex-icon .folder-a {
+  fill: var(--accent);
+}
+
 .ex-list.tiles .ex-icon svg {
   width: 30px;
   height: 30px;
@@ -1118,6 +1123,15 @@ input[type="checkbox"] {
 .overwrite-all {
   margin: 4px 0 2px;
   font-size: 12.5px;
+}
+
+/* 设置里非 label 包裹的字段（避免 label 把点击转发给内部按钮） */
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+  opacity: 0.9;
 }
 
 /* 圆角级别选择器：一排小图标，无文字 */

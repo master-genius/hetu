@@ -31,11 +31,12 @@ const CATEGORY: Array<[RegExp, string]> = [
 
 /** 文件夹图标（圆角、双层，KDE Breeze 观感，用强调色） */
 function folderSvg(): string {
+  // fill 用 CSS 类而非 fill="var(--accent)" 属性——WebKitGTK 不解析属性里的 var()
   return `<svg viewBox="0 0 20 20" width="17" height="17" fill="none">
-    <path d="M2 5.5A1.5 1.5 0 013.5 4h4l1.6 1.8H16.5A1.5 1.5 0 0118 7.3V14a1.5 1.5 0 01-1.5 1.5h-13A1.5 1.5 0 012 14V5.5z"
-      fill="var(--accent)" opacity="0.35"/>
-    <path d="M2 8.2A1.5 1.5 0 013.5 6.7h13A1.5 1.5 0 0118 8.2V14a1.5 1.5 0 01-1.5 1.5h-13A1.5 1.5 0 012 14V8.2z"
-      fill="var(--accent)" opacity="0.85"/>
+    <path class="folder-a" d="M2 5.5A1.5 1.5 0 013.5 4h4l1.6 1.8H16.5A1.5 1.5 0 0118 7.3V14a1.5 1.5 0 01-1.5 1.5h-13A1.5 1.5 0 012 14V5.5z"
+      opacity="0.35"/>
+    <path class="folder-a" d="M2 8.2A1.5 1.5 0 013.5 6.7h13A1.5 1.5 0 0118 8.2V14a1.5 1.5 0 01-1.5 1.5h-13A1.5 1.5 0 012 14V8.2z"
+      opacity="0.85"/>
   </svg>`;
 }
 

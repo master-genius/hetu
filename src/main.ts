@@ -638,6 +638,8 @@ async function bootstrap() {
   /** 命中快捷键则执行并阻止默认；返回是否命中。终端聚焦时由 pane.onAppKey 调用，
    *  其它场合由 window 兜底。 */
   const dispatchShortcut = (e: KeyboardEvent, pane?: Pane): boolean => {
+    // 有弹窗打开时不响应全局快捷键（避免在对话框后面误切分/新建/关闭）
+    if (document.querySelector(".modal-overlay")) return false;
     const action = matchAction(e, resolveBindings(getSettings().keybindings));
     if (!action) return false;
     e.preventDefault();

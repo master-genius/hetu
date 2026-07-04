@@ -316,9 +316,10 @@ export function showSettingsDialog() {
           <label class="check"><input name="blur" type="checkbox"> 毛玻璃虚化（透明时仍保持终端内容清晰）</label>
           <label>模糊程度 <span class="blur-val"></span>
             <input name="blurAmount" type="range" min="0" max="80" step="1"></label>
-          <label>界面圆角
+          <div class="settings-field">
+            <span>界面圆角</span>
             <div class="radius-picker"></div>
-          </label>
+          </div>
         </section>
         <section>
           <h4>标签页</h4>
@@ -417,6 +418,15 @@ export function showSettingsDialog() {
   // ---------- 快捷键编辑 ----------
   let kbOverrides: Record<string, string> = { ...s.keybindings };
   const kbList = q<HTMLElement>(".keybind-list");
+  // 当前正在捕获时的清理函数：关闭弹窗时必须调用，否则捕获监听器泄漏、吞掉全部键盘输入
+  let cancelCapture: (() => void) | null = null;
+  // 允许作为触发键的功能键（无修饰键时也可用，如 Shift+Tab、F5、方向键）
+  const SPECIAL_KEYS = new Set([
+    "Tab", "Escape", "Enter", "Space", "Backspace",
+    "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
+    "Home", "End", "PageUp", "PageDown", "Insert", "Delete",
+    "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
+  ]);
   const renderKeybinds = () => {
     const eff = resolveBindings(kbOverrides);
     kbList.textContent = "";
@@ -428,26 +438,40 @@ export function showSettingsDialog() {
       const keyBtn = document.createElement("button");
       keyBtn.type = "button";
       keyBtn.className = "btn kb-key";
-      keyBtn.textContent = comboToLabel(eff[action]);
+      keyBtn.textContent = eff[action] ? comboToLabel(eff[action]) : "未绑定";
       keyBtn.addEventListener("click", () => captureKey(action, keyBtn));
       row.append(name, keyBtn);
       kbList.appendChild(row);
     }
   };
   const captureKey = (action: Action, btn: HTMLButtonElement) => {
+    cancelCapture?.(); // 同一时刻只允许一个捕获
     btn.textContent = "按下组合键…";
     btn.classList.add("capturing");
     const onKey = (ev: KeyboardEvent) => {
       ev.preventDefault();
       ev.stopPropagation();
-      if (ev.key === "Escape") {
+      // 纯修饰键不作为触发键，等待完整组合
+      if (["Control", "Alt", "Shift", "Meta"].includes(ev.key)) return;
+      if (ev.code === "Escape") {
         cleanup();
         renderKeybinds();
         return;
       }
-      // 纯修饰键不作为触发键，等待完整组合
-      if (["Control", "Alt", "Shift", "Meta"].includes(ev.key)) return;
+      // 拒绝无修饰键的普通字符（否则会吞掉终端里正常打字）
+      const hasMod = ev.ctrlKey || ev.altKey || ev.metaKey;
+      if (!hasMod && !SPECIAL_KEYS.has(ev.code)) {
+        toast("请使用带 Ctrl/Alt 修饰键，或功能键（Tab/方向键/F 键）的组合", true);
+        cleanup();
+        renderKeybinds();
+        return;
+      }
       const combo = eventToCombo(ev);
+      // 该组合若已被其它动作占用，先解绑对方（避免两动作同组合导致其一永久失效）
+      const eff = resolveBindings(kbOverrides);
+      for (const other of Object.keys(eff) as Action[]) {
+        if (other !== action && eff[other] === combo) kbOverrides[other] = "";
+      }
       // 与默认相同则移除覆盖，否则记录覆盖
       if (DEFAULT_KEYBINDINGS[action] === combo) delete kbOverrides[action];
       else kbOverrides[action] = combo;
@@ -458,7 +482,9 @@ export function showSettingsDialog() {
     const cleanup = () => {
       window.removeEventListener("keydown", onKey, true);
       btn.classList.remove("capturing");
+      cancelCapture = null;
     };
+    cancelCapture = cleanup;
     window.addEventListener("keydown", onKey, true);
   };
   renderKeybinds();
@@ -517,11 +543,12 @@ export function showSettingsDialog() {
 
   const deleteTheme = (id: string) => {
     const custom = getSettings().customThemes.filter((t) => t.id !== id);
-    // 若删的是当前主题，回落到其 base（暗/亮）默认主题
+    // 若删的是当前主题，回落到其归一化的明暗默认主题（base 可能是某内置主题 id）
     let theme = getSettings().theme;
     if (theme === id) {
       const removed = getSettings().customThemes.find((t) => t.id === id);
-      theme = removed?.base === "light" ? "light" : "dark";
+      const baseBuiltin = BUILTIN_THEMES.find((t) => t.id === removed?.base);
+      theme = baseBuiltin?.base === "light" ? "light" : "dark";
       selectedThemeId = theme;
     }
     void updateSettings({ customThemes: custom, theme });
@@ -604,7 +631,10 @@ export function showSettingsDialog() {
     editor.style.display = "";
   });
 
-  const close = () => overlay.remove();
+  const close = () => {
+    cancelCapture?.(); // 关闭前解除可能仍在进行的快捷键捕获，防止监听器泄漏
+    overlay.remove();
+  };
   overlay.querySelector('[data-act="close"]')!.addEventListener("click", close);
   overlay.addEventListener("mousedown", (e) => {
     if (e.target === overlay) close();
