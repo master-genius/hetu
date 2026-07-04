@@ -1,4 +1,4 @@
-/** 内置主题库（暗色 16 / 亮色 11，收录主流配色）+ 自定义主题解析。
+/** 内置主题库（暗色 22 / 亮色 11，收录主流配色）+ 自定义主题解析。
  *  colors 键与 xterm ITheme 对齐。 */
 
 import type { ThemeDef } from "./types";

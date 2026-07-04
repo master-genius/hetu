@@ -22,6 +22,8 @@ export interface Tab {
   /** 本地文件管理器：每标签页独立实例，目录状态各自保留（懒创建） */
   explorer: Explorer | null;
   explorerOpen: boolean;
+  /** 会话恢复时的原始序号（用于后台并行连接完成后按保存顺序归位） */
+  order?: number;
 }
 
 export class TabManager {
@@ -76,8 +78,8 @@ export class TabManager {
     return out;
   }
 
-  /** 创建标签页：先建首个 pane，再渲染 */
-  async createTab(connId: string, params: ConnParams): Promise<Tab> {
+  /** 创建标签页：先建首个 pane，再渲染。order 用于会话恢复后按保存顺序归位。 */
+  async createTab(connId: string, params: ConnParams, order?: number): Promise<Tab> {
     const paneId = crypto.randomUUID();
     const pane = new Pane(paneId, connId);
     const layout = new Layout(pane);
@@ -99,6 +101,7 @@ export class TabManager {
       banner: null,
       explorer: null,
       explorerOpen: false,
+      order,
     };
 
     el.addEventListener("click", () => this.activate(tab.id));
@@ -155,6 +158,15 @@ export class TabManager {
       pane?.focus();
     });
     this.onLayoutChange?.();
+  }
+
+  /** 会话恢复完成后，按各标签页保存的 order 归位（后台并行连接会打乱到达顺序） */
+  reorderRestored(): void {
+    if (this.tabs.every((t) => t.order === undefined)) return;
+    this.tabs.sort((a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER));
+    const addBtn = this.tabBar.querySelector(".tab-add");
+    for (const t of this.tabs) this.tabBar.insertBefore(t.el, addBtn);
+    for (const t of this.tabs) t.order = undefined; // 归位后清除，避免影响后续
   }
 
   /** 相对当前标签页切换（delta=+1 下一个 / -1 上一个，循环） */

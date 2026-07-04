@@ -584,14 +584,14 @@ export function showSettingsDialog() {
     syncTitlebarUI();
   };
 
-  // 编辑已保存的自定义主题：用其副本打开逐色编辑器，保存后原地更新（id 不变）
+  // 编辑已保存的自定义主题：用其副本打开逐色编辑器，保存后原地更新（id 不变）。
+  // 不改变当前启用的主题——仅当被编辑的正是当前主题时，applySettings 会自动重应用新配色。
   const editTheme = (theme: ThemeDef) => {
     const editor = q<HTMLElement>(".theme-editor");
     const draft: ThemeDef = { ...theme, colors: { ...theme.colors } };
     renderThemeEditor(editor, draft, async () => {
       const custom = getSettings().customThemes.map((t) => (t.id === draft.id ? draft : t));
-      selectedThemeId = draft.id;
-      await updateSettings({ customThemes: custom, theme: draft.id });
+      await updateSettings({ customThemes: custom });
       renderThemeGroups();
       syncTitlebarUI();
       editor.style.display = "none";
@@ -610,7 +610,7 @@ export function showSettingsDialog() {
       (resolveTheme(selectedThemeId, getSettings().customThemes).colors.background ?? "#10151c").slice(0, 7);
     titlebarPicker.disabled = followInput.checked;
   };
-  requestAnimationFrame(renderThemeGroups); // 28 张色板卡片延后一帧，弹窗先出现
+  requestAnimationFrame(renderThemeGroups); // 33 张色板卡片延后一帧，弹窗先出现
   syncTitlebarUI();
   followInput.addEventListener("change", () => {
     titlebarPicker.disabled = followInput.checked;

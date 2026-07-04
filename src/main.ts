@@ -61,10 +61,14 @@ async function bootstrap() {
     connMeta.delete(connId);
   };
 
-  const connectAndOpenTab = async (params: ConnParams, profileId: string | null = null) => {
+  const connectAndOpenTab = async (
+    params: ConnParams,
+    profileId: string | null = null,
+    order?: number,
+  ) => {
     const connId = await api.sshConnect(params);
     recordConn(connId, params, profileId);
-    await tabs.createTab(connId, params);
+    await tabs.createTab(connId, params, order);
   };
 
   /** 本地终端：无 SSH 连接，connId 固定为 "local" */
@@ -75,8 +79,8 @@ async function bootstrap() {
     user: "",
     auth: "key",
   };
-  const openLocalTab = async () => {
-    await tabs.createTab("local", LOCAL_PARAMS);
+  const openLocalTab = async (order?: number) => {
+    await tabs.createTab("local", LOCAL_PARAMS, order);
   };
 
   /**
@@ -706,18 +710,19 @@ async function bootstrap() {
     // 本地终端立即打开（秒开）；SSH 连接**并行在后台建立、不阻塞界面**——
     // 任何一个连接慢/挂起都不会卡死整个应用，其它标签页照常可用。
     const pending: Promise<unknown>[] = [];
-    for (const st of session) {
+    // order = 会话中的原始序号：后台并行连接完成顺序不定，最后按 order 归位
+    session.forEach((st, order) => {
       if (st.local) {
-        await openLocalTab();
-        continue;
+        pending.push(openLocalTab(order));
+        return;
       }
-      if (!st.profileId) continue; // 临时/手输连接，未保存为连接项 → 不恢复
+      if (!st.profileId) return; // 临时/手输连接，未保存为连接项 → 不恢复
       const p = profiles.find((pr) => pr.id === st.profileId);
-      if (!p) continue; // 连接项已删除
+      if (!p) return; // 连接项已删除
       const hasKey = !!(p.keyData || p.keyPath);
       if (p.auth !== "key" || !hasKey) {
         toast(`「${p.name}」未保存凭据，跳过自动连接`);
-        continue;
+        return;
       }
       pending.push(
         connectAndOpenTab(
@@ -733,13 +738,15 @@ async function bootstrap() {
             timeout: p.timeout ?? undefined,
           },
           p.id,
+          order,
         ).catch((err) => toast(`自动连接「${st.name}」失败：${err}`, true)),
       );
-    }
-    // 不 await：界面已可交互；后台连接全部结束后再解除 restoring 并落盘一次
+    });
+    // 不 await：界面已可交互；后台连接全部结束后按保存顺序归位、解除 restoring 并落盘一次
     void Promise.allSettled(pending).then(() => {
       restoring = false;
       if (tabs.tabs.length === 0) void openLocalTab();
+      tabs.reorderRestored();
       snapshotSession();
     });
   }

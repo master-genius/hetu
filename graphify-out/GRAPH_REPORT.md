@@ -1,16 +1,16 @@
 # Graph Report - superssh  (2026-07-04)
 
 ## Corpus Check
-- 33 files · ~71,659 words
+- 33 files · ~72,867 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 818 nodes · 1263 edges · 84 communities (83 shown, 1 thin omitted)
-- Extraction: 96% EXTRACTED · 4% INFERRED · 0% AMBIGUOUS · INFERRED: 47 edges (avg confidence: 0.8)
+- 825 nodes · 1280 edges · 82 communities (81 shown, 1 thin omitted)
+- Extraction: 96% EXTRACTED · 4% INFERRED · 0% AMBIGUOUS · INFERRED: 49 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `ec35885b`
+- Built from commit: `d4818062`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -55,12 +55,10 @@
 - [[_COMMUNITY_Community 37|Community 37]]
 - [[_COMMUNITY_Community 38|Community 38]]
 - [[_COMMUNITY_Community 39|Community 39]]
-- [[_COMMUNITY_Community 40|Community 40]]
 - [[_COMMUNITY_Community 41|Community 41]]
 - [[_COMMUNITY_Community 42|Community 42]]
 - [[_COMMUNITY_Community 43|Community 43]]
 - [[_COMMUNITY_Community 44|Community 44]]
-- [[_COMMUNITY_Community 45|Community 45]]
 - [[_COMMUNITY_Community 46|Community 46]]
 - [[_COMMUNITY_Community 47|Community 47]]
 - [[_COMMUNITY_Community 48|Community 48]]
@@ -101,13 +99,13 @@
 1. `allow` - 74 edges
 2. `deny` - 74 edges
 3. `permissions` - 31 edges
-4. `Pane` - 27 edges
-5. `TabManager` - 19 edges
+4. `Pane` - 30 edges
+5. `TabManager` - 20 edges
 6. `permissions` - 17 edges
 7. `compilerOptions` - 14 edges
 8. `permissions` - 13 edges
-9. `permissions` - 11 edges
-10. `getSettings()` - 11 edges
+9. `getSettings()` - 12 edges
+10. `permissions` - 11 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `main()` --calls--> `run()`  [INFERRED]
@@ -116,12 +114,12 @@
   src-tauri/src/lib.rs → src-tauri/src/settings.rs
 - `profiles_list()` --calls--> `import()`  [INFERRED]
   src-tauri/src/lib.rs → src-tauri/src/sshcfg.rs
+- `default_download_dir()` --calls--> `home_dir()`  [INFERRED]
+  src-tauri/src/lib.rs → src-tauri/src/local.rs
 - `local_home()` --calls--> `home_dir()`  [INFERRED]
   src-tauri/src/lib.rs → src-tauri/src/local.rs
-- `expand_tilde()` --calls--> `home_dir()`  [INFERRED]
-  src-tauri/src/ssh/conn.rs → src-tauri/src/local.rs
 
-## Communities (84 total, 1 thin omitted)
+## Communities (82 total, 1 thin omitted)
 
 ### Community 0 - "Community 0"
 Cohesion: 0.06
@@ -133,15 +131,15 @@ Nodes (4): commands, description, identifier, deny-app-hide
 
 ### Community 2 - "Community 2"
 Cohesion: 0.05
-Nodes (41): commands, description, identifier, commands, description, identifier, commands, description (+33 more)
+Nodes (44): commands, description, identifier, commands, description, identifier, commands, description (+36 more)
 
 ### Community 3 - "Community 3"
-Cohesion: 0.06
-Nodes (33): commands, description, identifier, commands, description, identifier, commands, description (+25 more)
+Cohesion: 0.05
+Nodes (53): commands, description, identifier, commands, description, identifier, commands, description (+45 more)
 
 ### Community 4 - "Community 4"
-Cohesion: 0.13
-Nodes (23): clipboard-manager, default_permission, global_scope_schema, permission_sets, core, default_permission, default_permission, core:event (+15 more)
+Cohesion: 0.1
+Nodes (26): profile_delete(), profile_save(), run(), session_get(), session_set(), settings_set(), main(), config_dir() (+18 more)
 
 ### Community 5 - "Community 5"
 Cohesion: 0.09
@@ -152,8 +150,8 @@ Cohesion: 0.1
 Nodes (19): app, macOSPrivateApi, security, windows, build, beforeBuildCommand, beforeDevCommand, devUrl (+11 more)
 
 ### Community 7 - "Community 7"
-Cohesion: 0.21
-Nodes (14): local_home(), local_list(), profiles_list(), default_shell(), home_dir(), list_dir(), LocalEntry, on_path() (+6 more)
+Cohesion: 0.5
+Nodes (4): commands, description, identifier, allow-clear
 
 ### Community 8 - "Community 8"
 Cohesion: 0.12
@@ -165,7 +163,7 @@ Nodes (15): definitions, Identifier, Number, PermissionEntry, Target, Value, one
 
 ### Community 10 - "Community 10"
 Cohesion: 0.05
-Nodes (60): Error, AppState, get_conn(), pane_input(), pane_open(), profile_delete(), profile_save(), read_key_file() (+52 more)
+Nodes (54): Error, AppState, default_download_dir(), get_conn(), local_home(), local_list(), pane_input(), pane_open() (+46 more)
 
 ### Community 11 - "Community 11"
 Cohesion: 0.12
@@ -176,7 +174,7 @@ Cohesion: 0.13
 Nodes (15): definitions, Identifier, Number, PermissionEntry, Target, Value, oneOf, anyOf (+7 more)
 
 ### Community 14 - "Community 14"
-Cohesion: 0.12
+Cohesion: 0.11
 Nodes (3): Pane, wordAt(), wordRangeAt()
 
 ### Community 15 - "Community 15"
@@ -237,7 +235,7 @@ Nodes (16): commands, description, identifier, commands, description, identifier
 
 ### Community 29 - "Community 29"
 Cohesion: 0.1
-Nodes (21): commands, description, identifier, commands, description, identifier, permissions, commands (+13 more)
+Nodes (21): commands, description, identifier, permissions, commands, description, identifier, commands (+13 more)
 
 ### Community 30 - "Community 30"
 Cohesion: 0.5
@@ -279,10 +277,6 @@ Nodes (4): commands, description, identifier, deny-tauri-version
 Cohesion: 0.5
 Nodes (4): commands, description, identifier, allow-remove-listener
 
-### Community 40 - "Community 40"
-Cohesion: 0.4
-Nodes (3): open(), PaneCmd, PaneCtl
-
 ### Community 41 - "Community 41"
 Cohesion: 0.5
 Nodes (4): commands, description, identifier, allow-append
@@ -298,10 +292,6 @@ Nodes (4): commands, description, identifier, allow-write-text
 ### Community 44 - "Community 44"
 Cohesion: 0.5
 Nodes (4): commands, description, identifier, allow-write-image
-
-### Community 45 - "Community 45"
-Cohesion: 0.5
-Nodes (4): commands, description, identifier, deny-clear
 
 ### Community 46 - "Community 46"
 Cohesion: 0.5
@@ -356,8 +346,8 @@ Cohesion: 0.5
 Nodes (4): commands, description, identifier, deny-supports-multiple-windows
 
 ### Community 61 - "Community 61"
-Cohesion: 0.5
-Nodes (4): commands, description, identifier, allow-get
+Cohesion: 0.4
+Nodes (5): commands, description, identifier, permissions, allow-get
 
 ### Community 62 - "Community 62"
 Cohesion: 0.5
@@ -372,8 +362,8 @@ Cohesion: 0.5
 Nodes (4): commands, description, identifier, allow-remove
 
 ### Community 65 - "Community 65"
-Cohesion: 0.4
-Nodes (5): commands, description, identifier, permissions, allow-create-default
+Cohesion: 0.5
+Nodes (4): commands, description, identifier, allow-create-default
 
 ### Community 66 - "Community 66"
 Cohesion: 0.5
@@ -451,12 +441,12 @@ Nodes (4): commands, description, identifier, deny-register-listener
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `allow` connect `Community 21` to `Community 1`, `Community 2`, `Community 3`, `Community 20`, `Community 23`, `Community 28`, `Community 29`, `Community 30`, `Community 33`, `Community 34`, `Community 36`, `Community 37`, `Community 38`, `Community 39`, `Community 41`, `Community 42`, `Community 43`, `Community 44`, `Community 45`, `Community 46`, `Community 47`, `Community 48`, `Community 49`, `Community 50`, `Community 51`, `Community 52`, `Community 54`, `Community 55`, `Community 56`, `Community 57`, `Community 58`, `Community 59`, `Community 61`, `Community 62`, `Community 63`, `Community 64`, `Community 65`, `Community 66`, `Community 67`, `Community 68`, `Community 69`, `Community 70`, `Community 71`, `Community 72`, `Community 76`, `Community 84`, `Community 85`, `Community 86`, `Community 88`?**
-  _High betweenness centrality (0.057) - this node is a cross-community bridge._
-- **Why does `deny` connect `Community 33` to `Community 1`, `Community 2`, `Community 3`, `Community 20`, `Community 21`, `Community 23`, `Community 28`, `Community 29`, `Community 30`, `Community 34`, `Community 36`, `Community 37`, `Community 38`, `Community 39`, `Community 41`, `Community 42`, `Community 43`, `Community 44`, `Community 45`, `Community 46`, `Community 47`, `Community 48`, `Community 49`, `Community 50`, `Community 51`, `Community 52`, `Community 54`, `Community 55`, `Community 56`, `Community 57`, `Community 58`, `Community 59`, `Community 61`, `Community 62`, `Community 63`, `Community 64`, `Community 65`, `Community 66`, `Community 67`, `Community 68`, `Community 69`, `Community 70`, `Community 71`, `Community 72`, `Community 76`, `Community 84`, `Community 85`, `Community 86`, `Community 88`?**
-  _High betweenness centrality (0.057) - this node is a cross-community bridge._
-- **Why does `Pane` connect `Community 14` to `Community 0`, `Community 10`, `Community 35`?**
-  _High betweenness centrality (0.035) - this node is a cross-community bridge._
+- **Why does `allow` connect `Community 21` to `Community 1`, `Community 2`, `Community 3`, `Community 7`, `Community 20`, `Community 23`, `Community 28`, `Community 29`, `Community 30`, `Community 33`, `Community 34`, `Community 36`, `Community 37`, `Community 38`, `Community 39`, `Community 41`, `Community 42`, `Community 43`, `Community 44`, `Community 46`, `Community 47`, `Community 48`, `Community 49`, `Community 50`, `Community 51`, `Community 52`, `Community 54`, `Community 55`, `Community 56`, `Community 57`, `Community 58`, `Community 59`, `Community 61`, `Community 62`, `Community 63`, `Community 64`, `Community 65`, `Community 66`, `Community 67`, `Community 68`, `Community 69`, `Community 70`, `Community 71`, `Community 72`, `Community 76`, `Community 84`, `Community 85`, `Community 86`, `Community 88`?**
+  _High betweenness centrality (0.056) - this node is a cross-community bridge._
+- **Why does `deny` connect `Community 33` to `Community 1`, `Community 2`, `Community 3`, `Community 7`, `Community 20`, `Community 21`, `Community 23`, `Community 28`, `Community 29`, `Community 30`, `Community 34`, `Community 36`, `Community 37`, `Community 38`, `Community 39`, `Community 41`, `Community 42`, `Community 43`, `Community 44`, `Community 46`, `Community 47`, `Community 48`, `Community 49`, `Community 50`, `Community 51`, `Community 52`, `Community 54`, `Community 55`, `Community 56`, `Community 57`, `Community 58`, `Community 59`, `Community 61`, `Community 62`, `Community 63`, `Community 64`, `Community 65`, `Community 66`, `Community 67`, `Community 68`, `Community 69`, `Community 70`, `Community 71`, `Community 72`, `Community 76`, `Community 84`, `Community 85`, `Community 86`, `Community 88`?**
+  _High betweenness centrality (0.056) - this node is a cross-community bridge._
+- **Why does `Pane` connect `Community 14` to `Community 0`, `Community 35`, `Community 4`?**
+  _High betweenness centrality (0.037) - this node is a cross-community bridge._
 - **What connects `target`, `module`, `moduleResolution` to the rest of the system?**
   _328 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Community 0` be split into smaller, more focused modules?**
@@ -464,4 +454,4 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `Community 2` be split into smaller, more focused modules?**
   _Cohesion score 0.05 - nodes in this community are weakly interconnected._
 - **Should `Community 3` be split into smaller, more focused modules?**
-  _Cohesion score 0.06 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.05 - nodes in this community are weakly interconnected._
