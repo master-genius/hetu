@@ -1,0 +1,43 @@
+/* 内置字体：随应用分发，不依赖系统安装（均为 SIL OFL 协议，可自由再分发）。
+   用户在设置中指定其他字体时，这里仅作回退。 */
+
+@font-face {
+  font-family: "JetBrains Mono NL";
+  src: url("./assets/fonts/JetBrainsMonoNL-Light.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono NL";
+  src: url("./assets/fonts/JetBrainsMonoNL-LightItalic.woff2") format("woff2");
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono NL";
+  src: url("./assets/fonts/JetBrainsMonoNL-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono NL";
+  src: url("./assets/fonts/JetBrainsMonoNL-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* 可变字体：一个文件覆盖 100–900 全部字重 */
+@font-face {
+  font-family: "Noto Sans SC";
+  src: url("./assets/fonts/NotoSansSC.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
