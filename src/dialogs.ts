@@ -9,7 +9,7 @@ import type { ConnParams, Profile, ThemeDef } from "./types";
 // ---------- 连接对话框 ----------
 
 export function showConnectDialog(
-  onConnect: (params: ConnParams) => Promise<void>,
+  onConnect: (params: ConnParams, profileId?: string) => Promise<void>,
   onLocal?: () => Promise<void>,
 ) {
   const overlay = document.createElement("div");
@@ -45,7 +45,7 @@ export function showConnectDialog(
                 placeholder="粘贴私钥内容（-----BEGIN OPENSSH PRIVATE KEY----- …），或点「从文件导入」"></textarea>
             </label>
             <label>私钥口令（可选）<input name="passphrase" type="password" autocomplete="off"></label>
-            <p class="hint">私钥内容会保存到应用自己的配置（profiles.json），不依赖你的文件路径。</p>
+            <p class="hint">私钥内容随连接项保存到应用配置（profiles.json，权限 0600），不依赖你的文件路径。</p>
           </div>
           <div class="auth-pass" style="display:none">
             <label>密码 <input name="password" type="password" autocomplete="off"></label>
@@ -82,9 +82,15 @@ export function showConnectDialog(
   authSel.addEventListener("change", syncAuthUI);
 
   let selectedProfileId: string | null = null;
+  // 连接来源的连接项 id（供会话恢复）：仅当表单未被用户改动、直接来自某连接项时有效。
+  // 一旦手动编辑任一字段即清空 → 视为临时连接，不参与会话恢复。
+  let connectProfileId: string | null = null;
+  form.addEventListener("input", () => (connectProfileId = null));
+  form.addEventListener("change", () => (connectProfileId = null));
 
   const fillForm = (p: Profile) => {
     selectedProfileId = p.id;
+    connectProfileId = p.id;
     field("name").value = p.name;
     field("host").value = p.host;
     field("port").value = String(p.port);
@@ -202,6 +208,9 @@ export function showConnectDialog(
       timeout: p.timeout ?? null,
     };
     await api.profileSave(profile);
+    // 保存后表单即代表该连接项，随后「连接」可参与会话恢复
+    selectedProfileId = profile.id;
+    connectProfileId = profile.id;
     toast("连接项已保存");
     void api.profilesList().then(renderProfiles);
   });
@@ -228,7 +237,7 @@ export function showConnectDialog(
     submitBtn.disabled = true;
     submitBtn.textContent = "连接中…";
     try {
-      await onConnect(p);
+      await onConnect(p, connectProfileId ?? undefined);
       close();
     } catch (err) {
       toast(String(err), true);
@@ -278,7 +287,7 @@ export function showSettingsDialog() {
         </section>
         <section>
           <h4>主题</h4>
-          <p class="section-desc">内置 16 套暗色、11 套亮色，可基于任一主题派生自定义配色。点击色板即可切换。</p>
+          <p class="section-desc">内置 17 套暗色、11 套亮色，可基于任一主题派生自定义配色。点击色板即可切换。</p>
           <div class="theme-picker-head">
             <span>配色主题</span>
             <button type="button" class="btn new-theme">基于当前新建</button>

@@ -144,26 +144,33 @@ fn expand_tilde(path: &str) -> String {
 
 /// 建立连接并按指定方式认证。只尝试一次、只用一份凭据。
 pub async fn establish(params: &ConnParams) -> Result<client::Handle<ClientHandler>> {
+    // 超时覆盖「连接 + 认证」全过程：仅包 connect 会让服务器在认证阶段卡住时无限挂起，
+    // 进而卡死重连循环。默认 20s。
+    let timeout = Duration::from_secs(params.timeout.unwrap_or(20).max(1));
+    match tokio::time::timeout(timeout, establish_inner(params)).await {
+        Err(_) => Err(Error::msg(format!("连接超时（超过 {} 秒）", timeout.as_secs()))),
+        Ok(r) => r,
+    }
+}
+
+/// 实际的连接 + 认证流程（由 establish 统一施加超时）。
+async fn establish_inner(params: &ConnParams) -> Result<client::Handle<ClientHandler>> {
     let config = Arc::new(client::Config {
         keepalive_interval: Some(Duration::from_secs(params.keepalive.unwrap_or(15).max(1))),
         ..Default::default()
     });
-    let connect_fut = client::connect(
+    let mut handle = client::connect(
         config,
         (params.host.as_str(), params.port),
         ClientHandler::new(params.host.clone(), params.port),
-    );
-    // 连接超时：默认 20s，避免不可达主机长时间挂起
-    let timeout = Duration::from_secs(params.timeout.unwrap_or(20).max(1));
-    let mut handle = match tokio::time::timeout(timeout, connect_fut).await {
-        Err(_) => return Err(Error::msg(format!("连接超时（超过 {} 秒）", timeout.as_secs()))),
-        Ok(r) => r.map_err(|e| match e {
-            russh::Error::UnknownKey => {
-                Error::msg("服务器主机指纹与上次记录不一致，已拒绝连接（可能存在中间人攻击）。若确认服务器已重装，请在设置目录删除 known_hosts.json 中对应条目。")
-            }
-            other => Error::Ssh(other),
-        })?,
-    };
+    )
+    .await
+    .map_err(|e| match e {
+        russh::Error::UnknownKey => {
+            Error::msg("服务器主机指纹与上次记录不一致，已拒绝连接（可能存在中间人攻击）。若确认服务器已重装，请在设置目录删除 known_hosts.json 中对应条目。")
+        }
+        other => Error::Ssh(other),
+    })?;
 
     match params.auth.as_str() {
         "password" => {

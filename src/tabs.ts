@@ -64,8 +64,16 @@ export class TabManager {
     return null;
   }
 
-  tabsByConn(connId: string): Tab[] {
-    return this.tabs.filter((t) => t.connId === connId);
+  /** 所有连到某连接的 pane（跨标签页、跨分屏）。重连按 pane 自身 connId 定位，
+   *  而非 tab.connId——后者在多 pane 标签页里被就地切换后会失真。 */
+  panesByConn(connId: string): Array<{ tab: Tab; pane: Pane }> {
+    const out: Array<{ tab: Tab; pane: Pane }> = [];
+    for (const tab of this.tabs) {
+      for (const pane of tab.layout.panes()) {
+        if (pane.connId === connId) out.push({ tab, pane });
+      }
+    }
+    return out;
   }
 
   /** 创建标签页：先建首个 pane，再渲染 */
@@ -104,7 +112,23 @@ export class TabManager {
     this.onPaneCreated?.(pane, tab);
     layout.render();
     this.activate(tab.id);
-    await pane.open();
+    try {
+      await pane.open();
+    } catch (err) {
+      // 打开失败：回收该标签页与其连接，避免留下无法操作的僵尸标签页与泄漏的后端连接
+      pane.dispose();
+      el.remove();
+      tab.banner?.remove();
+      layout.container.remove();
+      this.tabs = this.tabs.filter((t) => t.id !== tab.id);
+      if (this.activeTabId === tab.id) {
+        this.activeTabId = this.tabs[this.tabs.length - 1]?.id ?? null;
+        if (this.active) this.activate(this.active.id);
+        else this.onLayoutChange?.();
+      }
+      this.gcConnections([connId]);
+      throw err;
+    }
     pane.focus();
     return tab;
   }

@@ -51,11 +51,8 @@ export interface Settings {
 export interface SessionTab {
   local: boolean;
   name: string;
-  host?: string | null;
-  port?: number | null;
-  user?: string | null;
-  auth?: "key" | "password" | null;
-  keyPath?: string | null;
+  /** 来源连接项 id；无（临时/手输连接）则不恢复 */
+  profileId?: string | null;
 }
 
 export interface ConnParams {

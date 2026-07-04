@@ -50,8 +50,13 @@ async fn settings_get(state: State<'_>) -> Result<Settings> {
 #[tauri::command]
 async fn settings_set(state: State<'_>, settings: Settings) -> Result<()> {
     // 连接项已独立到 profiles.json，settings 不再包含它们，无需特殊保护
+    let auto = settings.auto_reconnect;
     settings::save(&settings)?;
     *state.settings.lock().await = settings;
+    // 自动重连开关改动后同步到所有存活连接（否则仅对新建连接生效）
+    for conn in state.conns.lock().await.values() {
+        conn.auto_reconnect.store(auto, Ordering::SeqCst);
+    }
     Ok(())
 }
 

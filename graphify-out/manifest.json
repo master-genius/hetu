@@ -15,8 +15,8 @@
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/tauri.conf.json": {
-    "mtime": 1783185973.479909,
-    "ast_hash": "b93e23a28f5d1e6c49a423ec90652eb2",
+    "mtime": 1783188488.348556,
+    "ast_hash": "faa0802186fa6e93f093ed2afabc47b5",
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/build.rs": {
@@ -60,8 +60,8 @@
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/src/settings.rs": {
-    "mtime": 1783188136.5116768,
-    "ast_hash": "ecac40d84be694c159ba3fd975e8d01c",
+    "mtime": 1783189154.7840269,
+    "ast_hash": "35c97682b3a3dd7b7ce74bed1a231bff",
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/src/sshcfg.rs": {
@@ -75,8 +75,8 @@
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/src/lib.rs": {
-    "mtime": 1783188150.627379,
-    "ast_hash": "6132f073aa38961ce8ea945392a1640c",
+    "mtime": 1783189538.0645792,
+    "ast_hash": "c34bc4b5aa46602f4b1a2554cc4cbf88",
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/src/ssh/mod.rs": {
@@ -90,8 +90,8 @@
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/src/ssh/conn.rs": {
-    "mtime": 1783188130.2718089,
-    "ast_hash": "bc38a3fa44740c6a336dea81b6c8bf47",
+    "mtime": 1783189530.6047428,
+    "ast_hash": "722e949cb46a42b3ebdf008d815db2e4",
     "semantic_hash": ""
   },
   "/root/source/superssh/src-tauri/src/ssh/pane.rs": {
@@ -120,8 +120,8 @@
     "semantic_hash": ""
   },
   "/root/source/superssh/src/tabs.ts": {
-    "mtime": 1783186947.8097064,
-    "ast_hash": "3dcd03fc4aae746fd75983a447791e4e",
+    "mtime": 1783189573.4278095,
+    "ast_hash": "abd75d5e1df3040a0d09359c0a5de6fa",
     "semantic_hash": ""
   },
   "/root/source/superssh/src/settings.ts": {
@@ -130,8 +130,8 @@
     "semantic_hash": ""
   },
   "/root/source/superssh/src/types.ts": {
-    "mtime": 1783188170.3069658,
-    "ast_hash": "466249a60e4c0aad5c1c73db85332d24",
+    "mtime": 1783189168.7077718,
+    "ast_hash": "f54a7dd62749456825b55607e6ebe610",
     "semantic_hash": ""
   },
   "/root/source/superssh/src/explorer.ts": {
@@ -140,23 +140,23 @@
     "semantic_hash": ""
   },
   "/root/source/superssh/src/themes.ts": {
-    "mtime": 1783185996.6636128,
-    "ast_hash": "47612fc8409fa72d6e79c1605c795f2b",
+    "mtime": 1783189609.523032,
+    "ast_hash": "a036e9a6028585dd523bd474da371947",
     "semantic_hash": ""
   },
   "/root/source/superssh/src/main.ts": {
-    "mtime": 1783187958.839546,
-    "ast_hash": "d0be1539b910108fbf916a809b886e8a",
+    "mtime": 1783189590.9674306,
+    "ast_hash": "b6ca6155416b2a5dffc867c239b0f6f9",
     "semantic_hash": ""
   },
   "/root/source/superssh/src/dialogs.ts": {
-    "mtime": 1783188238.9575424,
-    "ast_hash": "921eca0ac1d515457fd5ea11631109c1",
+    "mtime": 1783189619.7868123,
+    "ast_hash": "412f7f7b2a44b913a367e311ddf1675a",
     "semantic_hash": ""
   },
   "/root/source/superssh/README.md": {
-    "mtime": 1783188282.9166439,
-    "ast_hash": "2c2bb7e5c272a3d9c6e2a06a856d2ac5",
+    "mtime": 1783189626.634666,
+    "ast_hash": "57b110f1479c4f0899fc3fb572a2461e",
     "semantic_hash": ""
   },
   "/root/source/superssh/index.html": {
@@ -164,9 +164,249 @@
     "ast_hash": "6f8a96027a42f3b0afac24e0b414ca8e",
     "semantic_hash": ""
   },
+  "/root/source/superssh/src-tauri/icons/128x128@2x.png": {
+    "mtime": 1783188469.5609233,
+    "ast_hash": "46202a5ae20a40e8cc11f87623669189",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/Square44x44Logo.png": {
+    "mtime": 1783188461.7010772,
+    "ast_hash": "bb03135d0dcff9a5e57640433c7bfc31",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/Square30x30Logo.png": {
+    "mtime": 1783188461.5690799,
+    "ast_hash": "5052c084550236282efa36038c65eb26",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/icon-source.svg": {
+    "mtime": 1783188459.9731112,
+    "ast_hash": "aa0369e5c31c747c8d38e22e7ae353f7",
+    "semantic_hash": ""
+  },
   "/root/source/superssh/src-tauri/icons/icon.png": {
-    "mtime": 1783180597.7569237,
-    "ast_hash": "e82bda92d358de46b563a2148c78fe81",
+    "mtime": 1783188470.5609038,
+    "ast_hash": "42a83caeba20b866c1a48d2f47e9649b",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/StoreLogo.png": {
+    "mtime": 1783188461.3930833,
+    "ast_hash": "62b9206603347297acf4d087603a5544",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/128x128.png": {
+    "mtime": 1783188469.1969304,
+    "ast_hash": "da720343ec0a11a8211741d160e66fdf",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/32x32.png": {
+    "mtime": 1783188468.9009361,
+    "ast_hash": "b260228cee670481da742d6c053c29e2",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/Square107x107Logo.png": {
+    "mtime": 1783188462.1530685,
+    "ast_hash": "aa77d78caae1375505a06a9ebbb1a221",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/Square310x310Logo.png": {
+    "mtime": 1783188463.3090458,
+    "ast_hash": "d0d4ce4f86df720f2099ad1ba6d99b9a",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/Square150x150Logo.png": {
+    "mtime": 1783188462.533061,
+    "ast_hash": "5317870fb8972b73efd7d13efec82dc2",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/64x64.png": {
+    "mtime": 1783188469.0249338,
+    "ast_hash": "e8807fa29261f0921e81549f87a2cb40",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/Square71x71Logo.png": {
+    "mtime": 1783188461.8490744,
+    "ast_hash": "67c641bc3c8aafeec59bdc5d90921766",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/Square142x142Logo.png": {
+    "mtime": 1783188462.329065,
+    "ast_hash": "1ea201e3bbad251cd6f480724e68f7bf",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/Square89x89Logo.png": {
+    "mtime": 1783188461.9970715,
+    "ast_hash": "7b6f6ae66ce50849bc7e944735925ba2",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/Square284x284Logo.png": {
+    "mtime": 1783188462.901054,
+    "ast_hash": "2778d4a20926dbbaef878b765ea127ed",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/ios/AppIcon-40x40@1x.png": {
+    "mtime": 1783188472.5488648,
+    "ast_hash": "0352aa9c10e965bc1c4ce1eb22a29957",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/ios/AppIcon-40x40@2x-1.png": {
+    "mtime": 1783188472.4168675,
+    "ast_hash": "815c4869bfa10d1f161dac990768453a",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/ios/AppIcon-29x29@2x.png": {
+    "mtime": 1783188472.1208732,
+    "ast_hash": "e87930d66dbab9a04aa062ee285e29e6",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/ios/AppIcon-29x29@2x-1.png": {
+    "mtime": 1783188471.5608842,
+    "ast_hash": "e87930d66dbab9a04aa062ee285e29e6",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/ios/AppIcon-512@2x.png": {
+    "mtime": 1783188474.3448296,
+    "ast_hash": "d78886d4c4c5eb1676bd54f7aca5ece4",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/ios/AppIcon-40x40@2x.png": {
+    "mtime": 1783188472.696862,
+    "ast_hash": "815c4869bfa10d1f161dac990768453a",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/ios/AppIcon-76x76@1x.png": {
+    "mtime": 1783188473.3408494,
+    "ast_hash": "1e1ba979af23805a7f64667913f743fe",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/ios/AppIcon-83.5x83.5@2x.png": {
+    "mtime": 1783188473.6328435,
+    "ast_hash": "49d82a68e9c3b9ae5fec5bee879d9f01",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/ios/AppIcon-20x20@2x-1.png": {
+    "mtime": 1783188470.7289004,
+    "ast_hash": "0352aa9c10e965bc1c4ce1eb22a29957",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/ios/AppIcon-20x20@1x.png": {
+    "mtime": 1783188471.0808935,
+    "ast_hash": "d4aaf487ab7c454b3e4540e359ffcccd",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/ios/AppIcon-40x40@3x.png": {
+    "mtime": 1783188472.9528568,
+    "ast_hash": "57c2e0c637f8587e11aa43d510fc7d57",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/ios/AppIcon-60x60@3x.png": {
+    "mtime": 1783188473.248851,
+    "ast_hash": "7dc33ad8fd0cc84e7a9f8b443ffe045b",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/ios/AppIcon-76x76@2x.png": {
+    "mtime": 1783188473.516846,
+    "ast_hash": "43f24b4a84da426a98350d4224bdb32e",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/ios/AppIcon-29x29@3x.png": {
+    "mtime": 1783188472.3008697,
+    "ast_hash": "5dca78409f0a5d0ef5d8aeb3c630fedc",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/ios/AppIcon-20x20@3x.png": {
+    "mtime": 1783188471.4328866,
+    "ast_hash": "78a3358aff9df690ae7d37cf0c58d053",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/ios/AppIcon-29x29@1x.png": {
+    "mtime": 1783188471.8888776,
+    "ast_hash": "6cd2eea9584a2118524163d733a7caa9",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/ios/AppIcon-60x60@2x.png": {
+    "mtime": 1783188473.0888543,
+    "ast_hash": "57c2e0c637f8587e11aa43d510fc7d57",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/ios/AppIcon-20x20@2x.png": {
+    "mtime": 1783188471.2848895,
+    "ast_hash": "0352aa9c10e965bc1c4ce1eb22a29957",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher_foreground.png": {
+    "mtime": 1783188475.6248045,
+    "ast_hash": "1861fc289f1bd447d29df641644148a7",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher_round.png": {
+    "mtime": 1783188476.576786,
+    "ast_hash": "66f4990eda228767b90858c1339d987f",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher.png": {
+    "mtime": 1783188476.7047834,
+    "ast_hash": "be12204e522896963370d6036147587e",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/android/mipmap-hdpi/ic_launcher_foreground.png": {
+    "mtime": 1783188474.532826,
+    "ast_hash": "802a4b7e1ee5cafc457e3cfbe00ccefa",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/android/mipmap-hdpi/ic_launcher_round.png": {
+    "mtime": 1783188475.7528021,
+    "ast_hash": "ce90fead6fe68159083a226eaab328a2",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/android/mipmap-hdpi/ic_launcher.png": {
+    "mtime": 1783188475.8648,
+    "ast_hash": "db5458faf684d9f843f5430a8246dbac",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/android/mipmap-xxhdpi/ic_launcher_foreground.png": {
+    "mtime": 1783188475.1008148,
+    "ast_hash": "68ec9a65a61e3e9967337118ae722a4f",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/android/mipmap-xxhdpi/ic_launcher_round.png": {
+    "mtime": 1783188476.3487904,
+    "ast_hash": "ba035160b37d16fb065d2a58ae853429",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/android/mipmap-xxhdpi/ic_launcher.png": {
+    "mtime": 1783188476.476788,
+    "ast_hash": "36c6dfd4ada90e021ffdec51d0018224",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/android/mipmap-xhdpi/ic_launcher_foreground.png": {
+    "mtime": 1783188474.880819,
+    "ast_hash": "04c2ee83f39aae5930971af8d3e0d14d",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/android/mipmap-xhdpi/ic_launcher_round.png": {
+    "mtime": 1783188476.160794,
+    "ast_hash": "c833a8ab284625d3e19e395d53c15026",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/android/mipmap-xhdpi/ic_launcher.png": {
+    "mtime": 1783188476.2607923,
+    "ast_hash": "46053aa56eb2e6b2b0bb2bdeed0ded2c",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/android/mipmap-mdpi/ic_launcher_foreground.png": {
+    "mtime": 1783188474.696823,
+    "ast_hash": "b2503bce71d30bd6d84d7f6989c0a28d",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/android/mipmap-mdpi/ic_launcher_round.png": {
+    "mtime": 1783188475.960798,
+    "ast_hash": "455027afd7d5fa45fe9f63aba11c762d",
+    "semantic_hash": ""
+  },
+  "/root/source/superssh/src-tauri/icons/android/mipmap-mdpi/ic_launcher.png": {
+    "mtime": 1783188476.0727959,
+    "ast_hash": "7f96d6ffa1a8a8ab16e5b87a14088d73",
     "semantic_hash": ""
   }
 }

@@ -110,7 +110,9 @@ impl Default for Settings {
     }
 }
 
-/// 会话中一个标签页的可持久化描述（不含任何密钥/密码等机密）。
+/// 会话中一个标签页的可持久化描述（不含任何机密）。
+/// 远程连接只记录来源连接项 id，恢复时据此从 profiles.json 取回完整参数（含密钥）；
+/// 临时/手输、或未保存为连接项的连接 profile_id 为 None，不予恢复。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTab {
@@ -118,16 +120,7 @@ pub struct SessionTab {
     pub local: bool,
     pub name: String,
     #[serde(default)]
-    pub host: Option<String>,
-    #[serde(default)]
-    pub port: Option<u16>,
-    #[serde(default)]
-    pub user: Option<String>,
-    /// "key" | "password"
-    #[serde(default)]
-    pub auth: Option<String>,
-    #[serde(default)]
-    pub key_path: Option<String>,
+    pub profile_id: Option<String>,
 }
 
 fn config_dir() -> Result<PathBuf> {
@@ -170,12 +163,22 @@ fn read_json_or_default<T: serde::de::DeserializeOwned + Default>(path: &PathBuf
     }
 }
 
+/// 仅属主可读写（0600）。私钥等机密以文件形式存于配置目录，用权限而非加密保护。
+#[cfg(unix)]
+fn set_owner_only(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+}
+#[cfg(not(unix))]
+fn set_owner_only(_path: &std::path::Path) {}
+
 fn write_json<T: Serialize>(path: &PathBuf, value: &T) -> Result<()> {
     let json =
         serde_json::to_string_pretty(value).map_err(|e| Error::msg(format!("序列化失败: {e}")))?;
-    // 原子写入
+    // 原子写入：先写临时文件并设 0600，再 rename，避免半写损坏与短暂的宽松权限窗口
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, json)?;
+    set_owner_only(&tmp);
     std::fs::rename(&tmp, path)?;
     Ok(())
 }
@@ -207,29 +210,14 @@ pub fn save_session(tabs: &[SessionTab]) -> Result<()> {
 }
 
 pub fn load() -> Settings {
-    let path = match settings_path() {
-        Ok(p) => p,
-        Err(_) => return Settings::default(),
-    };
-    let content = match std::fs::read_to_string(&path) {
-        Ok(s) => s,
-        Err(_) => return Settings::default(), // 文件不存在等：首次运行，用默认值
-    };
-    match serde_json::from_str(&content) {
-        Ok(s) => s,
-        Err(_) => {
-            // 文件存在但无法解析（手工误编辑/版本不兼容/损坏）。
-            // 绝不静默用默认值覆盖——先把原文件备份，避免下次 save 永久毁掉用户的
-            // 连接项与自定义主题；用户可从 .bak 手动恢复。
-            let _ = std::fs::rename(&path, path.with_extension("json.bak"));
-            Settings::default()
-        }
+    // 与 profiles/session 共用损坏恢复策略（解析失败备份为 .bak 后回默认值）
+    match settings_path() {
+        Ok(p) => read_json_or_default(&p),
+        Err(_) => Settings::default(),
     }
 }
 
 pub fn save(settings: &Settings) -> Result<()> {
-    let json = serde_json::to_string_pretty(settings)
-        .map_err(|e| Error::msg(format!("序列化设置失败: {e}")))?;
-    std::fs::write(settings_path()?, json)?;
-    Ok(())
+    // 与 profiles/session 一致：原子写入 + 0600，避免半写导致 load() 判损后重置全部偏好
+    write_json(&settings_path()?, settings)
 }

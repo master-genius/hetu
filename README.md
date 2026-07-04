@@ -32,7 +32,7 @@
 
 ### 外观
 - **字体随应用内置分发**（woff2 内嵌，无需系统安装）：`JetBrains Mono NL`（Light/Regular/Bold + 斜体）+ `Noto Sans SC` 可变字体（CJK，100–900 全字重）；两者均为 SIL OFL 协议。主字体/CJK 字体/字号/字重均可改为任意本机字体。
-- **内置 27 套主流主题**：暗色 16（One Dark、Dracula、Nord、Gruvbox、Solarized、Tokyo Night、Catppuccin Mocha、Monokai、GitHub Dark、Ayu、Rosé Pine、Kanagawa、Everforest、Night Owl、Palenight…）+ 亮色 11（Solarized Light、GitHub Light、Catppuccin Latte、Gruvbox Light、Rosé Pine Dawn、One Light…）；可**基于任一主题新建自定义主题**（逐色编辑），全部持久化。
+- **内置 28 套主流主题**：暗色 17（One Dark、Dracula、Nord、Gruvbox、Solarized、Tokyo Night、Catppuccin Mocha、Monokai、GitHub Dark、Ayu、Rosé Pine、Rosé Pine Moon、Kanagawa、Everforest、Night Owl、Palenight…）+ 亮色 11（Solarized Light、GitHub Light、Catppuccin Latte、Gruvbox Light、Rosé Pine Dawn、One Light…）；可**基于任一主题新建自定义主题**（逐色编辑），全部持久化。
 - **标题栏颜色默认跟随主题**，也可在设置中单独取色。
 - **背景透明度**可调 + **毛玻璃虚化**：macOS（vibrancy）/ Windows（acrylic）原生模糊；应用内另有 backdrop 层，即使很透明也能看清终端内容。Linux 下窗口级模糊取决于合成器（KDE 可为透明窗口配置模糊规则）。
 
@@ -72,8 +72,8 @@ npx tauri build    # 打包，产物在 src-tauri/target/release/bundle/
 配置保存在每个用户各自的配置目录 `hetushell/` 下（Linux: `~/.config/hetushell/`，
 macOS: `~/Library/Application Support/hetushell/`，Windows: `%APPDATA%\hetushell\`），按用途分文件：
 - `settings.json` — 界面与行为偏好
-- `profiles.json` — 连接项（名称、主机、认证方式、备注等；**不含密码/口令**）
-- `session.json` — 最后的会话（开启「记住最后的会话」时用于下次启动自动重开并连接）
+- `profiles.json` — 连接项（名称、主机、认证方式、私钥内容、备注等；**不含密码/口令**，文件权限 0600）
+- `session.json` — 最后的会话（仅记录标签页来源的连接项 id，据此从 profiles.json 取回参数恢复；临时/手输或未保存凭据的连接不恢复）
 - `known_hosts.json` — 主机指纹（TOFU）
 
 窗口大小/位置由 `tauri-plugin-window-state` 自动记忆并在下次启动恢复。不同系统用户互不影响。

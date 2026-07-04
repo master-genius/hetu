@@ -80,6 +80,10 @@ const DARK: ThemeDef[] = [
     "#26233a", "#eb6f92", "#31748f", "#f6c177", "#9ccfd8", "#c4a7e7", "#ebbcba", "#e0def4",
     "#6e6a86", "#eb6f92", "#31748f", "#f6c177", "#9ccfd8", "#c4a7e7", "#ebbcba", "#e0def4",
   ]),
+  t("rose-pine-moon", "Rosé Pine Moon", "dark", "#e0def4", "#232136", "#e0def4", "#44415a90", [
+    "#393552", "#eb6f92", "#3e8fb0", "#f6c177", "#9ccfd8", "#c4a7e7", "#ea9a97", "#e0def4",
+    "#6e6a86", "#eb6f92", "#3e8fb0", "#f6c177", "#9ccfd8", "#c4a7e7", "#ea9a97", "#e0def4",
+  ]),
   t("kanagawa", "Kanagawa", "dark", "#dcd7ba", "#1f1f28", "#c8c093", "#2d4f6780", [
     "#16161d", "#c34043", "#76946a", "#c0a36e", "#7e9cd8", "#957fb8", "#6a9589", "#c8c093",
     "#727169", "#e82424", "#98bb6c", "#e6c384", "#7fb4ca", "#938aa9", "#7aa89f", "#dcd7ba",

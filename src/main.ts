@@ -37,33 +37,28 @@ async function bootstrap() {
   // ---------- 连接与标签页 ----------
 
   // 连接元信息（供「标识连接」浮层与会话恢复用），键为 connId。不含任何机密。
+  // profileId 记录连接来源的连接项；临时/手输连接为 null，不参与会话恢复。
   interface ConnInfo {
     local: boolean;
     name: string;
     host: string;
-    port: number;
-    user: string;
-    auth: "key" | "password";
-    keyPath?: string | null;
+    profileId: string | null;
   }
   const connMeta = new Map<string, ConnInfo>();
-  connMeta.set("local", { local: true, name: "本地终端", host: "local", port: 0, user: "", auth: "key" });
+  connMeta.set("local", { local: true, name: "本地终端", host: "local", profileId: null });
 
-  const recordConn = (connId: string, params: ConnParams) => {
+  const recordConn = (connId: string, params: ConnParams, profileId: string | null) => {
     connMeta.set(connId, {
       local: false,
       name: params.name,
       host: params.host,
-      port: params.port,
-      user: params.user,
-      auth: params.auth,
-      keyPath: params.keyPath ?? null,
+      profileId,
     });
   };
 
-  const connectAndOpenTab = async (params: ConnParams) => {
+  const connectAndOpenTab = async (params: ConnParams, profileId: string | null = null) => {
     const connId = await api.sshConnect(params);
-    recordConn(connId, params);
+    recordConn(connId, params, profileId);
     await tabs.createTab(connId, params);
   };
 
@@ -85,9 +80,9 @@ async function bootstrap() {
    */
   const connectInPane = (tab: Tab, pane: Pane) => {
     showConnectDialog(
-      async (params) => {
+      async (params, profileId) => {
         const connId = await api.sshConnect(params);
-        recordConn(connId, params);
+        recordConn(connId, params, profileId ?? null);
         await tabs.switchPaneConnection(tab, pane, connId, params.name);
       },
       async () => {
@@ -221,25 +216,29 @@ async function bootstrap() {
   });
 
   void events.onConnState((e) => {
-    for (const tab of tabs.tabsByConn(e.connId)) {
-      switch (e.state) {
-        case "reconnecting":
-          tabs.setBanner(tab, "连接已断开，正在重连…");
-          break;
-        case "waiting":
+    // 按 pane 自身 connId 定位受影响的分屏（而非 tab.connId）：多 pane 标签页里被就地
+    // 切换连接的 pane 才能正确收到自己连接的重连事件，且不会误重开同标签页其它连接的 pane。
+    const affected = tabs.panesByConn(e.connId);
+    if (affected.length === 0) return;
+    const affectedTabs = new Set(affected.map((a) => a.tab));
+    switch (e.state) {
+      case "reconnecting":
+        for (const tab of affectedTabs) tabs.setBanner(tab, "连接已断开，正在重连…");
+        break;
+      case "waiting":
+        for (const tab of affectedTabs)
           tabs.setBanner(tab, `重连失败（${e.error ?? "未知错误"}），${e.retryIn}s 后重试…`);
-          break;
-        case "connected":
-          tabs.setBanner(tab, null);
-          for (const pane of tab.layout.panes()) {
-            pane.term.write("\r\n\x1b[32m[连接已恢复]\x1b[0m\r\n");
-            void pane.open().catch(() => {});
-          }
-          break;
-        case "closed":
-          tabs.setBanner(tab, "连接已关闭（自动重连已禁用）");
-          break;
-      }
+        break;
+      case "connected":
+        for (const tab of affectedTabs) tabs.setBanner(tab, null);
+        for (const { pane } of affected) {
+          pane.term.write("\r\n\x1b[32m[连接已恢复]\x1b[0m\r\n");
+          void pane.open().catch(() => {});
+        }
+        break;
+      case "closed":
+        for (const tab of affectedTabs) tabs.setBanner(tab, "连接已关闭（自动重连已禁用）");
+        break;
     }
   });
 
@@ -484,21 +483,16 @@ async function bootstrap() {
     explorerPanel.style.display = "";
     void tab.explorer.init();
   };
-  // 会话快照：每个标签页取其首个 pane 的连接（不含机密），防抖写入 session.json
+  // 会话快照：每个标签页取其首个 pane 的连接来源（连接项 id，不含机密），防抖写入 session.json。
+  // 恢复期间 restoring=true 时跳过，避免在标签页尚未全部重建时把会话写成半截而丢失。
+  let restoring = false;
   const snapshotSession = () => {
+    if (restoring) return;
     const snap = tabs.tabs.map((tab) => {
       const first = tab.layout.panes()[0];
       const info = first ? connMeta.get(first.connId) : undefined;
       if (!info || info.local) return { local: true, name: info?.name ?? "本地终端" };
-      return {
-        local: false,
-        name: info.name,
-        host: info.host,
-        port: info.port,
-        user: info.user,
-        auth: info.auth,
-        keyPath: info.keyPath ?? null,
-      };
+      return { local: false, name: info.name, profileId: info.profileId ?? null };
     });
     void api.sessionSet(snap).catch(() => {});
   };
@@ -649,28 +643,51 @@ async function bootstrap() {
     }
   });
 
-  // 启动：若开启「记住最后的会话」则恢复上次的标签页并自动连接；否则开一个本地终端
+  // 启动：若开启「记住最后的会话」则恢复上次的标签页并自动连接；否则开一个本地终端。
+  // 远程连接只恢复来自已保存连接项（含密钥）的会话；临时/手输、密码认证（未存密码）的一律跳过。
   const session = getSettings().restoreSession ? await api.sessionGet().catch(() => []) : [];
-  for (const st of session) {
-    try {
-      if (st.local) {
-        await openLocalTab();
-      } else {
-        await connectAndOpenTab({
-          name: st.name,
-          host: st.host ?? "",
-          port: st.port ?? 22,
-          user: st.user ?? "root",
-          auth: (st.auth ?? "key") as "key" | "password",
-          keyPath: st.keyPath ?? undefined,
-        });
+  if (session.length > 0) {
+    restoring = true;
+    const profiles = session.some((s) => !s.local && s.profileId)
+      ? await api.profilesList().catch(() => [] as Awaited<ReturnType<typeof api.profilesList>>)
+      : [];
+    for (const st of session) {
+      try {
+        if (st.local) {
+          await openLocalTab();
+          continue;
+        }
+        if (!st.profileId) continue; // 临时/手输连接，未保存为连接项 → 不恢复
+        const p = profiles.find((pr) => pr.id === st.profileId);
+        if (!p) continue; // 连接项已删除
+        // 密码认证不存密码、密钥认证缺密钥内容/路径 → 无法静默连接，跳过
+        const hasKey = !!(p.keyData || p.keyPath);
+        if (p.auth !== "key" || !hasKey) {
+          toast(`「${p.name}」未保存凭据，跳过自动连接`);
+          continue;
+        }
+        await connectAndOpenTab(
+          {
+            name: p.name,
+            host: p.host,
+            port: p.port,
+            user: p.user,
+            auth: p.auth,
+            keyPath: p.keyPath ?? undefined,
+            keyData: p.keyData ?? undefined,
+            keepalive: p.keepalive ?? undefined,
+            timeout: p.timeout ?? undefined,
+          },
+          p.id,
+        );
+      } catch (err) {
+        toast(`自动连接「${st.name}」失败：${err}`, true);
       }
-    } catch (err) {
-      // 需要密码/口令或主机不可达时无法静默重连——提示后跳过该项
-      toast(`自动连接「${st.name}」失败：${err}`, true);
     }
+    restoring = false;
   }
   if (tabs.tabs.length === 0) await openLocalTab(); // 无可恢复项时的兜底
+  snapshotSession(); // 恢复完成后落一次盘，反映真实的当前会话
 }
 
 function truncate(s: string, n = 24): string {
