@@ -144,6 +144,8 @@ export class TabManager {
       }
       if (t.banner) t.banner.style.display = active ? "" : "none";
     }
+    // 仅一个标签页时隐藏标签栏（新建标签页由工具栏「+」或快捷键触发）
+    this.tabBar.classList.toggle("single", this.tabs.length < 2);
     // 同步 refit（强制布局），让终端在本帧就以正确尺寸绘制，避免切回标签时先以旧尺寸
     // 绘一帧造成的「大字闪烁」；随后再 rAF 聚焦。
     const pane = this.activePane();
@@ -258,6 +260,7 @@ export class TabManager {
     this.tabs = this.tabs.filter((t) => t.id !== tab.id);
     // 断开不再被任何 pane 引用的连接
     this.gcConnections(conns);
+    this.tabBar.classList.toggle("single", this.tabs.length < 2);
     if (this.activeTabId === tab.id) {
       const next = this.tabs[this.tabs.length - 1];
       if (next) this.activate(next.id);

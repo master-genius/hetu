@@ -78,6 +78,14 @@ pub struct Settings {
     pub blur: bool,
     /// 毛玻璃模糊程度（px）
     pub blur_amount: f64,
+    /// 圆角级别："square" | "xs" | "sm" | "md" | "lg"
+    pub corner_radius: String,
+    /// 标签页平分横向宽度
+    pub tab_bar_fill: bool,
+    /// 标签页字体（空 = 同主字体）
+    pub tab_font_family: String,
+    /// 标签页字号（0 = 自动，终端字号 - 2）
+    pub tab_font_size: u16,
     /// 新建标签页行为："local"（直接本地终端）| "dialog"（弹出连接选择）
     pub new_tab_mode: String,
     /// 断线自动重连（默认开启）
@@ -107,6 +115,10 @@ impl Default for Settings {
             opacity: 0.85,
             blur: true,
             blur_amount: 30.0,
+            corner_radius: "md".into(),
+            tab_bar_fill: true,
+            tab_font_family: String::new(),
+            tab_font_size: 0,
             new_tab_mode: "local".into(),
             auto_reconnect: true,
             copy_on_select: true,

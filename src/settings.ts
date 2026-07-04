@@ -41,7 +41,17 @@ export function fontStack(): string {
 
 function applySettings() {
   const s = getSettings();
+  const root = document.documentElement;
   applyThemeToUI(activeTheme(), s.opacity, s.blur, s.blurAmount, s.titlebarColor);
-  document.documentElement.style.setProperty("--ui-font", fontStack());
+  root.style.setProperty("--ui-font", fontStack());
+  // 圆角级别（CSS 按 data-radius 提供各级 --radius 变量）
+  root.dataset.radius = s.cornerRadius;
+  // 标签栏平分宽度
+  root.dataset.tabFill = s.tabBarFill ? "1" : "0";
+  // 标签页字体/字号：字体空则同主字体；字号 0 则自动取终端字号 - 2（下限 9）
+  const tabFont = s.tabFontFamily.trim() ? `${s.tabFontFamily}, ${fontStack()}` : fontStack();
+  const tabSize = s.tabFontSize > 0 ? s.tabFontSize : Math.max(9, s.fontSize - 2);
+  root.style.setProperty("--tab-font", tabFont);
+  root.style.setProperty("--tab-font-size", `${tabSize}px`);
   for (const fn of listeners) fn(s);
 }

@@ -39,6 +39,14 @@ export interface Settings {
   blur: boolean;
   /** 毛玻璃模糊程度（px） */
   blurAmount: number;
+  /** 圆角级别 */
+  cornerRadius: "square" | "xs" | "sm" | "md" | "lg";
+  /** 标签页平分横向宽度 */
+  tabBarFill: boolean;
+  /** 标签页字体（空 = 同主字体） */
+  tabFontFamily: string;
+  /** 标签页字号（0 = 自动：终端字号 - 2） */
+  tabFontSize: number;
   /** 新建标签页行为："local" 直接本地终端 | "dialog" 弹出连接选择 */
   newTabMode: "local" | "dialog";
   autoReconnect: boolean;

@@ -7,7 +7,7 @@ import { customSelect, toast } from "./ui";
 import {
   ACTIONS, comboToLabel, DEFAULT_KEYBINDINGS, eventToCombo, resolveBindings, type Action,
 } from "./keybindings";
-import type { ConnParams, Profile, ThemeDef } from "./types";
+import type { ConnParams, Profile, Settings, ThemeDef } from "./types";
 
 // ---------- 连接对话框 ----------
 
@@ -289,6 +289,10 @@ export function showSettingsDialog() {
             <label class="narrow">字号 <input name="fontSize" type="number" min="8" max="32"></label>
             <label class="grow">字重 <span class="cs-mount" data-cs="fontWeight"></span></label>
           </div>
+          <div class="row">
+            <label class="grow">标签页字体（空=同主字体）<input name="tabFontFamily" spellcheck="false" placeholder="同主字体"></label>
+            <label class="narrow">标签字号 <input name="tabFontSize" type="number" min="0" max="24" placeholder="自动"></label>
+          </div>
         </section>
         <section>
           <h4>主题</h4>
@@ -312,6 +316,14 @@ export function showSettingsDialog() {
           <label class="check"><input name="blur" type="checkbox"> 毛玻璃虚化（透明时仍保持终端内容清晰）</label>
           <label>模糊程度 <span class="blur-val"></span>
             <input name="blurAmount" type="range" min="0" max="80" step="1"></label>
+          <label>界面圆角
+            <div class="radius-picker"></div>
+          </label>
+        </section>
+        <section>
+          <h4>标签页</h4>
+          <label class="check"><input name="tabBarFill" type="checkbox"> 标签页平分横向宽度</label>
+          <p class="section-desc">仅一个标签页时不显示标签栏；新建标签页用工具栏“+”或 Ctrl+Shift+T。</p>
         </section>
         <section>
           <h4>行为</h4>
@@ -351,6 +363,33 @@ export function showSettingsDialog() {
   input("copyOnSelect").checked = s.copyOnSelect;
   input("confirmOverwrite").checked = s.confirmOverwrite;
   input("restoreSession").checked = s.restoreSession;
+  input("tabFontFamily").value = s.tabFontFamily;
+  input("tabFontSize").value = s.tabFontSize ? String(s.tabFontSize) : "";
+  input("tabBarFill").checked = s.tabBarFill;
+
+  // 圆角级别选择器：小图标（方形 → 大圆角），不显示文字
+  let cornerRadius = s.cornerRadius;
+  const radiusPicker = q<HTMLElement>(".radius-picker");
+  const RADII: Array<{ v: Settings["cornerRadius"]; r: number }> = [
+    { v: "square", r: 0 }, { v: "xs", r: 2 }, { v: "sm", r: 4 }, { v: "md", r: 7 }, { v: "lg", r: 11 },
+  ];
+  const renderRadius = () => {
+    radiusPicker.textContent = "";
+    for (const { v, r } of RADII) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "radius-opt" + (v === cornerRadius ? " selected" : "");
+      b.title = v;
+      b.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20"><rect x="4" y="4" width="16" height="16" rx="${r}" fill="none" stroke="currentColor" stroke-width="2"/></svg>`;
+      b.addEventListener("click", () => {
+        cornerRadius = v;
+        renderRadius();
+        commit();
+      });
+      radiusPicker.appendChild(b);
+    }
+  };
+  renderRadius();
 
   // 自定义下拉替代原生 select（避免白底弹出）
   const fontWeightSel = customSelect(
@@ -522,6 +561,10 @@ export function showSettingsDialog() {
       copyOnSelect: input("copyOnSelect").checked,
       confirmOverwrite: input("confirmOverwrite").checked,
       restoreSession: input("restoreSession").checked,
+      cornerRadius,
+      tabBarFill: input("tabBarFill").checked,
+      tabFontFamily: input("tabFontFamily").value,
+      tabFontSize: parseInt(input("tabFontSize").value, 10) || 0,
     });
   };
 

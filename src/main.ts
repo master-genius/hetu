@@ -460,6 +460,8 @@ async function bootstrap() {
     await win.close();
   });
 
+  document.getElementById("btn-newtab")!.addEventListener("click", () => tabs.onNewTabRequest?.());
+
   // 顶部连接图标：默认针对当前聚焦的终端（就地打开/切换连接）；无终端时才新建标签页
   document.getElementById("btn-connect")!.addEventListener("click", () => {
     const tab = tabs.active;
