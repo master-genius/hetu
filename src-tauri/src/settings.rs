@@ -76,6 +76,8 @@ pub struct Settings {
     pub opacity: f64,
     /// 毛玻璃虚化
     pub blur: bool,
+    /// 毛玻璃模糊程度（px）
+    pub blur_amount: f64,
     /// 新建标签页行为："local"（直接本地终端）| "dialog"（弹出连接选择）
     pub new_tab_mode: String,
     /// 断线自动重连（默认开启）
@@ -85,6 +87,9 @@ pub struct Settings {
     pub confirm_overwrite: bool,
     /// 记住最后的会话：下次启动自动重开并连接（默认关闭）
     pub restore_session: bool,
+    /// 自定义快捷键：动作 → 组合键（仅存与默认不同的覆盖项）
+    #[serde(default)]
+    pub keybindings: std::collections::HashMap<String, String>,
 }
 
 impl Default for Settings {
@@ -101,11 +106,13 @@ impl Default for Settings {
             custom_themes: Vec::new(),
             opacity: 0.85,
             blur: true,
+            blur_amount: 30.0,
             new_tab_mode: "local".into(),
             auto_reconnect: true,
             copy_on_select: true,
             confirm_overwrite: false,
             restore_session: false,
+            keybindings: std::collections::HashMap::new(),
         }
     }
 }
@@ -165,12 +172,12 @@ fn read_json_or_default<T: serde::de::DeserializeOwned + Default>(path: &PathBuf
 
 /// 仅属主可读写（0600）。私钥等机密以文件形式存于配置目录，用权限而非加密保护。
 #[cfg(unix)]
-fn set_owner_only(path: &std::path::Path) {
+pub fn set_owner_only(path: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
     let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
 }
 #[cfg(not(unix))]
-fn set_owner_only(_path: &std::path::Path) {}
+pub fn set_owner_only(_path: &std::path::Path) {}
 
 fn write_json<T: Serialize>(path: &PathBuf, value: &T) -> Result<()> {
     let json =

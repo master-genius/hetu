@@ -7,10 +7,25 @@
   --bg-alpha: 0.92;
   --bg-rgba: rgba(16, 21, 28, 0.92);
   --chrome-rgba: rgba(16, 21, 28, 0.97);
-  --blur: blur(24px) saturate(1.25);
+  --blur: blur(30px) saturate(1.3);
   --ui-font: "JetBrains Mono NL", "Noto Sans SC", monospace;
   --titlebar-rgba: var(--chrome-rgba);
   --radius: 8px;
+  color-scheme: dark; /* 原生控件默认暗色，applyThemeToUI 会按主题覆盖 */
+}
+
+/* ---------- 通用过渡动画 ---------- */
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes menu-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to { opacity: 1; transform: none; }
 }
 
 * {
@@ -174,6 +189,7 @@ body {
   padding: 4px;
 }
 
+
 .layout-root > * {
   height: 100%;
 }
@@ -325,6 +341,17 @@ body {
   border-radius: var(--radius);
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.25);
   overflow: hidden;
+  /* 常驻 DOM，用位移+透明度做进出动画（display:none 无法过渡） */
+  transform: translateX(calc(100% + 8px));
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.3, 1), opacity 0.18s ease;
+}
+
+#explorer-panel.open {
+  transform: none;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .explorer {
@@ -459,6 +486,8 @@ body {
   border-radius: var(--radius);
   padding: 4px;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+  transform-origin: top left;
+  animation: menu-in 0.12s ease;
 }
 
 .ctx-item {
@@ -502,11 +531,18 @@ body {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  /* 轻遮罩：既凸显弹窗，又不把后面的终端压得太暗，方便边改设置边看效果 */
+  background: rgba(0, 0, 0, 0.28);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 150;
+  animation: overlay-in 0.16s ease;
+}
+
+/* 设置弹窗遮罩更淡，实时预览主题/透明度改动 */
+.modal-overlay.peek {
+  background: rgba(0, 0, 0, 0.1);
 }
 
 .modal {
@@ -519,6 +555,7 @@ body {
   max-height: 86vh;
   overflow: auto;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  animation: modal-in 0.19s cubic-bezier(0.2, 0.7, 0.3, 1);
 }
 
 .modal h3 {
@@ -787,6 +824,37 @@ select option {
   background: var(--term-bg);
 }
 
+/* 自定义下拉：外观与 input 一致，弹出列表复用 .ctx-menu（跟随主题） */
+.cs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: color-mix(in srgb, var(--term-fg) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--term-fg) 18%, transparent);
+  color: var(--term-fg);
+  font-family: var(--ui-font);
+  font-size: 13px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.cs:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.cs-caret {
+  opacity: 0.6;
+  font-size: 11px;
+}
+
+.cs-mount {
+  display: block;
+}
+
 input[type="range"] {
   padding: 0;
   accent-color: var(--accent);
@@ -802,6 +870,30 @@ input[type="checkbox"] {
 
 .modal.settings {
   width: 560px;
+  /* 顶部标题与底部关闭固定，仅中间设置区滚动 */
+  display: flex;
+  flex-direction: column;
+  max-height: 86vh;
+  overflow: hidden;
+}
+
+.modal.settings > h3 {
+  flex: 0 0 auto;
+}
+
+.modal.settings .settings-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 8px;
+  margin-right: -4px;
+}
+
+.modal.settings > .modal-actions {
+  flex: 0 0 auto;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--term-fg) 10%, transparent);
 }
 
 /* 每节顶部一句说明，弱化显示 */
@@ -876,6 +968,61 @@ input[type="checkbox"] {
 
 .theme-card.selected {
   border-color: var(--accent);
+}
+
+.theme-card {
+  position: relative;
+}
+
+.tc-del {
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  width: 16px;
+  height: 16px;
+  line-height: 14px;
+  text-align: center;
+  border-radius: 4px;
+  font-size: 13px;
+  opacity: 0;
+  background: color-mix(in srgb, #e06c75 70%, transparent);
+  color: #fff;
+  transition: opacity 0.12s;
+}
+
+.theme-card:hover .tc-del {
+  opacity: 0.9;
+}
+
+.tc-del:hover {
+  opacity: 1 !important;
+}
+
+/* 快捷键编辑行 */
+.keybind-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  font-size: 12.5px;
+}
+
+.keybind-row + .keybind-row {
+  border-top: 1px solid color-mix(in srgb, var(--term-fg) 6%, transparent);
+}
+
+.btn.kb-key {
+  padding: 3px 10px;
+  font-size: 12px;
+  min-width: 96px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.btn.kb-key.capturing {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .tc-preview {

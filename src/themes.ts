@@ -173,6 +173,7 @@ export function applyThemeToUI(
   theme: ThemeDef,
   opacity: number,
   blur: boolean,
+  blurAmount: number,
   titlebarColor?: string | null,
 ) {
   const root = document.documentElement;
@@ -180,6 +181,8 @@ export function applyThemeToUI(
   const fg = theme.colors.foreground ?? "#d8dee9";
   const chromeAlpha = Math.min(1, opacity + 0.05);
   root.dataset.base = theme.base;
+  // 让原生控件（下拉列表、复选框、滚动条）跟随明暗，修正 select/option 白底看不清
+  root.style.colorScheme = theme.base;
   root.style.setProperty("--term-bg", bg);
   root.style.setProperty("--term-fg", fg);
   root.style.setProperty("--accent", theme.colors.cursor ?? "#88c0d0");
@@ -187,7 +190,8 @@ export function applyThemeToUI(
   root.style.setProperty("--bg-rgba", hexToRgba(bg, opacity));
   root.style.setProperty("--chrome-rgba", hexToRgba(bg, chromeAlpha));
   root.style.setProperty("--titlebar-rgba", hexToRgba(titlebarColor || bg, chromeAlpha));
-  root.style.setProperty("--blur", blur ? "blur(24px) saturate(1.25)" : "none");
+  const px = Math.max(0, Math.round(blurAmount));
+  root.style.setProperty("--blur", blur && px > 0 ? `blur(${px}px) saturate(1.3)` : "none");
 }
 
 export function hexToRgba(hex: string, alpha: number): string {

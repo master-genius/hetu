@@ -136,20 +136,32 @@ export class TabManager {
   activate(tabId: string) {
     this.activeTabId = tabId;
     for (const t of this.tabs) {
-      t.el.classList.toggle("active", t.id === tabId);
-      t.layout.container.style.display = t.id === tabId ? "" : "none";
-      if (t.banner) t.banner.style.display = t.id === tabId ? "" : "none";
+      const active = t.id === tabId;
+      t.el.classList.toggle("active", active);
+      t.layout.container.style.display = active ? "" : "none";
+      if (active && !this.content.contains(t.layout.container)) {
+        this.content.appendChild(t.layout.container);
+      }
+      if (t.banner) t.banner.style.display = active ? "" : "none";
     }
-    const tab = this.active;
-    if (tab && !this.content.contains(tab.layout.container)) {
-      this.content.appendChild(tab.layout.container);
-    }
+    // 同步 refit（强制布局），让终端在本帧就以正确尺寸绘制，避免切回标签时先以旧尺寸
+    // 绘一帧造成的「大字闪烁」；随后再 rAF 聚焦。
+    const pane = this.activePane();
+    pane?.refit();
     requestAnimationFrame(() => {
-      const pane = this.activePane();
       pane?.refit();
       pane?.focus();
     });
     this.onLayoutChange?.();
+  }
+
+  /** 相对当前标签页切换（delta=+1 下一个 / -1 上一个，循环） */
+  switchTabBy(delta: number): void {
+    if (this.tabs.length < 2) return;
+    const idx = this.tabs.findIndex((t) => t.id === this.activeTabId);
+    if (idx < 0) return;
+    const next = (idx + delta + this.tabs.length) % this.tabs.length;
+    this.activate(this.tabs[next].id);
   }
 
   /** 允许的最大切分层级（参考 Konsole，防止无限嵌套） */
@@ -202,11 +214,15 @@ export class TabManager {
     return this.tabs.some((t) => t.layout.panes().some((p) => p.connId === connId));
   }
 
+  /** 某连接被回收（断开）后的通知，供上层清理连接元信息缓存 */
+  onConnClosed: ((connId: string) => void) | null = null;
+
   /** 回收不再被任何 pane 引用的连接（本地终端无需断开） */
   gcConnections(candidates: string[]): void {
     for (const cid of new Set(candidates)) {
       if (cid !== "local" && !this.connInUse(cid)) {
         void api.sshDisconnect(cid).catch(() => {});
+        this.onConnClosed?.(cid);
       }
     }
   }

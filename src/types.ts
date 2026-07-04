@@ -37,6 +37,8 @@ export interface Settings {
   customThemes: ThemeDef[];
   opacity: number;
   blur: boolean;
+  /** 毛玻璃模糊程度（px） */
+  blurAmount: number;
   /** 新建标签页行为："local" 直接本地终端 | "dialog" 弹出连接选择 */
   newTabMode: "local" | "dialog";
   autoReconnect: boolean;
@@ -45,6 +47,8 @@ export interface Settings {
   confirmOverwrite: boolean;
   /** 记住最后的会话：下次启动自动重开并连接 */
   restoreSession: boolean;
+  /** 自定义快捷键：动作 → 组合键（仅存覆盖项） */
+  keybindings: Record<string, string>;
 }
 
 /** 会话中一个标签页的可持久化描述（不含任何机密） */

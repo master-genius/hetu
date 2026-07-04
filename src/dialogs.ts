@@ -3,7 +3,10 @@
 import { api } from "./ipc";
 import { getSettings, updateSettings } from "./settings";
 import { allThemes, BUILTIN_THEMES, resolveTheme } from "./themes";
-import { toast } from "./ui";
+import { customSelect, toast } from "./ui";
+import {
+  ACTIONS, comboToLabel, DEFAULT_KEYBINDINGS, eventToCombo, resolveBindings, type Action,
+} from "./keybindings";
 import type { ConnParams, Profile, ThemeDef } from "./types";
 
 // ---------- 连接对话框 ----------
@@ -29,12 +32,7 @@ export function showConnectDialog(
             <label class="port">端口 <input name="port" type="number" value="22" min="1" max="65535"></label>
           </div>
           <label>用户名 <input name="user" placeholder="root" required></label>
-          <label>认证方式
-            <select name="auth">
-              <option value="key">私钥（直接证书验证）</option>
-              <option value="password">密码</option>
-            </select>
-          </label>
+          <label>认证方式 <span class="cs-mount" data-cs="auth"></span></label>
           <div class="auth-key">
             <input name="keyPath" type="hidden">
             <label>
@@ -72,14 +70,25 @@ export function showConnectDialog(
 
   const form = overlay.querySelector(".connect-form") as HTMLFormElement;
   const field = (n: string) => form.elements.namedItem(n) as HTMLInputElement;
-  const authSel = form.elements.namedItem("auth") as HTMLSelectElement;
+  // 认证方式：自定义下拉（值 authSel.getValue()），改动视为手动编辑
   const syncAuthUI = () => {
-    (overlay.querySelector(".auth-key") as HTMLElement).style.display =
-      authSel.value === "key" ? "" : "none";
+    const v = authSel.getValue();
+    (overlay.querySelector(".auth-key") as HTMLElement).style.display = v === "key" ? "" : "none";
     (overlay.querySelector(".auth-pass") as HTMLElement).style.display =
-      authSel.value === "password" ? "" : "none";
+      v === "password" ? "" : "none";
   };
-  authSel.addEventListener("change", syncAuthUI);
+  const authSel = customSelect(
+    [
+      { value: "key", label: "私钥（直接证书验证）" },
+      { value: "password", label: "密码" },
+    ],
+    "key",
+    () => {
+      connectProfileId = null;
+      syncAuthUI();
+    },
+  );
+  (overlay.querySelector('.cs-mount[data-cs="auth"]') as HTMLElement).appendChild(authSel.el);
 
   let selectedProfileId: string | null = null;
   // 连接来源的连接项 id（供会话恢复）：仅当表单未被用户改动、直接来自某连接项时有效。
@@ -95,7 +104,7 @@ export function showConnectDialog(
     field("host").value = p.host;
     field("port").value = String(p.port);
     field("user").value = p.user;
-    authSel.value = p.auth;
+    authSel.setValue(p.auth);
     field("keyPath").value = p.keyPath ?? "";
     field("keyData").value = p.keyData ?? "";
     field("note").value = p.note ?? "";
@@ -154,6 +163,9 @@ export function showConnectDialog(
       const content = await api.readKeyFile(picked);
       field("keyData").value = content;
       field("keyPath").value = ""; // 已内联内容，清除路径依赖
+      // 程序化赋值不触发 input 事件，需手动视作"表单已改动"：置空来源连接项，
+      // 否则会话恢复会误用连接项里原来的密钥而非刚导入的这把。
+      connectProfileId = null;
       toast("已导入私钥内容");
     } catch (err) {
       toast(`读取私钥失败: ${err}`, true);
@@ -175,7 +187,7 @@ export function showConnectDialog(
       host,
       port: parseInt(field("port").value, 10) || 22,
       user,
-      auth: authSel.value as "key" | "password",
+      auth: authSel.getValue() as "key" | "password",
       keyPath: field("keyPath").value.trim() || undefined,
       keyData: field("keyData").value.trim() || undefined,
       passphrase: field("passphrase").value || undefined,
@@ -260,7 +272,8 @@ const THEME_COLOR_KEYS = [
 export function showSettingsDialog() {
   const s = getSettings();
   const overlay = document.createElement("div");
-  overlay.className = "modal-overlay";
+  // peek：设置弹窗遮罩更淡，方便实时预览主题/透明度/模糊改动
+  overlay.className = "modal-overlay peek";
   overlay.innerHTML = `
     <div class="modal settings">
       <h3>设置</h3>
@@ -274,15 +287,7 @@ export function showSettingsDialog() {
           </div>
           <div class="row">
             <label class="narrow">字号 <input name="fontSize" type="number" min="8" max="32"></label>
-            <label class="grow">字重
-              <select name="fontWeight">
-                <option value="100">100 Thin</option>
-                <option value="200">200 ExtraLight</option>
-                <option value="300">300 Light</option>
-                <option value="400">400 Regular</option>
-                <option value="500">500 Medium</option>
-              </select>
-            </label>
+            <label class="grow">字重 <span class="cs-mount" data-cs="fontWeight"></span></label>
           </div>
         </section>
         <section>
@@ -305,19 +310,24 @@ export function showSettingsDialog() {
           <label>背景不透明度 <span class="opacity-val"></span>
             <input name="opacity" type="range" min="0.3" max="1" step="0.01"></label>
           <label class="check"><input name="blur" type="checkbox"> 毛玻璃虚化（透明时仍保持终端内容清晰）</label>
+          <label>模糊程度 <span class="blur-val"></span>
+            <input name="blurAmount" type="range" min="0" max="80" step="1"></label>
         </section>
         <section>
           <h4>行为</h4>
-          <label>点击“+”新建标签页时
-            <select name="newTabMode">
-              <option value="local">直接打开本地终端</option>
-              <option value="dialog">弹出连接选择</option>
-            </select>
-          </label>
+          <label>点击“+”新建标签页时 <span class="cs-mount" data-cs="newTabMode"></span></label>
           <label class="check"><input name="autoReconnect" type="checkbox"> 连接断开后自动重连</label>
           <label class="check"><input name="copyOnSelect" type="checkbox"> 选中文本即复制到剪贴板</label>
           <label class="check"><input name="confirmOverwrite" type="checkbox"> 上传遇同名文件时提示确认（默认直接覆盖）</label>
           <label class="check"><input name="restoreSession" type="checkbox"> 记住最后的会话（下次启动自动重开并连接）</label>
+        </section>
+        <section>
+          <h4>快捷键</h4>
+          <p class="section-desc">点击右侧组合键即可修改；按下新组合键生效，Esc 取消。终端聚焦时快捷键优先于 shell。</p>
+          <div class="keybind-list"></div>
+          <div class="modal-actions" style="margin-top:8px">
+            <button type="button" class="btn kb-reset">恢复默认快捷键</button>
+          </div>
         </section>
       </div>
       <div class="modal-actions">
@@ -332,15 +342,92 @@ export function showSettingsDialog() {
   input("fontFamily").value = s.fontFamily;
   input("cjkFontFamily").value = s.cjkFontFamily;
   input("fontSize").value = String(s.fontSize);
-  (overlay.querySelector('[name="fontWeight"]') as HTMLSelectElement).value = s.fontWeight;
   input("opacity").value = String(s.opacity);
   q<HTMLElement>(".opacity-val").textContent = `${Math.round(s.opacity * 100)}%`;
   input("blur").checked = s.blur;
-  (overlay.querySelector('[name="newTabMode"]') as HTMLSelectElement).value = s.newTabMode;
+  input("blurAmount").value = String(s.blurAmount);
+  q<HTMLElement>(".blur-val").textContent = `${Math.round(s.blurAmount)}px`;
   input("autoReconnect").checked = s.autoReconnect;
   input("copyOnSelect").checked = s.copyOnSelect;
   input("confirmOverwrite").checked = s.confirmOverwrite;
   input("restoreSession").checked = s.restoreSession;
+
+  // 自定义下拉替代原生 select（避免白底弹出）
+  const fontWeightSel = customSelect(
+    [
+      { value: "100", label: "100 Thin" },
+      { value: "200", label: "200 ExtraLight" },
+      { value: "300", label: "300 Light" },
+      { value: "400", label: "400 Regular" },
+      { value: "500", label: "500 Medium" },
+    ],
+    s.fontWeight,
+    () => commit(),
+  );
+  q<HTMLElement>('.cs-mount[data-cs="fontWeight"]').appendChild(fontWeightSel.el);
+  const newTabModeSel = customSelect(
+    [
+      { value: "local", label: "直接打开本地终端" },
+      { value: "dialog", label: "弹出连接选择" },
+    ],
+    s.newTabMode,
+    () => commit(),
+  );
+  q<HTMLElement>('.cs-mount[data-cs="newTabMode"]').appendChild(newTabModeSel.el);
+
+  // ---------- 快捷键编辑 ----------
+  let kbOverrides: Record<string, string> = { ...s.keybindings };
+  const kbList = q<HTMLElement>(".keybind-list");
+  const renderKeybinds = () => {
+    const eff = resolveBindings(kbOverrides);
+    kbList.textContent = "";
+    for (const { action, label } of ACTIONS) {
+      const row = document.createElement("div");
+      row.className = "keybind-row";
+      const name = document.createElement("span");
+      name.textContent = label;
+      const keyBtn = document.createElement("button");
+      keyBtn.type = "button";
+      keyBtn.className = "btn kb-key";
+      keyBtn.textContent = comboToLabel(eff[action]);
+      keyBtn.addEventListener("click", () => captureKey(action, keyBtn));
+      row.append(name, keyBtn);
+      kbList.appendChild(row);
+    }
+  };
+  const captureKey = (action: Action, btn: HTMLButtonElement) => {
+    btn.textContent = "按下组合键…";
+    btn.classList.add("capturing");
+    const onKey = (ev: KeyboardEvent) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (ev.key === "Escape") {
+        cleanup();
+        renderKeybinds();
+        return;
+      }
+      // 纯修饰键不作为触发键，等待完整组合
+      if (["Control", "Alt", "Shift", "Meta"].includes(ev.key)) return;
+      const combo = eventToCombo(ev);
+      // 与默认相同则移除覆盖，否则记录覆盖
+      if (DEFAULT_KEYBINDINGS[action] === combo) delete kbOverrides[action];
+      else kbOverrides[action] = combo;
+      cleanup();
+      void updateSettings({ keybindings: kbOverrides });
+      renderKeybinds();
+    };
+    const cleanup = () => {
+      window.removeEventListener("keydown", onKey, true);
+      btn.classList.remove("capturing");
+    };
+    window.addEventListener("keydown", onKey, true);
+  };
+  renderKeybinds();
+  q<HTMLButtonElement>(".kb-reset").addEventListener("click", () => {
+    kbOverrides = {};
+    void updateSettings({ keybindings: {} });
+    renderKeybinds();
+  });
 
   // 当前选中主题 id（由色板卡片维护，切换主题仅 patch theme，不动透明度/模糊）
   let selectedThemeId = s.theme;
@@ -363,8 +450,16 @@ export function showSettingsDialog() {
       groupsEl.appendChild(groupLabel);
       const grid = document.createElement("div");
       grid.className = "theme-grid";
+      const custom = label === "自定义";
       for (const t of matched) {
-        grid.appendChild(makeThemeCard(t, t.id === selectedThemeId, () => selectTheme(t.id)));
+        const card = makeThemeCard(
+          t,
+          t.id === selectedThemeId,
+          () => selectTheme(t.id),
+          custom ? () => deleteTheme(t.id) : undefined,
+        );
+        card.dataset.themeId = t.id;
+        grid.appendChild(card);
       }
       groupsEl.appendChild(grid);
     }
@@ -374,6 +469,23 @@ export function showSettingsDialog() {
     selectedThemeId = id;
     // 仅切主题，opacity/blur/其它设置保持不变
     void updateSettings({ theme: id });
+    // 只切换选中态高亮，不重建整个卡片网格（避免每次点击闪烁/卡顿）
+    groupsEl.querySelectorAll(".theme-card").forEach((c) => {
+      c.classList.toggle("selected", (c as HTMLElement).dataset.themeId === id);
+    });
+    syncTitlebarUI();
+  };
+
+  const deleteTheme = (id: string) => {
+    const custom = getSettings().customThemes.filter((t) => t.id !== id);
+    // 若删的是当前主题，回落到其 base（暗/亮）默认主题
+    let theme = getSettings().theme;
+    if (theme === id) {
+      const removed = getSettings().customThemes.find((t) => t.id === id);
+      theme = removed?.base === "light" ? "light" : "dark";
+      selectedThemeId = theme;
+    }
+    void updateSettings({ customThemes: custom, theme });
     renderThemeGroups();
     syncTitlebarUI();
   };
@@ -399,13 +511,13 @@ export function showSettingsDialog() {
       fontFamily: input("fontFamily").value,
       cjkFontFamily: input("cjkFontFamily").value,
       fontSize: parseInt(input("fontSize").value, 10) || 14,
-      fontWeight: (overlay.querySelector('[name="fontWeight"]') as HTMLSelectElement).value,
+      fontWeight: fontWeightSel.getValue(),
       theme: selectedThemeId,
       titlebarColor: input("titlebarFollow").checked ? null : input("titlebarColor").value,
       opacity: parseFloat(input("opacity").value),
       blur: input("blur").checked,
-      newTabMode: (overlay.querySelector('[name="newTabMode"]') as HTMLSelectElement)
-        .value as "local" | "dialog",
+      blurAmount: parseFloat(input("blurAmount").value),
+      newTabMode: newTabModeSel.getValue() as "local" | "dialog",
       autoReconnect: input("autoReconnect").checked,
       copyOnSelect: input("copyOnSelect").checked,
       confirmOverwrite: input("confirmOverwrite").checked,
@@ -419,6 +531,12 @@ export function showSettingsDialog() {
   input("opacity").addEventListener("input", () => {
     q<HTMLElement>(".opacity-val").textContent =
       `${Math.round(parseFloat(input("opacity").value) * 100)}%`;
+  });
+  // 拖动即时预览：透明度/模糊立即应用，无需松手
+  input("opacity").addEventListener("input", commit);
+  input("blurAmount").addEventListener("input", () => {
+    q<HTMLElement>(".blur-val").textContent = `${Math.round(parseFloat(input("blurAmount").value))}px`;
+    commit();
   });
 
   // 基于当前主题新建自定义主题
@@ -450,8 +568,13 @@ export function showSettingsDialog() {
   });
 }
 
-/** 主题配色示例卡片：背景 + 前景示意文字 + 一排 ANSI 色板 */
-function makeThemeCard(theme: ThemeDef, selected: boolean, onClick: () => void): HTMLElement {
+/** 主题配色示例卡片：背景 + 前景示意文字 + 一排 ANSI 色板；自定义主题带删除按钮 */
+function makeThemeCard(
+  theme: ThemeDef,
+  selected: boolean,
+  onClick: () => void,
+  onDelete?: () => void,
+): HTMLElement {
   const c = theme.colors;
   const card = document.createElement("button");
   card.type = "button";
@@ -459,6 +582,18 @@ function makeThemeCard(theme: ThemeDef, selected: boolean, onClick: () => void):
   card.style.background = c.background ?? "#000";
   card.style.color = c.foreground ?? "#fff";
   card.title = theme.name;
+
+  if (onDelete) {
+    const del = document.createElement("span");
+    del.className = "tc-del";
+    del.textContent = "×";
+    del.title = "删除此自定义主题";
+    del.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onDelete();
+    });
+    card.appendChild(del);
+  }
 
   const preview = document.createElement("div");
   preview.className = "tc-preview";

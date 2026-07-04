@@ -87,6 +87,7 @@ impl ClientHandler {
         if let (Ok(path), Ok(json)) = (known_hosts_path(), serde_json::to_string_pretty(db)) {
             let tmp = path.with_extension("json.tmp");
             if std::fs::write(&tmp, json).is_ok() {
+                crate::settings::set_owner_only(&tmp); // 与其它配置文件一致：0600
                 let _ = std::fs::rename(&tmp, &path);
             }
         }
@@ -245,15 +246,20 @@ impl Connection {
                 match establish(&self.params).await {
                     Ok(h) => {
                         // establish 可能耗时数秒，期间用户可能已主动断开（ssh_disconnect
-                        // 置 auto_reconnect=false 并移出注册表）。若如此，立即优雅关闭这条
-                        // 新建的已认证会话，避免泄漏一个无人引用、无法断开的幽灵连接。
+                        // 置 auto_reconnect=false 并 take() 掉 handle）。为杜绝「检查通过后、
+                        // 写入 handle 前被 disconnect 插入」而泄漏幽灵连接，必须在**持有 handle
+                        // 锁的临界区内**完成「判 auto_reconnect + 写入」，与 disconnect 的
+                        // handle.lock().take() 互斥。
+                        let mut guard = self.handle.lock().await;
                         if !self.auto_reconnect.load(Ordering::SeqCst) {
+                            drop(guard);
                             let _ = h
                                 .disconnect(russh::Disconnect::ByApplication, "bye", "zh")
                                 .await;
                             break;
                         }
-                        *self.handle.lock().await = Some(h);
+                        *guard = Some(h);
+                        drop(guard);
                         *self.sftp.lock().await = None; // 旧 SFTP 会话随连接失效
                         let _ = app.emit(
                             "conn-state",

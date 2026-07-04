@@ -1,6 +1,63 @@
-/** 通用 UI 组件：上下文菜单、确认框、tooltip、文件预览、传输进度 */
+/** 通用 UI 组件：上下文菜单、确认框、tooltip、文件预览、传输进度、自定义下拉 */
 
 import type { FileMeta, Preview, TransferProgressEvent } from "./types";
+
+// ---------- 自定义下拉（替代原生 select，避免 webkit2gtk 白底弹出列表不跟随主题）----------
+
+export interface CustomSelect {
+  el: HTMLElement;
+  getValue(): string;
+  setValue(v: string): void;
+}
+
+export function customSelect(
+  options: Array<{ value: string; label: string }>,
+  initial: string,
+  onChange?: (value: string) => void,
+): CustomSelect {
+  let value = initial;
+  const el = document.createElement("button");
+  el.type = "button";
+  el.className = "cs";
+  const labelSpan = document.createElement("span");
+  labelSpan.className = "cs-label";
+  const caret = document.createElement("span");
+  caret.className = "cs-caret";
+  caret.textContent = "▾";
+  el.append(labelSpan, caret);
+
+  const labelOf = (v: string) => options.find((o) => o.value === v)?.label ?? v;
+  const render = () => (labelSpan.textContent = labelOf(value));
+  render();
+
+  el.addEventListener("click", (e) => {
+    e.stopPropagation();
+    // 复用上下文菜单样式呈现选项列表，定位在下拉框正下方
+    const rect = el.getBoundingClientRect();
+    showMenu(
+      rect.left,
+      rect.bottom + 2,
+      options.map((o) => ({
+        label: (o.value === value ? "✓ " : "  ") + o.label,
+        action: () => {
+          value = o.value;
+          render();
+          onChange?.(value);
+        },
+      })),
+      rect.width,
+    );
+  });
+
+  return {
+    el,
+    getValue: () => value,
+    setValue: (v: string) => {
+      value = v;
+      render();
+    },
+  };
+}
 
 // ---------- 上下文菜单 ----------
 
@@ -14,10 +71,11 @@ export interface MenuItem {
 
 let menuEl: HTMLElement | null = null;
 
-export function showMenu(x: number, y: number, items: MenuItem[]) {
+export function showMenu(x: number, y: number, items: MenuItem[], minWidth?: number) {
   hideMenu();
   menuEl = document.createElement("div");
   menuEl.className = "ctx-menu";
+  if (minWidth) menuEl.style.minWidth = `${minWidth}px`;
   for (const item of items) {
     if (item.separator) {
       const sep = document.createElement("div");

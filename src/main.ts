@@ -11,6 +11,7 @@ import { loadSettings, getSettings, onSettingsChange, activeTheme, fontStack } f
 import { TabManager, type Tab } from "./tabs";
 import { Pane } from "./pane";
 import { DND_MIME, Explorer } from "./explorer";
+import { type Action, matchAction, resolveBindings } from "./keybindings";
 import { showConnectDialog, showSettingsDialog } from "./dialogs";
 import {
   confirmDialog, confirmOverwriteDialog, formatSize, showFileTooltip, showMenu, showPreview,
@@ -54,6 +55,10 @@ async function bootstrap() {
       host: params.host,
       profileId,
     });
+  };
+  // 连接被回收（断开）时同步清除其元信息，避免 connMeta 随连接次数无界增长
+  tabs.onConnClosed = (connId) => {
+    connMeta.delete(connId);
   };
 
   const connectAndOpenTab = async (params: ConnParams, profileId: string | null = null) => {
@@ -127,8 +132,8 @@ async function bootstrap() {
     pane.onFocus = () => {
       tab.activePaneId = pane.id;
     };
-    pane.onSplitRequest = (dir) => void tabs.splitActive(dir, pane);
-    pane.onFocusNeighbor = (dir) => focusNeighbor(dir);
+    // 终端聚焦时的按键先经全局快捷键分发（命中则不透传给 shell）
+    pane.onAppKey = (e) => dispatchShortcut(e, pane);
     pane.onTooltip = showFileTooltip;
     pane.onPreview = async (path) => {
       if (pane.isLocal) return; // 本地终端无 SFTP，双击不预览
@@ -468,8 +473,9 @@ async function bootstrap() {
   const explorerPanel = document.getElementById("explorer-panel")!;
   const syncExplorerPanel = () => {
     const tab = tabs.active;
+    // 用 .open 类做滑入/滑出动画（面板常驻 DOM，不用 display 切换以免动画失效）
     if (!tab || !tab.explorerOpen) {
-      explorerPanel.style.display = "none";
+      explorerPanel.classList.remove("open");
       return;
     }
     if (!tab.explorer) {
@@ -480,14 +486,15 @@ async function bootstrap() {
       explorerPanel.textContent = "";
       explorerPanel.appendChild(tab.explorer.element);
     }
-    explorerPanel.style.display = "";
+    explorerPanel.classList.add("open");
     void tab.explorer.init();
   };
   // 会话快照：每个标签页取其首个 pane 的连接来源（连接项 id，不含机密），防抖写入 session.json。
   // 恢复期间 restoring=true 时跳过，避免在标签页尚未全部重建时把会话写成半截而丢失。
   let restoring = false;
   const snapshotSession = () => {
-    if (restoring) return;
+    // 未开启「记住最后的会话」时不写盘：既避免无谓写入，也不覆盖上次保存的会话
+    if (restoring || !getSettings().restoreSession) return;
     const snap = tabs.tabs.map((tab) => {
       const first = tab.layout.panes()[0];
       const info = first ? connMeta.get(first.connId) : undefined;
@@ -601,46 +608,48 @@ async function bootstrap() {
     }
   };
 
-  // ---------- 快捷键 ----------
+  // ---------- 快捷键（统一分发）----------
+
+  const runAction = (action: Action, pane?: Pane) => {
+    const tab = tabs.active;
+    const p = pane ?? tabs.activePane();
+    switch (action) {
+      case "newTab": tabs.onNewTabRequest?.(); break;
+      case "splitRight": if (tab && p) void tabs.splitActive("row", p); break;
+      case "splitDown": if (tab && p) void tabs.splitActive("col", p); break;
+      case "closePane": if (tab && p) void requestClosePane(tab, p); break;
+      case "cycleTab": case "nextTab": tabs.switchTabBy(1); break;
+      case "prevTab": tabs.switchTabBy(-1); break;
+      case "focusLeft": focusNeighbor("left"); break;
+      case "focusRight": focusNeighbor("right"); break;
+      case "focusUp": focusNeighbor("up"); break;
+      case "focusDown": focusNeighbor("down"); break;
+      case "copy": {
+        const sel = p?.term.getSelection();
+        if (p && sel) void p.copyText(sel);
+        break;
+      }
+      case "paste": void p?.pasteFromClipboard(); break;
+    }
+  };
+
+  /** 命中快捷键则执行并阻止默认；返回是否命中。终端聚焦时由 pane.onAppKey 调用，
+   *  其它场合由 window 兜底。 */
+  const dispatchShortcut = (e: KeyboardEvent, pane?: Pane): boolean => {
+    const action = matchAction(e, resolveBindings(getSettings().keybindings));
+    if (!action) return false;
+    e.preventDefault();
+    runAction(action, pane);
+    return true;
+  };
 
   window.addEventListener("keydown", (e) => {
-    // Alt+方向键：切换分屏焦点（焦点在终端内时由 xterm 自定义键处理器拦截，这里兜底焦点在外）
-    if (e.altKey && !e.ctrlKey && !e.shiftKey) {
-      const map: Record<string, "left" | "right" | "up" | "down"> = {
-        ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down",
-      };
-      const dir = map[e.code];
-      if (dir) {
-        e.preventDefault();
-        focusNeighbor(dir);
-        return;
-      }
-    }
-    // Ctrl+Alt+R / D：切分（终端焦点内由 xterm 自定义键处理器拦截，这里覆盖焦点在外的情况）
-    if (e.ctrlKey && e.altKey && !e.shiftKey) {
-      if (e.code === "KeyR") {
-        e.preventDefault();
-        void tabs.splitActive("row");
-      } else if (e.code === "KeyD") {
-        e.preventDefault();
-        void tabs.splitActive("col");
-      }
-      return;
-    }
-    if (!e.ctrlKey || !e.shiftKey) return;
-    switch (e.code) {
-      case "KeyT":
-        e.preventDefault();
-        tabs.onNewTabRequest?.();
-        break;
-      case "KeyW": {
-        e.preventDefault();
-        const tab = tabs.active;
-        const pane = tabs.activePane();
-        if (tab && pane) void requestClosePane(tab, pane);
-        break;
-      }
-    }
+    const el = document.activeElement as HTMLElement | null;
+    // 终端聚焦：已由 pane.onAppKey 处理，避免重复触发
+    if (el?.closest?.(".pane")) return;
+    // 表单/弹窗聚焦：保留原生行为（如 Tab 在字段间移动），不触发全局快捷键
+    if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.closest(".modal"))) return;
+    dispatchShortcut(e);
   });
 
   // 启动：若开启「记住最后的会话」则恢复上次的标签页并自动连接；否则开一个本地终端。

@@ -69,6 +69,47 @@ npx tauri build    # 打包，产物在 src-tauri/target/release/bundle/
 
 注意：桌面安装包不支持交叉编译——Windows 包必须在 Windows 上构建、macOS 包必须在 macOS 上构建，这正是方式一的价值。
 
+## 故障排查
+
+### AppImage 无法运行 / 提示二进制不完整
+
+AppImage 的启动器依赖 **FUSE 2（libfuse.so.2）**；较新的发行版（Ubuntu 22.04+、Fedora 等）默认只装
+FUSE 3，导致 AppImage 启动失败，报错常被显示为"二进制文件不完整/无法执行"之类。三种解法任选其一：
+
+```bash
+# A. 免 FUSE 直接解压运行（最省事）
+./HetuShell_0.1.0_amd64.AppImage --appimage-extract-and-run
+
+# B. 安装 FUSE 2
+sudo apt install libfuse2        # Debian/Ubuntu
+sudo dnf install fuse-libs       # Fedora
+
+# C. 直接用 deb / rpm（不依赖 FUSE，推荐）
+sudo dpkg -i HetuShell_0.1.0_amd64.deb
+```
+
+若怀疑文件在传输中被截断，可校验（构建时会随产物给出 sha256）：
+`sha256sum HetuShell_0.1.0_amd64.AppImage`。AppImage 是有效文件的话，前 12 字节为
+`7f454c46 02010100 41490200`（ELF 头 + AppImage type-2 魔数 `AI\x02`）。
+
+### 界面渲染异常（花屏 / 空白 / 卡顿）
+
+Linux 上 HetuShell 使用系统自带的 **WebKitGTK**（Tauri/WRY 的机制，见下）。个别显卡/驱动组合下
+可尝试禁用合成或 DMA-BUF 渲染：
+
+```bash
+WEBKIT_DISABLE_DMABUF_RENDERER=1 ./HetuShell        # 常见花屏修复
+WEBKIT_DISABLE_COMPOSITING_MODE=1 ./HetuShell
+```
+
+### 关于「自选 WebView 内核」
+
+Tauri（底层 WRY）刻意复用**操作系统自带的 WebView**——Linux 用 WebKitGTK、Windows 用 WebView2、
+macOS 用 WKWebView——以换取几 MB 的极小体积。因此 Linux 上**不能像 Electron 那样内置 Chromium**；
+可控的只是所用 WebKitGTK 的版本（升级系统的 `webkit2gtk-4.1` 即可获得更新的内核）。若确实需要
+统一的 Chromium 内核，只能改用 Electron/CEF 技术栈重构，会牺牲体积优势。Servo/Verso 作为 WRY 的
+实验性后端仍不成熟，暂不适合生产。
+
 配置保存在每个用户各自的配置目录 `hetushell/` 下（Linux: `~/.config/hetushell/`，
 macOS: `~/Library/Application Support/hetushell/`，Windows: `%APPDATA%\hetushell\`），按用途分文件：
 - `settings.json` — 界面与行为偏好

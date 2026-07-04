@@ -50,10 +50,8 @@ export class Pane {
   private disposed = false;
 
   onFocus: (() => void) | null = null;
-  /** 请求以本 pane 为目标切分（row=左右两个，col=上下两个） */
-  onSplitRequest: ((dir: "row" | "col") => void) | null = null;
-  /** 请求把焦点移到相邻分屏（Alt+方向键） */
-  onFocusNeighbor: ((dir: "left" | "right" | "up" | "down") => void) | null = null;
+  /** 全局快捷键分发：返回 true 表示已处理（不透传给 shell） */
+  onAppKey: ((e: KeyboardEvent) => boolean) | null = null;
   onPreview: ((path: string) => void) | null = null;
   onTooltip: ((meta: FileMeta | null, x: number, y: number) => void) | null = null;
   onContextMenu: ((e: MouseEvent, word: string | null) => void) | null = null;
@@ -104,46 +102,11 @@ export class Pane {
       if (sel && getSettings().copyOnSelect) void this.copyText(sel);
     });
 
-    // 快捷键拦截（返回 false 阻止按键透传给远端 shell）：
-    // Ctrl+Shift+C/V 复制粘贴；Ctrl+Alt+R 向右切分、Ctrl+Alt+D 向下切分
+    // 快捷键拦截：命中全局快捷键则返回 false，阻止按键透传给远端 shell（也防止终端聚焦
+    // 时窗口监听重复触发——快捷键统一由这里在终端聚焦时处理，窗口监听仅兜底焦点在外）。
     this.term.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
-      if (e.ctrlKey && e.shiftKey && !e.altKey) {
-        if (e.code === "KeyC") {
-          const sel = this.term.getSelection();
-          if (sel) void this.copyText(sel);
-          return false;
-        }
-        if (e.code === "KeyV") {
-          void this.pasteFromClipboard();
-          return false;
-        }
-      }
-      if (e.ctrlKey && e.altKey && !e.shiftKey) {
-        if (e.code === "KeyR") {
-          this.onSplitRequest?.("row");
-          return false;
-        }
-        if (e.code === "KeyD") {
-          this.onSplitRequest?.("col");
-          return false;
-        }
-      }
-      // Alt+方向键：切换分屏焦点（拦截，避免透传成 shell 的按词移动）
-      if (e.altKey && !e.ctrlKey && !e.shiftKey) {
-        const map: Record<string, "left" | "right" | "up" | "down"> = {
-          ArrowLeft: "left",
-          ArrowRight: "right",
-          ArrowUp: "up",
-          ArrowDown: "down",
-        };
-        const dir = map[e.code];
-        if (dir) {
-          this.onFocusNeighbor?.(dir);
-          return false;
-        }
-      }
-      return true;
+      return this.onAppKey?.(e) ? false : true;
     });
 
     this.element.addEventListener("mousedown", () => this.onFocus?.());

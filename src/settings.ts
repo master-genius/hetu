@@ -41,7 +41,7 @@ export function fontStack(): string {
 
 function applySettings() {
   const s = getSettings();
-  applyThemeToUI(activeTheme(), s.opacity, s.blur, s.titlebarColor);
+  applyThemeToUI(activeTheme(), s.opacity, s.blur, s.blurAmount, s.titlebarColor);
   document.documentElement.style.setProperty("--ui-font", fontStack());
   for (const fn of listeners) fn(s);
 }
