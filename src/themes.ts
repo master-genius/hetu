@@ -233,6 +233,30 @@ export function allThemes(custom: ThemeDef[]): ThemeDef[] {
 }
 
 /** 主题色应用到 UI 层 CSS 变量。titlebarColor 为空时标题栏跟随主题背景色。 */
+/**
+ * 磨砂颗粒贴图：运行时 Canvas 生成的**纯白噪声**（逐像素独立随机灰度）。
+ * 白噪声无低频结构，平铺天然无缝、不会出现 SVG feTurbulence 分形噪声那种
+ * 低频斑块拼接感（"一块块亮砖"）。只生成一次，以 data URL 写入 CSS 变量。
+ */
+let frostNoise: string | null = null;
+function frostNoiseUrl(): string {
+  if (frostNoise) return frostNoise;
+  const size = 128;
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const ctx = c.getContext("2d");
+  if (!ctx) return (frostNoise = "none");
+  const img = ctx.createImageData(size, size);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = (Math.random() * 255) | 0;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+    img.data[i + 3] = 13; // ≈5% 透明度：只留质感，不动对比度
+  }
+  ctx.putImageData(img, 0, 0);
+  frostNoise = `url(${c.toDataURL("image/png")})`;
+  return frostNoise;
+}
+
 export function applyThemeToUI(
   theme: ThemeDef,
   opacity: number,
@@ -257,8 +281,10 @@ export function applyThemeToUI(
   const px = Math.max(0, Math.round(blurAmount));
   root.style.setProperty("--blur", blur && px > 0 ? `blur(${px}px) saturate(1.3)` : "none");
   // 磨砂质感层开关（styles.css 的 #app::before）：桌面级真模糊在网页内不可得，
-  // 开启毛玻璃时用噪点+光泽模拟磨砂玻璃观感
-  root.dataset.blur = blur && px > 0 ? "1" : "0";
+  // 开启毛玻璃时叠加均匀白噪声颗粒模拟磨砂材质（贴图运行时生成，见 frostNoiseUrl）
+  const frosted = blur && px > 0;
+  root.dataset.blur = frosted ? "1" : "0";
+  if (frosted) root.style.setProperty("--frost-noise", frostNoiseUrl());
 }
 
 export function hexToRgba(hex: string, alpha: number): string {
