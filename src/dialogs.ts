@@ -387,6 +387,9 @@ export function showSettingsDialog() {
           <label class="check"><input name="blur" type="checkbox"> 毛玻璃虚化（透明时仍保持终端内容清晰）</label>
           <label>模糊程度 <span class="blur-val"></span>
             <input name="blurAmount" type="range" min="0" max="100" step="1"></label>
+          <label class="check"><input name="frosted" type="checkbox"> 磨砂质感（同色系细颗粒，独立于毛玻璃）</label>
+          <label>磨砂程度 <span class="frost-val"></span>
+            <input name="frostStrength" type="range" min="0" max="100" step="1"></label>
           <div class="settings-field">
             <span>界面圆角</span>
             <div class="radius-picker"></div>
@@ -442,6 +445,9 @@ export function showSettingsDialog() {
   input("blur").checked = s.blur;
   input("blurAmount").value = String(s.blurAmount);
   q<HTMLElement>(".blur-val").textContent = `${Math.round(s.blurAmount)}px`;
+  input("frosted").checked = s.frosted;
+  input("frostStrength").value = String(s.frostStrength);
+  q<HTMLElement>(".frost-val").textContent = `${s.frostStrength}%`;
   input("autoReconnect").checked = s.autoReconnect;
   input("copyOnSelect").checked = s.copyOnSelect;
   input("showScrollbar").checked = s.showScrollbar;
@@ -706,6 +712,8 @@ export function showSettingsDialog() {
       opacity: parseFloat(input("opacity").value),
       blur: input("blur").checked,
       blurAmount: parseFloat(input("blurAmount").value),
+      frosted: input("frosted").checked,
+      frostStrength: parseInt(input("frostStrength").value, 10) || 0,
       newTabMode: newTabModeSel.getValue() as "local" | "dialog",
       autoReconnect: input("autoReconnect").checked,
       copyOnSelect: input("copyOnSelect").checked,
@@ -733,6 +741,11 @@ export function showSettingsDialog() {
   input("opacity").addEventListener("input", commit);
   input("blurAmount").addEventListener("input", () => {
     q<HTMLElement>(".blur-val").textContent = `${Math.round(parseFloat(input("blurAmount").value))}px`;
+    commit();
+  });
+  // 磨砂程度拖动即时预览（贴图按 (背景色, alpha) 缓存，重生成开销可忽略）
+  input("frostStrength").addEventListener("input", () => {
+    q<HTMLElement>(".frost-val").textContent = `${input("frostStrength").value}%`;
     commit();
   });
 

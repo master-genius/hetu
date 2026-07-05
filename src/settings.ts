@@ -1,7 +1,7 @@
 /** 设置存取 + 应用（字体/主题/透明度）到 UI 与所有终端 */
 
 import { api } from "./ipc";
-import { applyThemeToUI, resolveTheme } from "./themes";
+import { applyThemeToUI, frostNoiseUrl, resolveTheme } from "./themes";
 import type { Settings, ThemeDef } from "./types";
 
 let current: Settings | null = null;
@@ -58,5 +58,14 @@ function applySettings() {
   // 文件面板列表字号：跟随终端字号自动取「小一号」，钳制在 [11, 19]，不提供独立选项
   const exSize = Math.min(19, Math.max(11, s.fontSize - 1));
   root.style.setProperty("--ex-font-size", `${exSize}px`);
+  // 磨砂质感：独立于毛玻璃的表面颗粒层（同色系噪点，随主题背景取色）。
+  // 程度 0–100 → 贴图 alpha 0–45（上限 ≈18% 透明度）
+  const frosted = s.frosted && s.frostStrength > 0;
+  root.dataset.frost = frosted ? "1" : "0";
+  if (frosted) {
+    const bg = activeTheme().colors.background ?? "#10151c";
+    const alpha = Math.round(Math.min(100, Math.max(0, s.frostStrength)) * 0.45);
+    root.style.setProperty("--frost-noise", frostNoiseUrl(bg, alpha));
+  }
   for (const fn of listeners) fn(s);
 }

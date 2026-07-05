@@ -183,6 +183,11 @@ export class Explorer {
       void this.load();
     });
 
+    // 点击列表空白处（含底部预留空白区）取消选择
+    this.listEl.addEventListener("click", (e) => {
+      if (e.target === this.listEl) this.clearSelection();
+    });
+
     // 键盘导航：↑/↓ 移动选中，Enter 打开选中的目录（本地/远程一致）
     this.listEl.tabIndex = 0;
     this.listEl.addEventListener("keydown", (e) => {
@@ -303,7 +308,7 @@ export class Explorer {
     this.listEl.textContent = "";
     this.entries = entries;
     this.rowEls = [];
-    this.selIdx = -1; // 换目录/刷新后清空选中
+    this.selIdx = -1; // 换目录/刷新后清空选中（行元素已随列表清空，无需摘类）
     entries.forEach((entry, i) => {
       const row = this.renderRow(entry, i);
       this.rowEls.push(row);
@@ -312,6 +317,12 @@ export class Explorer {
     if (entries.length === 0) {
       this.listEl.innerHTML = `<p class="hint" style="padding:12px">（空目录）</p>`;
     }
+  }
+
+  /** 取消选择（点击空白处 / 主动清理） */
+  private clearSelection(): void {
+    if (this.selIdx >= 0) this.rowEls[this.selIdx]?.classList.remove("selected");
+    this.selIdx = -1;
   }
 
   /** 选中某行：背景条高亮 + 滚动到可视区（点击与方向键共用） */

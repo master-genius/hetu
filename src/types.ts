@@ -39,6 +39,10 @@ export interface Settings {
   blur: boolean;
   /** 毛玻璃模糊程度（px） */
   blurAmount: number;
+  /** 磨砂质感：独立于毛玻璃的表面颗粒层（同色系噪点） */
+  frosted: boolean;
+  /** 磨砂程度 0–100（映射颗粒透明度） */
+  frostStrength: number;
   /** 圆角级别 */
   cornerRadius: "square" | "xs" | "sm" | "md" | "lg";
   /** 标签页平分横向宽度 */

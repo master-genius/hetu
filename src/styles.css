@@ -136,14 +136,12 @@ body {
 }
 
 /*
- * 磨砂质感层：桌面级真模糊在网页内不可得（backdrop-filter 只能模糊页面内更底层
- * 的内容，#app 背后是窗口外的桌面）。开启毛玻璃时叠加一层**均匀的白噪声细颗粒**
- * （themes.ts 运行时 Canvas 生成，写入 --frost-noise）模拟磨砂材质。
- * 只用无低频结构的白噪声、不加任何光泽/柔光渐变——保证整窗质感均匀一致，
- * 不会出现分形噪声平铺的斑块（"亮砖"）或渐变造成的局部亮区。
- * 强度 ≈5%，不影响终端文字对比度；关闭毛玻璃则整层不渲染。
+ * 磨砂质感层：独立设置项（开关 + 程度），与毛玻璃模糊解耦。
+ * 均匀白噪声细颗粒（themes.ts 运行时 Canvas 生成，写入 --frost-noise），
+ * 颗粒围绕主题背景色取同色系抖动——暗色主题跟随暗色，不会发亮。
+ * 无低频结构 → 平铺无缝、整窗质感均匀；关闭则整层不渲染。
  */
-:root[data-blur="1"] #app::before {
+:root[data-frost="1"] #app::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -152,6 +150,28 @@ body {
   border-radius: inherit;
   background-image: var(--frost-noise, none);
   background-size: 128px 128px;
+}
+
+/*
+ * 玻璃内容层（终端背景真模糊）：backdrop-filter 够不到窗口外的桌面，
+ * 所以自己垫「被模糊的内容」——几团主题同色系的柔和色斑，再用真 CSS blur 糊化。
+ * 观感即「磨砂玻璃后有朦胧的光影」。层级 -2：在磨砂颗粒(-1)与所有内容之下、
+ * #app 半透明底色之上；剩余透明度仍透出桌面，与整窗透明不冲突。
+ * 跟随「毛玻璃虚化」开关与「模糊程度」滑杆（--glass-blur）。
+ */
+:root[data-glass="1"] #app::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  border-radius: inherit;
+  filter: blur(var(--glass-blur, 40px));
+  background:
+    radial-gradient(42% 38% at 18% 20%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 70%),
+    radial-gradient(50% 44% at 84% 10%, color-mix(in srgb, var(--term-fg) 11%, transparent), transparent 70%),
+    radial-gradient(46% 42% at 72% 86%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%),
+    radial-gradient(38% 34% at 10% 80%, color-mix(in srgb, var(--term-fg) 8%, transparent), transparent 70%);
 }
 
 /* 仅一个标签页时不显示标签栏（由 JS 切换 .single 类） */
@@ -471,7 +491,7 @@ body {
 
 /* Ctrl+拖远端文件到本地终端时，整块 pane 高亮，提示"释放即下载到此终端目录" */
 .pane.dl-drop-target {
-  outline: 2px dashed var(--accent);
+  outline: 1.7px dashed var(--accent); /* 2px 的 85%：更细的提示框 */
   outline-offset: -3px;
 }
 
@@ -641,7 +661,8 @@ body {
 .ex-list {
   flex: 1;
   overflow-y: auto;
-  padding: 4px;
+  /* 底部恒留约两行高度的空白：给「拖到当前目录」与「点空白取消选择」留操作区 */
+  padding: 4px 4px calc((var(--ex-font-size) + 15px) * 2);
 }
 
 /* 刷新按钮：点击时仅内部图标转一圈（不转按钮方块），动画结束由 JS 移除类 */
@@ -768,7 +789,7 @@ body {
   align-items: center;
   justify-content: center;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
-  border: 2px dashed var(--accent);
+  border: 1.7px dashed var(--accent); /* 与 dl-drop-target 同款细化 */
   border-radius: var(--radius);
   z-index: 90;
   pointer-events: none;

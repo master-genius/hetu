@@ -234,30 +234,44 @@ export function allThemes(custom: ThemeDef[]): ThemeDef[] {
 
 /** 主题色应用到 UI 层 CSS 变量。titlebarColor 为空时标题栏跟随主题背景色。 */
 /**
- * 磨砂颗粒贴图：运行时 Canvas 生成的**纯白噪声**（逐像素独立随机灰度）。
- * 白噪声无低频结构，平铺天然无缝、不会出现 SVG feTurbulence 分形噪声那种
- * 低频斑块拼接感（"一块块亮砖"）。只生成一次，以 data URL 写入 CSS 变量。
+ * 磨砂颗粒贴图：运行时 Canvas 生成的白噪声（逐像素独立随机，无低频结构，
+ * 平铺天然无缝，不会出现分形噪声那种斑块拼接感）。
+ *
+ * 颗粒**同色系**：每个像素围绕主题背景色小幅抖动（±26/通道）——暗色主题出
+ * 深色系颗粒、亮色主题出浅色系颗粒，绝不会在暗底上冒出发亮的灰白点。
+ * alpha 由「磨砂程度」设置换算而来。按 (背景色, alpha) 缓存，换主题/调程度
+ * 时才重新生成。
  */
-let frostNoise: string | null = null;
-function frostNoiseUrl(): string {
-  if (frostNoise) return frostNoise;
+const frostCache = new Map<string, string>();
+export function frostNoiseUrl(bg: string, alpha: number): string {
+  const key = `${bg}:${alpha}`;
+  const hit = frostCache.get(key);
+  if (hit) return hit;
+  const m = bg.replace("#", "");
+  const br = parseInt(m.slice(0, 2), 16) || 0;
+  const bgc = parseInt(m.slice(2, 4), 16) || 0;
+  const bb = parseInt(m.slice(4, 6), 16) || 0;
   // 256×256 贴图以 128px 显示（styles.css background-size）：每个噪点仅占
-  // 0.5 CSS 像素，亚像素颗粒经渲染滤波互相平均 → 更细密、整体更平滑的哑光面；
-  // HiDPI（DPR 2）下恰好 1 噪点对齐 1 物理像素。
+  // 0.5 CSS 像素，亚像素滤波互相平均 → 细密平滑的哑光面；DPR 2 下对齐物理像素。
   const size = 256;
   const c = document.createElement("canvas");
   c.width = c.height = size;
   const ctx = c.getContext("2d");
-  if (!ctx) return (frostNoise = "none");
+  if (!ctx) return "none";
   const img = ctx.createImageData(size, size);
+  const clamp = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : v | 0);
   for (let i = 0; i < img.data.length; i += 4) {
-    const v = (Math.random() * 255) | 0;
-    img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
-    img.data[i + 3] = 9; // ≈3.5% 透明度：配合亚像素密度，质感更接近均匀哑光
+    const j = (Math.random() * 2 - 1) * 26; // 同一像素三通道同步抖动，保持同色系
+    img.data[i] = clamp(br + j);
+    img.data[i + 1] = clamp(bgc + j);
+    img.data[i + 2] = clamp(bb + j);
+    img.data[i + 3] = alpha;
   }
   ctx.putImageData(img, 0, 0);
-  frostNoise = `url(${c.toDataURL("image/png")})`;
-  return frostNoise;
+  const url = `url(${c.toDataURL("image/png")})`;
+  frostCache.clear(); // 只保留当前一张，避免反复调滑杆时累积 data URL
+  frostCache.set(key, url);
+  return url;
 }
 
 export function applyThemeToUI(
@@ -283,11 +297,11 @@ export function applyThemeToUI(
   root.style.setProperty("--titlebar-rgba", hexToRgba(titlebarColor || bg, chromeAlpha));
   const px = Math.max(0, Math.round(blurAmount));
   root.style.setProperty("--blur", blur && px > 0 ? `blur(${px}px) saturate(1.3)` : "none");
-  // 磨砂质感层开关（styles.css 的 #app::before）：桌面级真模糊在网页内不可得，
-  // 开启毛玻璃时叠加均匀白噪声颗粒模拟磨砂材质（贴图运行时生成，见 frostNoiseUrl）
-  const frosted = blur && px > 0;
-  root.dataset.blur = frosted ? "1" : "0";
-  if (frosted) root.style.setProperty("--frost-noise", frostNoiseUrl());
+  // 磨砂质感已独立为单独设置（frosted/frostStrength），由 settings.ts 应用
+  // 终端背景真模糊（#app::after 玻璃内容层）：桌面像素拿不到，改为自己垫一层
+  // 主题派生的色斑内容并对它做真 CSS 模糊——「模糊程度」滑杆同时控制其柔度
+  root.dataset.glass = blur && px > 0 ? "1" : "0";
+  root.style.setProperty("--glass-blur", `${Math.min(80, Math.max(24, px * 1.2))}px`);
 }
 
 export function hexToRgba(hex: string, alpha: number): string {
