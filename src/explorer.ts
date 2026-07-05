@@ -133,6 +133,10 @@ export class Explorer {
   private viewBtn: HTMLButtonElement;
   private view: ViewMode;
   private initialized = false;
+  /** 当前目录条目与对应行元素（顺序一致），支撑选中态与键盘导航 */
+  private entries: FsEntry[] = [];
+  private rowEls: HTMLElement[] = [];
+  private selIdx = -1;
 
   constructor(backend: ExplorerBackend) {
     this.backend = backend;
@@ -169,7 +173,38 @@ export class Explorer {
     this.element.querySelector(".ex-up")!.addEventListener("click", () => {
       void this.navigate(parentDir(this.cwd));
     });
-    this.element.querySelector(".ex-refresh")!.addEventListener("click", () => void this.load());
+    // 刷新：图标转一圈作为「已处理」反馈（动画结束移除类，下次点击可重播）
+    const refreshBtn = this.element.querySelector(".ex-refresh") as HTMLButtonElement;
+    refreshBtn.addEventListener("animationend", () => refreshBtn.classList.remove("spin"));
+    refreshBtn.addEventListener("click", () => {
+      refreshBtn.classList.remove("spin");
+      void refreshBtn.offsetWidth; // 强制 reflow，保证连续点击也能重启动画
+      refreshBtn.classList.add("spin");
+      void this.load();
+    });
+
+    // 键盘导航：↑/↓ 移动选中，Enter 打开选中的目录（本地/远程一致）
+    this.listEl.tabIndex = 0;
+    this.listEl.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault(); // 防止列表容器自身滚动，滚动交给 scrollIntoView
+        if (!this.rowEls.length) return;
+        const delta = e.key === "ArrowDown" ? 1 : -1;
+        const next =
+          this.selIdx < 0
+            ? delta > 0
+              ? 0
+              : this.rowEls.length - 1
+            : Math.min(this.rowEls.length - 1, Math.max(0, this.selIdx + delta));
+        this.select(next);
+      } else if (e.key === "Enter") {
+        const entry = this.entries[this.selIdx];
+        if (entry?.isDir) {
+          e.preventDefault();
+          void this.navigate(entry.path);
+        }
+      }
+    });
     this.viewBtn.addEventListener("click", () => {
       this.view = this.view === "list" ? "tiles" : "list";
       localStorage.setItem(VIEW_KEY, this.view);
@@ -266,15 +301,30 @@ export class Explorer {
     const entries = await this.backend.list(this.cwd);
     this.pathInput.value = this.cwd;
     this.listEl.textContent = "";
-    for (const entry of entries) {
-      this.listEl.appendChild(this.renderRow(entry));
-    }
+    this.entries = entries;
+    this.rowEls = [];
+    this.selIdx = -1; // 换目录/刷新后清空选中
+    entries.forEach((entry, i) => {
+      const row = this.renderRow(entry, i);
+      this.rowEls.push(row);
+      this.listEl.appendChild(row);
+    });
     if (entries.length === 0) {
       this.listEl.innerHTML = `<p class="hint" style="padding:12px">（空目录）</p>`;
     }
   }
 
-  private renderRow(entry: FsEntry): HTMLElement {
+  /** 选中某行：背景条高亮 + 滚动到可视区（点击与方向键共用） */
+  private select(idx: number): void {
+    if (idx < 0 || idx >= this.rowEls.length) return;
+    if (this.selIdx >= 0) this.rowEls[this.selIdx]?.classList.remove("selected");
+    this.selIdx = idx;
+    const row = this.rowEls[idx];
+    row.classList.add("selected");
+    row.scrollIntoView({ block: "nearest" });
+  }
+
+  private renderRow(entry: FsEntry, idx: number): HTMLElement {
     const row = document.createElement("div");
     row.className = "ex-row";
     row.draggable = true;
@@ -288,6 +338,11 @@ export class Explorer {
     row.title = entry.path;
     if (entry.isDir) row.dataset.dir = entry.path; // 拖入时作为目标目录
 
+    // 单击选中（并让列表获得焦点，方向键随即可用）；双击才进入目录
+    row.addEventListener("click", () => {
+      this.select(idx);
+      this.listEl.focus();
+    });
     row.addEventListener("dblclick", () => {
       if (entry.isDir) void this.navigate(entry.path);
     });
@@ -314,6 +369,7 @@ export class Explorer {
     row.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       e.stopPropagation();
+      this.select(idx); // 右键也建立选中，菜单操作对象一目了然
       const items =
         this.backend.kind === "local"
           ? [

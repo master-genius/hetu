@@ -644,6 +644,20 @@ body {
   padding: 4px;
 }
 
+/* 刷新按钮：点击转一圈，作为「已处理」的反馈（动画结束由 JS 移除类） */
+.ex-refresh.spin {
+  animation: ex-spin 0.55s ease;
+}
+
+@keyframes ex-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .ex-row {
   display: grid;
   grid-template-columns: 22px 1fr 72px 84px;
@@ -655,8 +669,18 @@ body {
   cursor: default;
 }
 
+.ex-list:focus {
+  outline: none; /* 焦点用于键盘导航，选中行的背景条即视觉反馈，不再画外框 */
+}
+
 .ex-row:hover {
   background: color-mix(in srgb, var(--term-fg) 7%, transparent);
+}
+
+/* 选中行：强调色背景条（点击或方向键选中；Enter 打开目录） */
+.ex-row.selected,
+.ex-row.selected:hover {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
 }
 
 .ex-row.dragging {
