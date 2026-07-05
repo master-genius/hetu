@@ -152,7 +152,14 @@ async fn pane_open(
         .panes
         .lock()
         .await
-        .insert(pane_id.clone(), PaneCtl { tx, conn_id })
+        .insert(
+            pane_id.clone(),
+            PaneCtl {
+                tx,
+                conn_id,
+                local_pid: None,
+            },
+        )
     {
         let _ = old.tx.send(PaneCmd::Close);
     }
@@ -180,15 +187,38 @@ async fn pane_open_local(
         PaneCtl {
             tx,
             conn_id: "local".into(),
+            local_pid: None,
         },
     ) {
         let _ = old.tx.send(PaneCmd::Close);
     }
-    if let Err(e) = local::open(app, pane_id.clone(), cols, rows, rx) {
-        state.panes.lock().await.remove(&pane_id);
-        return Err(e);
+    match local::open(app, pane_id.clone(), cols, rows, rx) {
+        // 启动成功后回填 shell PID，供 local_cwd 读实时工作目录
+        Ok(pid) => {
+            if let Some(ctl) = state.panes.lock().await.get_mut(&pane_id) {
+                ctl.local_pid = pid;
+            }
+            Ok(())
+        }
+        Err(e) => {
+            state.panes.lock().await.remove(&pane_id);
+            Err(e)
+        }
     }
-    Ok(())
+}
+
+/// 读取本地终端 pane 的实时工作目录（经其 shell 的 /proc/<pid>/cwd）。
+/// 用于「Ctrl+拖远端文件到本地终端」时确定下载落点。
+#[tauri::command]
+async fn local_cwd(state: State<'_>, pane_id: String) -> Result<String> {
+    let pid = {
+        let panes = state.panes.lock().await;
+        panes
+            .get(&pane_id)
+            .and_then(|c| c.local_pid)
+            .ok_or_else(|| Error::msg("本地终端未就绪"))?
+    };
+    local::cwd(pid)
 }
 
 #[tauri::command]
@@ -470,6 +500,7 @@ pub fn run() {
             list_fonts,
             local_list,
             local_home,
+            local_cwd,
             read_key_file,
         ])
         .run(tauri::generate_context!())

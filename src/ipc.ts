@@ -58,6 +58,8 @@ export const api = {
   listFonts: () => invoke<string[]>("list_fonts"),
   localList: (dir: string) => invoke<LocalEntry[]>("local_list", { dir }),
   localHome: () => invoke<string>("local_home"),
+  /** 本地终端 pane 的实时工作目录（经其 shell 的 /proc/<pid>/cwd） */
+  localCwd: (paneId: string) => invoke<string>("local_cwd", { paneId }),
   readKeyFile: (path: string) => invoke<string>("read_key_file", { path }),
 };
 

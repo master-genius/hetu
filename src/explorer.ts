@@ -122,6 +122,8 @@ export class Explorer {
     | null = null;
   /** [remote] 请求把本地文件上传到本连接的某远端目录（本地条目拖入时触发） */
   onUploadHere: ((localPaths: string[], remoteDir: string) => void) | null = null;
+  /** 请求关闭本面板（标题栏 ✕，等价于顶部对应图标的关闭） */
+  onClose: (() => void) | null = null;
   private listEl: HTMLElement;
   private pathInput: HTMLInputElement;
   private titleEl: HTMLElement;
@@ -139,7 +141,10 @@ export class Explorer {
         ? "拖条目到终端/远程面板上传；从终端 Ctrl+拖文件到这里下载；右键更多操作"
         : "拖条目到本地面板下载；把本地条目拖到这里上传；右键更多操作";
     this.element.innerHTML = `
-      <div class="ex-title"></div>
+      <div class="ex-title">
+        <span class="ex-title-text"></span>
+        <button class="ex-close" title="关闭面板">✕</button>
+      </div>
       <div class="ex-head">
         <button class="btn ex-up" title="上一级">↑</button>
         <input class="ex-path" spellcheck="false">
@@ -150,9 +155,10 @@ export class Explorer {
       <div class="ex-hint">${hint}</div>`;
     this.listEl = this.element.querySelector(".ex-list") as HTMLElement;
     this.pathInput = this.element.querySelector(".ex-path") as HTMLInputElement;
-    this.titleEl = this.element.querySelector(".ex-title") as HTMLElement;
+    this.titleEl = this.element.querySelector(".ex-title-text") as HTMLElement;
     this.titleEl.textContent = backend.label;
     this.titleEl.title = backend.label;
+    this.element.querySelector(".ex-close")!.addEventListener("click", () => this.onClose?.());
 
     this.installDrop();
 

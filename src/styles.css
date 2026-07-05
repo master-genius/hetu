@@ -245,6 +245,17 @@ body {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
+/* 鼠标点击后不残留 focus 轮廓（否则图标一直显示"选中态"）；
+   键盘 Tab 聚焦仍给可见焦点环，保障可达性。 */
+.tool-btn:focus {
+  outline: none;
+}
+
+.tool-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 1px;
+}
+
 /* ---------- 内容区 / 分屏 ---------- */
 
 #content-wrap {
@@ -418,6 +429,12 @@ body {
   transition: left 0.08s, top 0.08s, width 0.08s;
 }
 
+/* Ctrl+拖远端文件到本地终端时，整块 pane 高亮，提示"释放即下载到此终端目录" */
+.pane.dl-drop-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: -3px;
+}
+
 /* ---------- 本地文件管理器面板（右侧浮动 45%） ---------- */
 
 #explorer-panel {
@@ -476,23 +493,87 @@ body {
   pointer-events: auto;
 }
 
+/* ---------- 文件面板尺寸把手（顶边调高度 / 内侧边调宽度） ---------- */
+/* 顶边把手：横贯上沿，纵向拖拽调高度（底边固定） */
+.panel-resize-h {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 6px;
+  cursor: ns-resize;
+  z-index: 70;
+}
+
+/* 内侧边把手：纵贯内侧边，横向拖拽调宽度（外侧边固定）。留出顶部 6px 避让顶边把手 */
+.panel-resize-w {
+  position: absolute;
+  top: 6px;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  z-index: 70;
+}
+
+/* 本地面板锚右→内侧=左边；远程面板锚左→内侧=右边 */
+#explorer-panel .panel-resize-w {
+  left: 0;
+}
+#remote-panel .panel-resize-w {
+  right: 0;
+}
+
+/* 悬停时把手微亮，提示可拖拽 */
+.panel-resize-h:hover,
+.panel-resize-w:hover {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
 .explorer {
   display: flex;
   flex-direction: column;
   height: 100%;
 }
 
-/* 面板顶部标题：本地显示“本地”，远程显示“连接名 · host” */
+/* 面板顶部标题：本地显示“本地”，远程显示“连接名 · host”；右侧 ✕ 关闭本面板 */
 .ex-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 8px 10px 6px;
   font-size: 12.5px;
   font-weight: 600;
   color: var(--term-fg);
   letter-spacing: 0.2px;
+  border-bottom: 1px solid color-mix(in srgb, var(--term-fg) 8%, transparent);
+}
+
+.ex-title-text {
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  border-bottom: 1px solid color-mix(in srgb, var(--term-fg) 8%, transparent);
+}
+
+/* 标题栏关闭按钮：淡出常态，悬停转红以示"关闭" */
+.ex-close {
+  flex: none;
+  border: none;
+  background: none;
+  color: var(--term-fg);
+  opacity: 0.5;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: var(--radius);
+}
+
+.ex-close:hover {
+  opacity: 1;
+  background: color-mix(in srgb, #e5484d 22%, transparent);
+  color: #e5484d;
 }
 
 /* 远程面板标题用强调色，凸显“远端”身份 */
@@ -711,7 +792,9 @@ body {
   overflow: auto;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5),
     inset 0 1px 0 color-mix(in srgb, var(--term-fg) 12%, transparent);
-  animation: fade-in 0.14s ease;
+  /* 不对毛玻璃层做透明度入场动画：backdrop-filter blur 会在动画每一帧重算模糊
+     （叠加背后实时终端），是「打开设置有点卡」的主因。改为一次合成到位，
+     入场淡入交给遮罩层 overlay-in（不带模糊、开销极低），毛玻璃观感不变。 */
 }
 
 .modal h3 {

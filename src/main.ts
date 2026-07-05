@@ -19,6 +19,7 @@ import {
 } from "./explorer";
 import { type Action, matchAction, resolveBindings } from "./keybindings";
 import { showConnectDialog, showSettingsDialog } from "./dialogs";
+import { initPanelResize } from "./panelResize";
 import {
   confirmDialog, confirmOverwriteDialog, formatSize, showFileTooltip, showMenu, showPreview,
   toast,
@@ -284,6 +285,13 @@ async function bootstrap() {
   void events.onTransferProgress(updateTransfer);
   initTransfers(document.getElementById("btn-transfers")!);
 
+  // 预热：空闲时提前加载 WebGL 渲染器分块，消除首次新建标签页时动态 import 的一次性卡顿。
+  // 失败无妨（无 WebGL 时 pane 自会回退 canvas 渲染）。
+  const preloadWebgl = () => void import("@xterm/addon-webgl").catch(() => {});
+  const ric = (window as unknown as { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback;
+  if (ric) ric(preloadWebgl);
+  else window.setTimeout(preloadWebgl, 1500);
+
   // ---------- 上传：工具栏按钮 + 拖拽 ----------
 
   const uploadFiles = async (paths: string[], pane?: Pane | null, dirOverride?: string | null) => {
@@ -460,6 +468,60 @@ async function bootstrap() {
     if (e.target === content) clearDropIndicators();
   });
 
+  // Ctrl+拖拽远端文件 → 拖到「本地终端」pane → 下载到该终端实时 cwd。
+  // 远端文件拖拽携带 DL_MIME；只有本地终端可作为落点（远端终端拒收），下载目录取
+  // 该本地 shell 的 /proc cwd（拿不到则回退 home）。与拖到本地文件面板的下载互不影响。
+  let dlHlPane: HTMLElement | null = null;
+  const clearDlHighlight = () => {
+    dlHlPane?.classList.remove("dl-drop-target");
+    dlHlPane = null;
+  };
+  const localPaneUnder = (x: number, y: number): Pane | null => {
+    const el = document.elementFromPoint(x, y)?.closest(".pane") as HTMLElement | null;
+    const pane = el?.dataset.paneId ? tabs.findPane(el.dataset.paneId)?.pane : null;
+    return pane && pane.isLocal ? pane : null;
+  };
+  content.addEventListener("dragover", (e) => {
+    if (!e.dataTransfer?.types.includes(DL_MIME)) return;
+    const pane = localPaneUnder(e.clientX, e.clientY);
+    if (!pane) {
+      clearDlHighlight();
+      return; // 非本地终端不接收下载，保留默认（禁止落下）
+    }
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    if (dlHlPane !== pane.element) {
+      clearDlHighlight();
+      dlHlPane = pane.element;
+      dlHlPane.classList.add("dl-drop-target");
+    }
+  });
+  content.addEventListener("drop", (e) => {
+    const raw = e.dataTransfer?.getData(DL_MIME);
+    if (!raw) return;
+    const target = localPaneUnder(e.clientX, e.clientY);
+    clearDlHighlight();
+    if (!target) return;
+    e.preventDefault();
+    let payload: { connId: string; paneId?: string; path: string };
+    try {
+      payload = JSON.parse(raw) as { connId: string; paneId?: string; path: string };
+    } catch {
+      return; // 载荷异常，忽略
+    }
+    // 优先用拖拽发起的源 pane 解析相对路径，回退到该连接任一 pane
+    const src = (payload.paneId && tabs.findPane(payload.paneId)?.pane) || tabs.panesByConn(payload.connId)[0]?.pane;
+    if (!src) return;
+    void (async () => {
+      const dir = (await target.resolveLocalCwd()) ?? (await api.localHome().catch(() => ""));
+      if (!dir) {
+        toast("无法确定本地终端目录", true);
+        return;
+      }
+      void downloadFile(src, payload.path, dir);
+    })();
+  });
+
   // ---------- 下载 ----------
 
   /** 解析默认下载目录：设置里指定的优先，否则系统 Downloads */
@@ -550,6 +612,7 @@ async function bootstrap() {
   // ---------- 本地文件管理器面板（右侧浮动 45%，每标签页独立实例） ----------
 
   const explorerPanel = document.getElementById("explorer-panel")!;
+  initPanelResize(explorerPanel, "right");
   const syncExplorerPanel = () => {
     const tab = tabs.active;
     // 用 .open 类做滑入/滑出动画（面板常驻 DOM，不用 display 切换以免动画失效）
@@ -559,6 +622,11 @@ async function bootstrap() {
     }
     if (!tab.explorer) {
       tab.explorer = new Explorer(localBackend());
+      // 面板标题栏 ✕：关闭本地文件面板（等价于顶部本地文件图标再点一次）
+      tab.explorer.onClose = () => {
+        tab.explorerOpen = false;
+        syncExplorerPanel();
+      };
       tab.explorer.onUploadRequest = (paths) => void uploadFiles(paths);
       tab.explorer.onDownloadRequest = (connId, path, targetDir, srcPaneId) => {
         // 优先用拖拽发起的源 pane 解析相对路径，回退到该连接任一 pane
@@ -577,6 +645,7 @@ async function bootstrap() {
   // ---------- 远程文件管理器面板（左侧浮动 45%，每连接独立实例） ----------
 
   const remotePanel = document.getElementById("remote-panel")!;
+  initPanelResize(remotePanel, "left");
   const remoteBtn = document.getElementById("btn-remote") as HTMLButtonElement;
   const remoteExplorers = new Map<string, Explorer>();
 
@@ -608,6 +677,12 @@ async function bootstrap() {
     let ex = remoteExplorers.get(connId);
     if (!ex) {
       ex = new Explorer(remoteBackend(connId));
+      // 面板标题栏 ✕：关闭当前标签页的远程文件面板（等价于顶部远程图标再点一次）
+      ex.onClose = () => {
+        if (tabs.active) tabs.active.remoteOpen = false;
+        syncRemotePanel();
+        updateRemoteBtn();
+      };
       ex.onDownloadRequest = (cid, path, targetDir) => {
         const found = tabs.panesByConn(cid)[0];
         if (found) void downloadFile(found.pane, path, targetDir || undefined);
@@ -813,6 +888,9 @@ async function bootstrap() {
     // 去重：同一 KeyboardEvent 可能既经 pane.onAppKey（终端聚焦）又冒泡到 window 兜底，
     // 两条路径共享同一事件对象，打标记确保一次按键只执行一次动作（修复分屏被创建两次）。
     if ((e as { __hetuHandled?: boolean }).__hetuHandled) return false;
+    // 忽略操作系统按键自动重复：一次长按不应连开多个标签页/多次切分/多次切换
+    // （修复「快捷键容易连续出现 2 个标签页」——按住 Ctrl+Shift+T 稍久即触发多次 keydown）
+    if (e.repeat) return false;
     // 有弹窗打开时不响应全局快捷键（避免在对话框后面误切分/新建/关闭）
     if (document.querySelector(".modal-overlay")) return false;
     const action = matchAction(e, resolveBindings(getSettings().keybindings));

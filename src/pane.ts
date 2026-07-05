@@ -190,7 +190,10 @@ export class Pane {
 
   /** 打开（或断线后重开）后端 PTY channel */
   async open(): Promise<void> {
-    this.refit();
+    // 首帧 fit 放到下一帧：新建标签时不在点击处理里同步强制重排（消除「新建标签有点卡」）。
+    // PTY 先以当前 cols/rows 启动，下一帧 fit 后经 paneResize 校正（SIGWINCH），观感无损；
+    // 重连场景终端已保留上次尺寸，cols/rows 本就正确，延后一帧亦无副作用。
+    requestAnimationFrame(() => this.refit());
     if (this.isLocal) {
       await api.paneOpenLocal(this.id, this.term.cols, this.term.rows);
       return;
@@ -273,6 +276,17 @@ export class Pane {
   /** 上传目标目录（语义同 currentDir，保留原调用名） */
   async uploadDir(): Promise<{ dir: string | null; guessed: boolean }> {
     return this.currentDir();
+  }
+
+  /**
+   * 本地终端的实时工作目录（拖拽下载落点用）：
+   * 优先 OSC7 上报的 cwd，否则经后端 /proc/<本地 shell pid>/cwd 读取；均失败返回 null。
+   * 非本地 pane 返回 null。
+   */
+  async resolveLocalCwd(): Promise<string | null> {
+    if (!this.isLocal) return null;
+    if (this.cwd) return this.cwd;
+    return api.localCwd(this.id).catch(() => null);
   }
 
   /**

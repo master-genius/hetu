@@ -21,6 +21,9 @@ pub enum PaneCmd {
 pub struct PaneCtl {
     pub tx: mpsc::UnboundedSender<PaneCmd>,
     pub conn_id: String,
+    /// 本地 PTY shell 的进程号（仅本地 pane 有；SSH pane 为 None）。
+    /// 用于经 /proc/<pid>/cwd 读本地终端的实时工作目录（拖拽下载落点）。
+    pub local_pid: Option<u32>,
 }
 
 fn b64(data: &[u8]) -> String {

@@ -58,6 +58,19 @@ pub fn home_dir() -> String {
         .unwrap_or_else(|| "/".into())
 }
 
+/// 本地 shell 的实时工作目录：读 /proc/<pid>/cwd 符号链接（与远端 remote_cwd 同理）。
+/// 仅 Linux 有 /proc；其它平台不支持（前端会回退到 home）。
+#[cfg(target_os = "linux")]
+pub fn cwd(pid: u32) -> Result<String> {
+    let target = std::fs::read_link(format!("/proc/{pid}/cwd"))?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn cwd(_pid: u32) -> Result<String> {
+    Err(Error::msg("当前平台不支持读取本地终端工作目录"))
+}
+
 // ---------- 本地 PTY ----------
 
 fn size(cols: u32, rows: u32) -> PtySize {
@@ -97,13 +110,14 @@ fn default_shell() -> String {
 }
 
 /// 打开本地 PTY pane。控制线程处理输入/resize/关闭，读线程转发输出。
+/// 返回本地 shell 的进程号（用于 /proc/<pid>/cwd 读实时工作目录）；取不到则 None。
 pub fn open(
     app: AppHandle,
     pane_id: String,
     cols: u32,
     rows: u32,
     mut rx: mpsc::UnboundedReceiver<PaneCmd>,
-) -> Result<()> {
+) -> Result<Option<u32>> {
     let pty = native_pty_system();
     let pair = pty
         .openpty(size(cols, rows))
@@ -121,6 +135,8 @@ pub fn open(
         .spawn_command(cmd)
         .map_err(|e| Error::msg(format!("启动本地 shell({shell}) 失败: {e}")))?;
     drop(pair.slave);
+    // 在 child 被移入控制线程前取其 PID（供 /proc/<pid>/cwd 读实时工作目录）
+    let pid = child.process_id();
 
     let mut reader = pair
         .master
@@ -187,5 +203,5 @@ pub fn open(
         // master 随线程结束 drop，读线程随之 EOF 退出
     });
 
-    Ok(())
+    Ok(pid)
 }
