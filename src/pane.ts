@@ -7,6 +7,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { api, b64decode, b64encode } from "./ipc";
+import { installImeGuard } from "./imeGuard";
 import { getSettings, activeTheme, fontStack } from "./settings";
 import type { FileMeta } from "./types";
 
@@ -87,6 +88,8 @@ export class Pane {
     this.term.loadAddon(this.fit);
     this.term.loadAddon(new WebLinksAddon());
     this.term.open(this.element);
+    // WebKitGTK 下 CJK 输入法重复/残留修复（详见 imeGuard.ts 根因注释）
+    installImeGuard(this.element);
     void this.tryWebgl();
 
     // 输入 → 后端 PTY

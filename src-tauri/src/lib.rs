@@ -1,5 +1,6 @@
 //! HetuShell Tauri 后端：应用状态、command 注册、窗口毛玻璃效果。
 
+mod cache;
 mod error;
 mod local;
 mod settings;
@@ -221,6 +222,19 @@ async fn local_cwd(state: State<'_>, pane_id: String) -> Result<String> {
     local::cwd(pid)
 }
 
+/// 本地终端标签页信息（工作目录 + 前台进程名），供标签标题展示 `目录:进程`。
+#[tauri::command]
+async fn local_tab_info(state: State<'_>, pane_id: String) -> Result<local::TabInfo> {
+    let pid = {
+        let panes = state.panes.lock().await;
+        panes
+            .get(&pane_id)
+            .and_then(|c| c.local_pid)
+            .ok_or_else(|| Error::msg("本地终端未就绪"))?
+    };
+    local::tab_info(pid)
+}
+
 #[tauri::command]
 async fn pane_input(state: State<'_>, pane_id: String, data: String) -> Result<()> {
     let bytes = base64::engine::general_purpose::STANDARD
@@ -269,6 +283,18 @@ async fn sftp_preview(
     ssh::sftp::preview(&conn, &path, max_bytes).await
 }
 
+/// 图片整读预览（文件面板右键）：本地直接读文件；远端经磁盘缓存
+/// （键含 size+mtime，远端文件变化自动失效），单张上限见 cache::MAX_IMAGE_BYTES。
+#[tauri::command]
+async fn image_preview(state: State<'_>, conn_id: String, path: String) -> Result<cache::ImageData> {
+    if conn_id == "local" {
+        cache::local_image(&path)
+    } else {
+        let conn = get_conn(&state, &conn_id).await?;
+        cache::remote_image(&conn, &path).await
+    }
+}
+
 /// 注册一次传输的控制句柄，返回它；传输结束务必调用 unregister_transfer 清理。
 async fn register_transfer(state: &AppState, id: &str) -> Arc<ssh::sftp::TransferCtl> {
     let ctl = Arc::new(ssh::sftp::TransferCtl::new());
@@ -308,6 +334,26 @@ async fn sftp_upload(
     let conn = get_conn(&state, &conn_id).await?;
     let ctl = register_transfer(&state, &transfer_id).await;
     let r = ssh::sftp::upload(&app, &conn, &ctl, &local_path, &remote_dir, &transfer_id).await;
+    unregister_transfer(&state, &transfer_id).await;
+    r
+}
+
+/// 远程 → 远程复制（面板条目拖到远程终端）：同连接走服务器内 cp 快路径，
+/// 否则经客户端流式中转。返回目标端根路径。
+#[tauri::command]
+async fn sftp_copy_remote(
+    app: tauri::AppHandle,
+    state: State<'_>,
+    src_conn_id: String,
+    src_path: String,
+    dst_conn_id: String,
+    dst_dir: String,
+    transfer_id: String,
+) -> Result<String> {
+    let src = get_conn(&state, &src_conn_id).await?;
+    let dst = get_conn(&state, &dst_conn_id).await?;
+    let ctl = register_transfer(&state, &transfer_id).await;
+    let r = ssh::sftp::copy_remote(&app, &src, &dst, &ctl, &src_path, &dst_dir, &transfer_id).await;
     unregister_transfer(&state, &transfer_id).await;
     r
 }
@@ -469,6 +515,15 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             let _ = window_vibrancy::apply_acrylic(&window, Some((18, 18, 18, 120)));
             let _ = window;
+            // 预览缓存清理：应用内后台任务（启动 30s 后首次、之后每 30 分钟），
+            // 随应用退出自动结束。文件操作走 spawn_blocking，不占用异步执行器。
+            tauri::async_runtime::spawn(async {
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                loop {
+                    let _ = tokio::task::spawn_blocking(cache::sweep).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(30 * 60)).await;
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -489,11 +544,13 @@ pub fn run() {
             sftp_stat,
             sftp_list,
             sftp_preview,
+            image_preview,
             sftp_download,
             sftp_upload,
             transfer_pause,
             transfer_resume,
             transfer_cancel,
+            sftp_copy_remote,
             remote_home,
             remote_cwd,
             default_download_dir,
@@ -501,6 +558,7 @@ pub fn run() {
             local_list,
             local_home,
             local_cwd,
+            local_tab_info,
             read_key_file,
         ])
         .run(tauri::generate_context!())

@@ -71,6 +71,57 @@ pub fn cwd(_pid: u32) -> Result<String> {
     Err(Error::msg("当前平台不支持读取本地终端工作目录"))
 }
 
+/// 本地终端标签页信息：实时工作目录 + 前台进程名（供标签标题展示 `目录:进程`）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TabInfo {
+    /// 实时工作目录（绝对路径）
+    pub cwd: String,
+    /// 前台进程名：idle 时为 shell 名（bash/zsh…），运行程序时为程序名（vim/node…）
+    pub process: String,
+}
+
+/// 读取本地终端标签页信息：cwd（/proc/<pid>/cwd）+ 前台进程名。
+/// 前台进程：读 /proc/<pid>/stat 的 tpgid（该 tty 的前台进程组），再取组 leader 的 comm；
+/// idle 时 tpgid 指向 shell 自身 → "bash"/"zsh"，运行程序时 → 程序名。取不到则回退 shell 自身 comm。
+#[cfg(target_os = "linux")]
+pub fn tab_info(pid: u32) -> Result<TabInfo> {
+    let cwd = std::fs::read_link(format!("/proc/{pid}/cwd"))?
+        .to_string_lossy()
+        .into_owned();
+    let process = fg_process_name(pid).unwrap_or_else(|| shell_comm(pid));
+    Ok(TabInfo { cwd, process })
+}
+
+/// shell 自身进程名（前台进程探测失败时的兜底）
+#[cfg(target_os = "linux")]
+fn shell_comm(pid: u32) -> String {
+    std::fs::read_to_string(format!("/proc/{pid}/comm"))
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
+}
+
+/// pid 所在 tty 的前台进程组 leader 的进程名。
+#[cfg(target_os = "linux")]
+fn fg_process_name(pid: u32) -> Option<String> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // comm 字段（第 2 个）可能含空格与括号，跳到最后一个 ')' 之后再按空白切分，
+    // 剩余首字段为 state，依次为 ppid pgrp session tty_nr tpgid…，故 tpgid 位于索引 5。
+    let rest = stat.get(stat.rfind(')')? + 1..)?;
+    let tpgid: i32 = rest.split_whitespace().nth(5)?.parse().ok()?;
+    if tpgid <= 0 {
+        return None;
+    }
+    let comm = std::fs::read_to_string(format!("/proc/{tpgid}/comm")).ok()?;
+    let comm = comm.trim();
+    (!comm.is_empty()).then(|| comm.to_string())
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn tab_info(_pid: u32) -> Result<TabInfo> {
+    Err(Error::msg("当前平台不支持读取本地终端标签页信息"))
+}
+
 // ---------- 本地 PTY ----------
 
 fn size(cols: u32, rows: u32) -> PtySize {

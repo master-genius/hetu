@@ -27,7 +27,8 @@ import {
 import {
   beginTransfer, completeTransfer, failTransfer, initTransfers, updateTransfer,
 } from "./transfers";
-import type { ConnParams } from "./types";
+import type { LayoutNode } from "./layout";
+import type { ConnParams, SessionLayout } from "./types";
 
 const PREVIEW_MAX_BYTES = 512 * 1024;
 
@@ -80,10 +81,10 @@ async function bootstrap() {
     params: ConnParams,
     profileId: string | null = null,
     order?: number,
-  ) => {
+  ): Promise<Tab> => {
     const connId = await api.sshConnect(params);
     recordConn(connId, params, profileId);
-    await tabs.createTab(connId, params, order);
+    return tabs.createTab(connId, params, order);
   };
 
   /** 本地终端：无 SSH 连接，connId 固定为 "local" */
@@ -94,9 +95,8 @@ async function bootstrap() {
     user: "",
     auth: "key",
   };
-  const openLocalTab = async (order?: number) => {
-    await tabs.createTab("local", LOCAL_PARAMS, order);
-  };
+  const openLocalTab = async (order?: number): Promise<Tab> =>
+    tabs.createTab("local", LOCAL_PARAMS, order);
 
   /**
    * 在指定 pane 内打开/切换连接（右键菜单与顶部连接图标共用）：
@@ -116,9 +116,17 @@ async function bootstrap() {
   };
 
   // “+” 行为由设置决定：默认直接开本地终端；连接图标始终弹连接选择
+  // 连接对话框回调只关心成功与否，不需要 Tab 返回值 → 适配为 Promise<void>
+  const connectAndOpenTabVoid = async (params: ConnParams, profileId?: string | null) => {
+    await connectAndOpenTab(params, profileId ?? null);
+  };
+  const openLocalTabVoid = async () => {
+    await openLocalTab();
+  };
+
   tabs.onNewTabRequest = () => {
     if (getSettings().newTabMode === "dialog") {
-      showConnectDialog(connectAndOpenTab, openLocalTab);
+      showConnectDialog(connectAndOpenTabVoid, openLocalTabVoid);
     } else {
       void openLocalTab();
     }
@@ -291,6 +299,12 @@ async function bootstrap() {
   const ric = (window as unknown as { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback;
   if (ric) ric(preloadWebgl);
   else window.setTimeout(preloadWebgl, 1500);
+
+  // 本地终端标签标题 `目录:进程`：注入 home（用于 `~` 显示）并定时轮询刷新。
+  api.localHome().then((h) => (tabs.localHomeDir = h)).catch(() => {});
+  const pollLocalTitles = () => void tabs.refreshLocalTabTitles();
+  pollLocalTitles();
+  window.setInterval(pollLocalTitles, 1500);
 
   // ---------- 上传：工具栏按钮 + 拖拽 ----------
 
@@ -469,24 +483,25 @@ async function bootstrap() {
   });
 
   // Ctrl+拖拽远端文件 → 拖到「本地终端」pane → 下载到该终端实时 cwd。
-  // 远端文件拖拽携带 DL_MIME；只有本地终端可作为落点（远端终端拒收），下载目录取
-  // 该本地 shell 的 /proc cwd（拿不到则回退 home）。与拖到本地文件面板的下载互不影响。
+  // 远端文件拖拽携带 DL_MIME，落点按终端类型分流：
+  // - 本地终端 → 下载到该 shell 的 /proc cwd（拿不到则回退 home）；
+  // - 远程终端 → 复制到该终端所在目录（同连接走服务器内 cp，跨连接经客户端流式中转）。
+  // 与拖到本地文件面板的下载互不影响。
   let dlHlPane: HTMLElement | null = null;
   const clearDlHighlight = () => {
     dlHlPane?.classList.remove("dl-drop-target");
     dlHlPane = null;
   };
-  const localPaneUnder = (x: number, y: number): Pane | null => {
+  const paneUnder = (x: number, y: number): Pane | null => {
     const el = document.elementFromPoint(x, y)?.closest(".pane") as HTMLElement | null;
-    const pane = el?.dataset.paneId ? tabs.findPane(el.dataset.paneId)?.pane : null;
-    return pane && pane.isLocal ? pane : null;
+    return (el?.dataset.paneId && tabs.findPane(el.dataset.paneId)?.pane) || null;
   };
   content.addEventListener("dragover", (e) => {
     if (!e.dataTransfer?.types.includes(DL_MIME)) return;
-    const pane = localPaneUnder(e.clientX, e.clientY);
+    const pane = paneUnder(e.clientX, e.clientY);
     if (!pane) {
       clearDlHighlight();
-      return; // 非本地终端不接收下载，保留默认（禁止落下）
+      return; // 非终端区域不接收，保留默认（禁止落下）
     }
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
@@ -496,10 +511,46 @@ async function bootstrap() {
       dlHlPane.classList.add("dl-drop-target");
     }
   });
+  /** 远端文件拖入远程终端：复制到该终端的实时 cwd */
+  const copyToRemotePane = async (src: Pane, srcSpec: string, target: Pane) => {
+    try {
+      const srcPath = await src.resolveRemotePath(srcSpec);
+      if (!srcPath) {
+        toast("无法解析远端路径（未知当前目录）", true);
+        return;
+      }
+      const { dir, guessed } = await target.currentDir();
+      if (!dir) {
+        toast("尚未获取目标终端的远端目录，请稍候重试", true);
+        return;
+      }
+      // cwd 未由 OSC7/proc 获得时落到 home 猜测——与上传拖放同款确认，避免静默复制错位置
+      if (guessed) {
+        const ok = await confirmDialog(
+          "确认复制目录",
+          `未能获取目标终端的当前工作目录。\n将复制到用户主目录：${dir}\n\n继续吗？`,
+        );
+        if (!ok) return;
+      }
+      const name = srcPath.replace(/\/+$/, "").split("/").pop() ?? srcPath;
+      const tid = crypto.randomUUID();
+      beginTransfer(tid, name, "upload", dir);
+      try {
+        const dest = await api.sftpCopyRemote(src.connId, srcPath, target.connId, dir, tid);
+        completeTransfer(tid);
+        toast(`已复制到 ${dest}`);
+      } catch (err) {
+        failTransfer(tid, String(err));
+      }
+    } catch (err) {
+      // 路径解析 / cwd 获取等传输前错误仍用 toast 提示
+      toast(`复制失败: ${err}`, true);
+    }
+  };
   content.addEventListener("drop", (e) => {
     const raw = e.dataTransfer?.getData(DL_MIME);
     if (!raw) return;
-    const target = localPaneUnder(e.clientX, e.clientY);
+    const target = paneUnder(e.clientX, e.clientY);
     clearDlHighlight();
     if (!target) return;
     e.preventDefault();
@@ -512,14 +563,20 @@ async function bootstrap() {
     // 优先用拖拽发起的源 pane 解析相对路径，回退到该连接任一 pane
     const src = (payload.paneId && tabs.findPane(payload.paneId)?.pane) || tabs.panesByConn(payload.connId)[0]?.pane;
     if (!src) return;
-    void (async () => {
-      const dir = (await target.resolveLocalCwd()) ?? (await api.localHome().catch(() => ""));
-      if (!dir) {
-        toast("无法确定本地终端目录", true);
-        return;
-      }
-      void downloadFile(src, payload.path, dir);
-    })();
+    if (target.isLocal) {
+      // 本地终端 → 下载（原有行为不变）
+      void (async () => {
+        const dir = (await target.resolveLocalCwd()) ?? (await api.localHome().catch(() => ""));
+        if (!dir) {
+          toast("无法确定本地终端目录", true);
+          return;
+        }
+        void downloadFile(src, payload.path, dir);
+      })();
+    } else {
+      // 远程终端 → 复制到其所在目录
+      void copyToRemotePane(src, payload.path, target);
+    }
   });
 
   // ---------- 下载 ----------
@@ -565,14 +622,16 @@ async function bootstrap() {
         local = meta.isDir ? dir : `${dir.replace(/\/+$/, "")}/${name}`;
       }
       if (!local) return;
-      // 传输进度与成败由右下角面板呈现（可暂停/取消/删除），不再用 toast；
-      // 落地完整路径作为行名悬停提示，替代原「已下载到 …」，让用户能找到文件
+      // 传输进度与成败由右下角面板呈现（可暂停/取消/删除）；
+      // 落地完整路径作为行名悬停提示，让用户能找到文件。
+      // 完成时另发一条 toast：小文件瞬间完成，仅靠面板行不够醒目
       const dest = meta.isDir ? `${local.replace(/\/+$/, "")}/${name}` : local;
       const tid = crypto.randomUUID();
       beginTransfer(tid, name, "download", dest);
       try {
         await api.sftpDownload(pane.connId, remotePath, local, tid);
         completeTransfer(tid);
+        toast(`已下载到 ${dest}`);
       } catch (err) {
         failTransfer(tid, String(err));
       }
@@ -606,15 +665,20 @@ async function bootstrap() {
     const tab = tabs.active;
     const pane = tabs.activePane();
     if (tab && pane) connectInPane(tab, pane);
-    else showConnectDialog(connectAndOpenTab, openLocalTab);
+    else showConnectDialog(connectAndOpenTabVoid, openLocalTabVoid);
   });
 
   // ---------- 本地文件管理器面板（右侧浮动 45%，每标签页独立实例） ----------
 
   const explorerPanel = document.getElementById("explorer-panel")!;
+  const explorerBtn = document.getElementById("btn-explorer") as HTMLButtonElement;
+  // 本地文件图标激活态：面板打开时高亮（与远程图标 updateRemoteBtn 对齐）
+  const updateExplorerBtn = () =>
+    explorerBtn.classList.toggle("active", !!tabs.active?.explorerOpen);
   initPanelResize(explorerPanel, "right");
   const syncExplorerPanel = () => {
     const tab = tabs.active;
+    updateExplorerBtn();
     // 用 .open 类做滑入/滑出动画（面板常驻 DOM，不用 display 切换以免动画失效）
     if (!tab || !tab.explorerOpen) {
       explorerPanel.classList.remove("open");
@@ -733,14 +797,27 @@ async function bootstrap() {
   // 会话快照：每个标签页取其首个 pane 的连接来源（连接项 id，不含机密），防抖写入 session.json。
   // 恢复期间 restoring=true 时跳过，避免在标签页尚未全部重建时把会话写成半截而丢失。
   let restoring = false;
+  /** 布局树 → 可持久化快照（只留结构与比例，比例取 3 位小数避免噪声写盘） */
+  const snapLayout = (n: LayoutNode): SessionLayout =>
+    n.type === "leaf"
+      ? { type: "leaf" }
+      : {
+          type: "split",
+          dir: n.dir,
+          ratio: Math.round(n.ratio * 1000) / 1000,
+          a: snapLayout(n.a),
+          b: snapLayout(n.b),
+        };
   const snapshotSession = () => {
     // 未开启「记住最后的会话」时不写盘：既避免无谓写入，也不覆盖上次保存的会话
     if (restoring || !getSettings().restoreSession) return;
     const snap = tabs.tabs.map((tab) => {
       const first = tab.layout.panes()[0];
       const info = first ? connMeta.get(first.connId) : undefined;
-      if (!info || info.local) return { local: true, name: info?.name ?? "本地终端" };
-      return { local: false, name: info.name, profileId: info.profileId ?? null };
+      // 分屏结构仅在确有切分时记录（单 pane 省略，保持 session.json 精简）
+      const layout = tab.layout.root.type === "split" ? snapLayout(tab.layout.root) : undefined;
+      if (!info || info.local) return { local: true, name: info?.name ?? "本地终端", layout };
+      return { local: false, name: info.name, profileId: info.profileId ?? null, layout };
     });
     void api.sessionSet(snap).catch(() => {});
   };
@@ -917,6 +994,26 @@ async function bootstrap() {
 
   // 启动：若开启「记住最后的会话」则恢复上次的标签页并自动连接；否则开一个本地终端。
   // 远程连接只恢复来自已保存连接项（含密钥）的会话；临时/手输、密码认证（未存密码）的一律跳过。
+  /**
+   * 按会话快照重建某标签页的分屏结构：对首 pane 递归重放切分（新 pane 沿用被切分
+   * pane 的连接）。快照来自持久化文件，逐节点校验；越界/打开失败即停在当前结构，
+   * 绝不让损坏的 session.json 阻断启动恢复。
+   */
+  const applySessionLayout = async (tab: Tab, snap?: SessionLayout | null) => {
+    const rebuild = async (node: SessionLayout, pane: Pane): Promise<void> => {
+      if (node?.type !== "split" || (node.dir !== "row" && node.dir !== "col")) return;
+      const ratio = typeof node.ratio === "number" ? node.ratio : 0.5;
+      const created = await tabs.splitPane(tab, pane, node.dir, ratio).catch(() => null);
+      if (!created) return;
+      await rebuild(node.a, pane);
+      await rebuild(node.b, created);
+    };
+    if (snap?.type === "split") await rebuild(snap, tab.layout.panes()[0]);
+    // 重放过程中 activePaneId 落在最后创建的 pane 上，恢复完成后焦点回到首 pane
+    const first = tab.layout.panes()[0];
+    if (first) tab.activePaneId = first.id;
+  };
+
   const session = getSettings().restoreSession ? await api.sessionGet().catch(() => []) : [];
   if (session.length === 0) {
     await openLocalTab();
@@ -932,7 +1029,7 @@ async function bootstrap() {
     // order = 会话中的原始序号：后台并行连接完成顺序不定，最后按 order 归位
     session.forEach((st, order) => {
       if (st.local) {
-        pending.push(openLocalTab(order));
+        pending.push(openLocalTab(order).then((tab) => applySessionLayout(tab, st.layout)));
         return;
       }
       if (!st.profileId) return; // 临时/手输连接，未保存为连接项 → 不恢复
@@ -958,7 +1055,9 @@ async function bootstrap() {
           },
           p.id,
           order,
-        ).catch((err) => toast(`自动连接「${st.name}」失败：${err}`, true)),
+        )
+          .then((tab) => applySessionLayout(tab, st.layout))
+          .catch((err) => toast(`自动连接「${st.name}」失败：${err}`, true)),
       );
     });
     // 不 await：界面已可交互；后台连接全部结束后按保存顺序归位、解除 restoring 并落盘一次

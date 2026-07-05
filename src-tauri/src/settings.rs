@@ -150,6 +150,10 @@ pub struct SessionTab {
     pub name: String,
     #[serde(default)]
     pub profile_id: Option<String>,
+    /// 分屏结构快照（结构+比例的递归 JSON）。后端不解释其形状，原样透传给前端重放；
+    /// 缺省 = 单 pane。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<serde_json::Value>,
 }
 
 fn config_dir() -> Result<PathBuf> {

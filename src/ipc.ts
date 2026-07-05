@@ -42,10 +42,16 @@ export const api = {
   sftpStat: (connId: string, path: string) => invoke<FileMeta>("sftp_stat", { connId, path }),
   sftpPreview: (connId: string, path: string, maxBytes: number) =>
     invoke<Preview>("sftp_preview", { connId, path, maxBytes }),
+  /** 图片整读预览：本地直接读文件；远端经磁盘缓存（connId 传 "local" 表示本机） */
+  imagePreview: (connId: string, path: string) =>
+    invoke<{ data: string; size: number }>("image_preview", { connId, path }),
   sftpDownload: (connId: string, remotePath: string, localPath: string, transferId: string) =>
     invoke<void>("sftp_download", { connId, remotePath, localPath, transferId }),
   sftpUpload: (connId: string, localPath: string, remoteDir: string, transferId: string) =>
     invoke<string>("sftp_upload", { connId, localPath, remoteDir, transferId }),
+  /** 远程→远程复制：同连接走服务器内 cp，跨连接经客户端流式中转；返回目标端根路径 */
+  sftpCopyRemote: (srcConnId: string, srcPath: string, dstConnId: string, dstDir: string, transferId: string) =>
+    invoke<string>("sftp_copy_remote", { srcConnId, srcPath, dstConnId, dstDir, transferId }),
   transferPause: (transferId: string) => invoke<void>("transfer_pause", { transferId }),
   transferResume: (transferId: string) => invoke<void>("transfer_resume", { transferId }),
   transferCancel: (transferId: string) => invoke<void>("transfer_cancel", { transferId }),
@@ -60,6 +66,9 @@ export const api = {
   localHome: () => invoke<string>("local_home"),
   /** 本地终端 pane 的实时工作目录（经其 shell 的 /proc/<pid>/cwd） */
   localCwd: (paneId: string) => invoke<string>("local_cwd", { paneId }),
+  /** 本地终端标签页信息：工作目录 + 前台进程名（标签标题 `目录:进程`） */
+  localTabInfo: (paneId: string) =>
+    invoke<{ cwd: string; process: string }>("local_tab_info", { paneId }),
   readKeyFile: (path: string) => invoke<string>("read_key_file", { path }),
 };
 

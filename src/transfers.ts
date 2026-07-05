@@ -159,7 +159,7 @@ export function beginTransfer(
   el.querySelector(".t-cancel")!.addEventListener("click", () => requestCancel(row));
   el.querySelector(".t-del")!.addEventListener("click", () => removeRow(row));
   rows.set(id, row);
-  list.appendChild(el);
+  list.prepend(el); // 最新的传输在最前面
   render(row);
   refreshVisibility();
 }

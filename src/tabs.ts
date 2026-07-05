@@ -10,6 +10,31 @@ import { Layout } from "./layout";
 import { Pane } from "./pane";
 import type { ConnParams } from "./types";
 
+/** 测量文本像素宽度用的共享 canvas 上下文（懒建） */
+let measureCtx: CanvasRenderingContext2D | null = null;
+
+/**
+ * 把 full 截断到不超过 availPx（用给定 font 度量）。放得下则原样返回；
+ * 放不下则二分求最长前缀 + 结尾 ".."，保证整体不超出可用宽度。
+ */
+function fitLabel(full: string, availPx: number, font: string): string {
+  if (availPx <= 0) return full; // 尚未布局：交给后续 relabel/poll 再算
+  measureCtx ??= document.createElement("canvas").getContext("2d");
+  const ctx = measureCtx;
+  if (!ctx) return full;
+  ctx.font = font;
+  if (ctx.measureText(full).width <= availPx) return full;
+  const ellW = ctx.measureText("..").width;
+  let lo = 0;
+  let hi = full.length;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (ctx.measureText(full.slice(0, mid)).width + ellW <= availPx) lo = mid;
+    else hi = mid - 1;
+  }
+  return full.slice(0, lo).trimEnd() + "..";
+}
+
 export interface Tab {
   id: string;
   title: string;
@@ -18,6 +43,9 @@ export interface Tab {
   layout: Layout;
   activePaneId: string;
   el: HTMLElement; // 标签头元素
+  labelEl: HTMLElement; // 标签内的文字 span
+  /** 标签完整标题（未截断）：本地终端为 `目录:进程`，其余为连接名；用作 tooltip 与截断源串 */
+  fullTitle: string;
   banner: HTMLElement | null; // 重连提示条
   /** 本地文件管理器：每标签页独立实例，目录状态各自保留（懒创建） */
   explorer: Explorer | null;
@@ -31,8 +59,11 @@ export interface Tab {
 export class TabManager {
   tabs: Tab[] = [];
   activeTabId: string | null = null;
+  /** 本地终端 home 目录（由 main.ts 注入）：cwd 等于它时标题目录段显示为 `~` */
+  localHomeDir: string | null = null;
   private tabBar: HTMLElement;
   private content: HTMLElement;
+  private relabelScheduled = false;
 
   onTabContextMenu: ((e: MouseEvent, tab: Tab) => void) | null = null;
   onNewTabRequest: (() => void) | null = null;
@@ -49,6 +80,70 @@ export class TabManager {
     addBtn.textContent = "+";
     addBtn.addEventListener("click", () => this.onNewTabRequest?.());
     this.tabBar.appendChild(addBtn);
+    // 窗口尺寸变化会改变每个标签的可用宽度 → 重新按新宽度截断（rAF 去抖）
+    window.addEventListener("resize", () => this.scheduleRelabel());
+  }
+
+  /** 按当前可用宽度把 full 截断后写入标签，并把完整串作为 tooltip */
+  private applyLabel(tab: Tab): void {
+    const el = tab.el;
+    const cs = getComputedStyle(el);
+    const avail = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    const font = `${cs.fontSize} ${cs.fontFamily}`;
+    tab.labelEl.textContent = fitLabel(tab.fullTitle, avail, font);
+    el.title = tab.fullTitle; // 悬停展示完整信息
+  }
+
+  /** 设置标签完整标题并立即按可用宽度截断展示 */
+  setLabel(tab: Tab, full: string): void {
+    tab.fullTitle = full;
+    this.applyLabel(tab);
+  }
+
+  /** 重新截断所有标签（宽度可能因窗口缩放/标签数量/平分模式改变） */
+  relabelAll(): void {
+    for (const t of this.tabs) this.applyLabel(t);
+  }
+
+  /** rAF 去抖的 relabelAll（连续 resize 每帧至多一次） */
+  private scheduleRelabel(): void {
+    if (this.relabelScheduled) return;
+    this.relabelScheduled = true;
+    requestAnimationFrame(() => {
+      this.relabelScheduled = false;
+      this.relabelAll();
+    });
+  }
+
+  /** 单 pane 且为本地终端的 pane（多 pane 分屏不动态改名，沿用静态名） */
+  private localSinglePane(tab: Tab): Pane | null {
+    const panes = tab.layout.panes();
+    return panes.length === 1 && panes[0].isLocal ? panes[0] : null;
+  }
+
+  /** cwd → 标题目录段：home 显示 `~`，根显示 `/`，否则末级目录名 */
+  private dirLabel(cwd: string): string {
+    if (this.localHomeDir && cwd === this.localHomeDir) return "~";
+    const trimmed = cwd.replace(/\/+$/, "");
+    if (!trimmed) return "/";
+    return trimmed.slice(trimmed.lastIndexOf("/") + 1) || "/";
+  }
+
+  /**
+   * 刷新所有本地终端标签的标题为 `目录:进程`（由 main.ts 定时轮询调用）。
+   * 逐个读后端 /proc 信息；失败则保留原标题，不打断其它标签。
+   */
+  async refreshLocalTabTitles(): Promise<void> {
+    await Promise.all(
+      this.tabs.map(async (tab) => {
+        const pane = this.localSinglePane(tab);
+        if (!pane) return;
+        const info = await api.localTabInfo(pane.id).catch(() => null);
+        if (!info) return;
+        const title = `${this.dirLabel(info.cwd)}:${info.process}`;
+        if (title !== tab.fullTitle) this.setLabel(tab, title);
+      }),
+    );
   }
 
   get active(): Tab | null {
@@ -85,10 +180,13 @@ export class TabManager {
     const paneId = crypto.randomUUID();
     const pane = new Pane(paneId, connId);
     const layout = new Layout(pane);
+    // 拖动分割线改比例也要触发会话快照（结构变化由 splitPane/closePane 触发）
+    layout.onChange = () => this.onLayoutChange?.();
 
     const el = document.createElement("div");
     el.className = "tab";
     const label = document.createElement("span");
+    label.className = "tab-label";
     label.textContent = params.name;
     el.appendChild(label);
 
@@ -100,6 +198,8 @@ export class TabManager {
       layout,
       activePaneId: paneId,
       el,
+      labelEl: label,
+      fullTitle: params.name,
       banner: null,
       explorer: null,
       explorerOpen: false,
@@ -159,6 +259,8 @@ export class TabManager {
       const pane = this.activePane();
       pane?.refit();
       pane?.focus();
+      // 标签数量/平分模式变化会改变每个标签可用宽度，按新宽度重截断
+      this.relabelAll();
     });
     this.onLayoutChange?.();
   }
@@ -184,21 +286,32 @@ export class TabManager {
   /** 允许的最大切分层级（参考 Konsole，防止无限嵌套） */
   static readonly MAX_SPLIT_DEPTH = 5;
 
+  /**
+   * 切分指定 tab 中的某个 pane（交互切分与会话恢复共用）。
+   * 超出最大层级返回 null；ratio 供会话恢复还原分割比例。
+   */
+  async splitPane(tab: Tab, target: Pane, dir: "row" | "col", ratio?: number): Promise<Pane | null> {
+    if (tab.layout.depthOf(target) > TabManager.MAX_SPLIT_DEPTH) return null;
+    // 复用被切分 pane 的连接（可能已就地切换过，未必等于 tab.connId）
+    const pane = new Pane(crypto.randomUUID(), target.connId);
+    this.onPaneCreated?.(pane, tab);
+    tab.layout.split(target, dir, pane, ratio);
+    tab.activePaneId = pane.id;
+    await pane.open();
+    this.onLayoutChange?.(); // 分屏结构变化 → 面板同步 + 会话快照
+    return pane;
+  }
+
   /** 分屏：复用当前标签页的连接。target 缺省为活动 pane。 */
   async splitActive(dir: "row" | "col", target?: Pane): Promise<void> {
     const tab = this.active;
     target = target ?? this.activePane(tab ?? undefined) ?? undefined;
     if (!tab || !target) return;
-    if (tab.layout.depthOf(target) > TabManager.MAX_SPLIT_DEPTH) {
+    const pane = await this.splitPane(tab, target, dir);
+    if (!pane) {
       toast(`已达到最大切分层级（${TabManager.MAX_SPLIT_DEPTH} 级）`, true);
       return;
     }
-    // 复用被切分 pane 的连接（可能已就地切换过，未必等于 tab.connId）
-    const pane = new Pane(crypto.randomUUID(), target.connId);
-    this.onPaneCreated?.(pane, tab);
-    tab.layout.split(target, dir, pane);
-    tab.activePaneId = pane.id;
-    await pane.open();
     pane.focus();
   }
 
@@ -218,8 +331,7 @@ export class TabManager {
     // 单 pane 标签：标题跟随新连接；多 pane 分屏不改名，避免误导
     if (tab.layout.panes().length === 1) {
       tab.title = name;
-      const label = tab.el.querySelector("span");
-      if (label) label.textContent = name;
+      this.setLabel(tab, name); // 切到本地终端后由轮询接管为 `目录:进程`
       tab.connId = newConnId;
     }
     this.gcConnections([oldConn]);
@@ -257,6 +369,7 @@ export class TabManager {
     }
     this.gcConnections([oldConn]);
     this.activePane(tab)?.focus();
+    this.onLayoutChange?.(); // 分屏结构变化 → 面板同步 + 会话快照
   }
 
   /** tab 内是否有疑似运行中的程序（busy 启发式） */

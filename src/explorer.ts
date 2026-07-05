@@ -6,7 +6,7 @@
  */
 
 import { api } from "./ipc";
-import { formatSize, showMenu, toast } from "./ui";
+import { formatSize, IMAGE_MIME, showImageViewer, showMenu, toast } from "./ui";
 import type { LocalEntry } from "./types";
 
 /** 拖拽数据的自定义 MIME（区分应用内拖拽与 OS 文件拖入） */
@@ -47,6 +47,9 @@ export function localBackend(): ExplorerBackend {
 
 type ViewMode = "list" | "tiles";
 const VIEW_KEY = "hetushell-explorer-view";
+
+/** webview 可直接解码的图片格式（可右键预览查看）；tiff 等浏览器不识别的不提供 */
+const VIEWABLE_IMG = /\.(png|jpe?g|gif|webp|bmp|svg|ico)$/i;
 
 /** 按扩展名归类：类别 → 强调色（用于文件图标的折角与迷你标记，KDE Breeze 风格） */
 const CATEGORY: Array<[RegExp, string]> = [
@@ -225,11 +228,14 @@ export class Explorer {
   async init(initialDir?: string): Promise<void> {
     if (this.initialized) return;
     this.initialized = true;
+    // 首次加载可能要等远端往返（home + 列目录），先给出加载提示，不让面板空白
+    this.listEl.innerHTML = `<p class="hint" style="padding:12px">加载中…</p>`;
     try {
       this.cwd = (initialDir && initialDir.trim()) || (await this.backend.home());
       await this.load();
     } catch (err) {
       this.initialized = false; // 首次列目录失败：允许下次打开重试，并提示而非静默空白
+      this.listEl.textContent = ""; // 清掉加载提示，避免失败后停留在「加载中…」
       toast(`无法打开${this.backend.kind === "remote" ? "远程" : ""}目录: ${err}`, true);
     }
   }
@@ -291,6 +297,10 @@ export class Explorer {
       row.classList.add("dragging");
     });
     row.addEventListener("dragend", () => row.classList.remove("dragging"));
+    // 双击图片文件也可预览（目录双击是进入，互不冲突）
+    row.addEventListener("dblclick", () => {
+      if (!entry.isDir && VIEWABLE_IMG.test(entry.name)) this.previewImage(entry);
+    });
     row.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -311,6 +321,10 @@ export class Explorer {
               },
             ];
       showMenu(e.clientX, e.clientY, [
+        // 图片（本地/远端）→ 弹图片查看器：缩放/旋转/平移
+        ...(!entry.isDir && VIEWABLE_IMG.test(entry.name)
+          ? [{ label: `预览 “${entry.name}”`, action: () => this.previewImage(entry) }]
+          : []),
         ...items,
         ...(entry.isDir
           ? [{ label: "进入目录", action: () => void this.navigate(entry.path) }]
@@ -320,5 +334,17 @@ export class Explorer {
       ]);
     });
     return row;
+  }
+
+  /** 弹出图片查看器：数据由后端整读（本地直读 / 远端经磁盘缓存），异步注入 */
+  private previewImage(entry: FsEntry): void {
+    const ext = entry.name.split(".").pop()?.toLowerCase() ?? "png";
+    const mime = IMAGE_MIME[ext] ?? "image/png";
+    showImageViewer(
+      entry.name,
+      api
+        .imagePreview(this.backend.connId ?? "local", entry.path)
+        .then((p) => `data:${mime};base64,${p.data}`),
+    );
   }
 }

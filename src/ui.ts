@@ -273,7 +273,7 @@ export function showFileTooltip(meta: FileMeta | null, x: number, y: number) {
 
 // ---------- 文件预览 ----------
 
-const IMAGE_MIME: Record<string, string> = {
+export const IMAGE_MIME: Record<string, string> = {
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
   webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml", ico: "image/x-icon",
 };
@@ -323,6 +323,147 @@ export function showPreview(path: string, preview: Preview) {
       window.removeEventListener("keydown", esc);
     }
   });
+  document.body.appendChild(overlay);
+}
+
+/**
+ * 图片查看器（文件面板右键「预览」）：滚轮/按钮缩放、左右旋转、拖拽平移，
+ * 双击在「适应窗口 ⇄ 100%」间切换。src 由调用方异步提供（远端需先取回/命中缓存），
+ * 弹窗先出「加载中」，避免慢网络下看似无响应。
+ */
+export function showImageViewer(name: string, load: Promise<string>): void {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal preview image-viewer">
+      <div class="preview-header">
+        <span class="preview-title"></span>
+        <div class="iv-tools">
+          <button class="btn" data-act="out" title="缩小">−</button>
+          <span class="iv-pct">--</span>
+          <button class="btn" data-act="in" title="放大">＋</button>
+          <button class="btn" data-act="fit" title="适应窗口">适应</button>
+          <button class="btn" data-act="ccw" title="向左旋转 90°">↺</button>
+          <button class="btn" data-act="cw" title="向右旋转 90°">↻</button>
+          <button class="btn" data-act="close">关闭</button>
+        </div>
+      </div>
+      <div class="preview-body"><p class="hint" style="padding:24px">加载中…</p></div>
+    </div>`;
+  overlay.querySelector(".preview-title")!.textContent = name;
+  const body = overlay.querySelector(".preview-body") as HTMLElement;
+  const pct = overlay.querySelector(".iv-pct") as HTMLElement;
+  const on = (act: string, fn: () => void) =>
+    overlay.querySelector(`[data-act="${act}"]`)!.addEventListener("click", fn);
+
+  let img: HTMLImageElement | null = null;
+  let scale = 1;
+  let rot = 0; // 仅 90° 步进
+  let tx = 0;
+  let ty = 0;
+
+  // translate 在最左（屏幕坐标系平移），旋转/缩放围绕图片中心，拖拽手感与方向无关
+  const apply = () => {
+    if (!img) return;
+    img.style.transform = `translate(${tx}px, ${ty}px) rotate(${rot}deg) scale(${scale})`;
+    pct.textContent = `${Math.round(scale * 100)}%`;
+  };
+  /** 适应窗口的缩放比（旋转 90/270° 时宽高互换）；小图不放大（上限 100%） */
+  const fitScale = () => {
+    if (!img || !img.naturalWidth || !img.naturalHeight) return 1;
+    const swap = rot % 180 !== 0;
+    const w = swap ? img.naturalHeight : img.naturalWidth;
+    const h = swap ? img.naturalWidth : img.naturalHeight;
+    return Math.min((body.clientWidth - 32) / w, (body.clientHeight - 32) / h, 1) || 1;
+  };
+  const fit = () => {
+    scale = fitScale();
+    tx = ty = 0;
+    apply();
+  };
+  const zoom = (factor: number) => {
+    scale = Math.min(20, Math.max(0.05, scale * factor));
+    apply();
+  };
+  const rotate = (deg: number) => {
+    rot = (rot + deg + 360) % 360;
+    fit(); // 旋转后宽高互换，重新适应最不易「转丢」
+  };
+
+  const close = () => {
+    overlay.remove();
+    window.removeEventListener("keydown", onKey);
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") close();
+  };
+  window.addEventListener("keydown", onKey);
+  overlay.addEventListener("mousedown", (e) => {
+    if (e.target === overlay) close();
+  });
+  on("close", close);
+  on("in", () => zoom(1.25));
+  on("out", () => zoom(0.8));
+  on("fit", fit);
+  on("ccw", () => rotate(-90));
+  on("cw", () => rotate(90));
+
+  body.addEventListener(
+    "wheel",
+    (e) => {
+      e.preventDefault();
+      zoom(e.deltaY < 0 ? 1.12 : 1 / 1.12);
+    },
+    { passive: false },
+  );
+  body.addEventListener("mousedown", (e) => {
+    if (!img || e.button !== 0) return;
+    e.preventDefault();
+    const sx = e.clientX - tx;
+    const sy = e.clientY - ty;
+    img.classList.add("panning");
+    const move = (ev: MouseEvent) => {
+      tx = ev.clientX - sx;
+      ty = ev.clientY - sy;
+      apply();
+    };
+    const up = () => {
+      img?.classList.remove("panning");
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  });
+  body.addEventListener("dblclick", () => {
+    if (!img) return;
+    const f = fitScale();
+    scale = Math.abs(scale - f) < 0.001 ? 1 : f; // 适应 ⇄ 100%
+    tx = ty = 0;
+    apply();
+  });
+
+  const showHint = (text: string) => {
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.style.padding = "24px";
+    p.textContent = text;
+    body.replaceChildren(p);
+  };
+  load
+    .then((src) => {
+      const el = document.createElement("img");
+      el.draggable = false; // 禁掉原生拖拽幽灵图，让位给平移
+      el.onload = () => {
+        img = el;
+        body.replaceChildren(el);
+        fit();
+      };
+      el.onerror = () => showHint("图片解码失败，格式可能不受支持");
+      el.src = src;
+    })
+    .catch((err) => showHint(`加载失败: ${err}`));
+
   document.body.appendChild(overlay);
 }
 

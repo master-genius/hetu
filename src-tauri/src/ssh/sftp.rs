@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use base64::Engine;
+use russh::ChannelMsg;
 use russh_sftp::client::SftpSession;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -57,6 +58,30 @@ impl TransferCtl {
     /// 取消（终态，不可逆；任意非取消态皆可切入）
     pub fn cancel(&self) {
         self.transition(None, T_CANCELLED);
+    }
+
+    /// 取消信号：状态变为「已取消」时 resolve（用于 select! 抢占阻塞中的网络读写，
+    /// 使取消无需等当前 64KB 读/写完成或 TCP 超时即可立即中止）。
+    async fn cancelled(&self) {
+        let mut rx = self.tx.subscribe();
+        loop {
+            if *rx.borrow_and_update() == T_CANCELLED {
+                return;
+            }
+            if rx.changed().await.is_err() {
+                return; // 发送端被丢弃，视同取消
+            }
+        }
+    }
+
+    /// 让一段远端操作可被取消抢占：取消时立即返回 Err(Cancelled)，不等操作完成。
+    /// 用于数据块读写之外的慢阶段（目录树枚举、骨架创建），使取消全程即时。
+    async fn preempt<T>(&self, fut: impl std::future::Future<Output = Result<T>>) -> Result<T> {
+        tokio::select! {
+            biased;
+            _ = self.cancelled() => Err(Error::Cancelled),
+            r = fut => r,
+        }
     }
 
     /// 传输循环闸门：运行→立即放行；暂停→挂起等待；取消→返回错误中止本次传输。
@@ -276,6 +301,39 @@ pub async fn preview(conn: &Arc<Connection>, path: &str, max_bytes: u64) -> Resu
     result
 }
 
+/// 整读远端文件（图片预览缓存用）。超过 limit 直接报错，避免大文件驻留内存。
+pub async fn read_file_bytes(conn: &Arc<Connection>, path: &str, limit: u64) -> Result<Vec<u8>> {
+    let sftp = session(conn).await?;
+    let result = async {
+        let meta = sftp.metadata(path).await?;
+        let size = meta.size.unwrap_or(0);
+        if size > limit {
+            return Err(Error::msg(format!("文件过大（{size} 字节）")));
+        }
+        let mut file = sftp.open(path).await?;
+        let mut buf = Vec::with_capacity(size as usize);
+        let mut chunk = vec![0u8; 64 * 1024];
+        loop {
+            let n = file.read(&mut chunk).await?;
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+            // stat 与读取之间文件可能被写大——按实际读取量二次设限
+            if buf.len() as u64 > limit {
+                return Err(Error::msg("文件在读取过程中超过大小上限"));
+            }
+        }
+        Ok(buf)
+    }
+    .await;
+    // 与 preview 一致：失败统一失效缓存会话（业务性失败也失效无害，下次自动重建）
+    if result.is_err() {
+        invalidate(conn).await;
+    }
+    result
+}
+
 /// 传输进度事件（上传/下载共用）
 fn emit_progress(app: &AppHandle, id: &str, name: &str, done: u64, total: u64, dir: &str) {
     let _ = app.emit(
@@ -308,7 +366,16 @@ async fn download_file(
             let _ = tokio::fs::remove_file(local).await;
             return Err(e);
         }
-        let n = src.read(&mut buf).await?;
+        // 抢占式取消：读阻塞在慢/停滞的网络上时，取消无需等这次读完成即可中止
+        let n = tokio::select! {
+            biased;
+            _ = ctl.cancelled() => {
+                drop(dst);
+                let _ = tokio::fs::remove_file(local).await;
+                return Err(Error::Cancelled);
+            }
+            r = src.read(&mut buf) => r?,
+        };
         if n == 0 {
             break;
         }
@@ -338,16 +405,33 @@ async fn upload_file(
     loop {
         // 每块前过闸门：暂停则挂起，取消则中止并清理半成品远端文件
         if let Err(e) = ctl.gate().await {
-            let _ = dst.shutdown().await;
-            drop(dst);
-            let _ = sftp.remove_file(remote).await;
+            // 清理是远端操作，限时执行：网络停滞时不让取消路径自身挂起
+            cleanup_bounded(async {
+                let _ = dst.shutdown().await;
+                drop(dst);
+                let _ = sftp.remove_file(remote).await;
+            })
+            .await;
             return Err(e);
         }
         let n = src.read(&mut buf).await?;
         if n == 0 {
             break;
         }
-        dst.write_all(&buf[..n]).await?;
+        // 抢占式取消：写阻塞在慢/停滞的远端网络上时，取消无需等这次写完成即可中止
+        tokio::select! {
+            biased;
+            _ = ctl.cancelled() => {
+                cleanup_bounded(async {
+                    let _ = dst.shutdown().await;
+                    drop(dst);
+                    let _ = sftp.remove_file(remote).await;
+                })
+                .await;
+                return Err(Error::Cancelled);
+            }
+            r = dst.write_all(&buf[..n]) => r?,
+        }
         *done += n as u64;
         emit_progress(app, transfer_id, label, *done, total, "upload");
     }
@@ -358,6 +442,12 @@ async fn upload_file(
 
 fn is_dir_mode(mode: u32) -> bool {
     mode & 0o170000 == 0o040000
+}
+
+/// 取消后的远端清理：网络可能已停滞（这正是用户点取消的典型场景），限时 best-effort，
+/// 超时放弃回滚——留半成品优于让取消路径挂死等 TCP 超时。
+async fn cleanup_bounded(fut: impl std::future::Future<Output = ()>) {
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), fut).await;
 }
 
 /// 目录条目名安全校验：拒绝 "."/".." 与含路径分隔符的名字。
@@ -459,7 +549,7 @@ pub async fn download(
     let name = remote.rsplit('/').next().unwrap_or(remote).to_string();
     // 主体失败即失效缓存的 SFTP 会话（会话可能已随连接中断而失效），下次自动重建
     let result = async {
-        let meta = sftp.metadata(remote).await?;
+        let meta = ctl.preempt(async { Ok(sftp.metadata(remote).await?) }).await?;
         let mut done = 0u64;
 
         if !is_dir_mode(meta.permissions.unwrap_or(0)) {
@@ -469,9 +559,10 @@ pub async fn download(
             return Ok(());
         }
 
-        // 目录：local 是父目录，先建目录骨架再逐文件下载
+        // 目录：local 是父目录，先建目录骨架再逐文件下载。
+        // 枚举整棵远端树可能很慢（大目录/停滞网络），允许取消抢占
         let root = format!("{}/{}", local.trim_end_matches('/'), name);
-        let (dirs, files, total) = walk_remote(&sftp, remote).await?;
+        let (dirs, files, total) = ctl.preempt(walk_remote(&sftp, remote)).await?;
         tokio::fs::create_dir_all(&root).await?;
         for d in &dirs {
             tokio::fs::create_dir_all(format!("{root}/{d}")).await?;
@@ -529,26 +620,35 @@ pub async fn upload(
             return Ok(());
         }
 
-        // 目录：先建远端目录骨架（已存在则忽略错误），再逐文件上传
+        // 目录：先建远端目录骨架（已存在则忽略错误），再逐文件上传。
+        // 骨架创建是逐目录的远端调用，允许取消抢占（不回滚：目录可能本就存在）
         let (dirs, files, total) = walk_local(local_path)?;
-        let _ = sftp.create_dir(&remote_root).await;
-        for d in &dirs {
-            let _ = sftp.create_dir(&format!("{remote_root}/{d}")).await;
-        }
+        ctl.preempt(async {
+            let _ = sftp.create_dir(&remote_root).await;
+            for d in &dirs {
+                let _ = sftp.create_dir(&format!("{remote_root}/{d}")).await;
+            }
+            Ok(())
+        })
+        .await?;
         let count = files.len();
         for (i, (lpath, rel)) in files.iter().enumerate() {
             let label = format!("{name}/{rel} ({}/{count})", i + 1);
             match upload_file(app, &sftp, ctl, lpath, &format!("{remote_root}/{rel}"), transfer_id, &label, &mut done, total).await {
                 Ok(()) => {}
-                // 取消：best-effort 回滚远端已建的树——先删文件，再逆序删目录，最后删根
+                // 取消：best-effort 回滚远端已建的树——先删文件，再逆序删目录，最后删根。
+                // 回滚是 O(N) 次串行远端调用，整体限时：网络停滞/大目录时不让取消挂死
                 Err(Error::Cancelled) => {
-                    for (_, r) in &files {
-                        let _ = sftp.remove_file(format!("{remote_root}/{r}")).await;
-                    }
-                    for d in dirs.iter().rev() {
-                        let _ = sftp.remove_dir(format!("{remote_root}/{d}")).await;
-                    }
-                    let _ = sftp.remove_dir(remote_root.clone()).await;
+                    cleanup_bounded(async {
+                        for (_, r) in &files {
+                            let _ = sftp.remove_file(format!("{remote_root}/{r}")).await;
+                        }
+                        for d in dirs.iter().rev() {
+                            let _ = sftp.remove_dir(format!("{remote_root}/{d}")).await;
+                        }
+                        let _ = sftp.remove_dir(remote_root.clone()).await;
+                    })
+                    .await;
                     return Err(Error::Cancelled);
                 }
                 Err(e) => return Err(e),
@@ -593,4 +693,236 @@ pub async fn home(conn: &Arc<Connection>) -> Result<String> {
             Err(e.into())
         }
     }
+}
+
+// ---------- 远程 → 远程复制（面板条目拖到远程终端）----------
+
+/// POSIX shell 单引号转义：任意字节序列安全嵌入命令行（' → '\''）
+fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+/// 在连接上执行一条命令，返回 (退出码, stderr)。退出码 None 表示服务器未上报。
+/// 抢占取消由调用方用 `ctl.preempt` 包裹：future 被 drop 时 channel 随之关闭，
+/// 服务端（OpenSSH）会终止会话子进程，属 best-effort 中止。
+async fn exec_status(conn: &Arc<Connection>, cmd: &str) -> Result<(Option<u32>, String)> {
+    let mut channel = {
+        let guard = conn.handle.lock().await;
+        let handle = guard.as_ref().ok_or_else(|| Error::msg("连接未建立"))?;
+        handle.channel_open_session().await?
+    };
+    channel.exec(true, cmd).await?;
+    let mut code = None;
+    let mut stderr = Vec::new();
+    while let Some(msg) = channel.wait().await {
+        match msg {
+            ChannelMsg::ExtendedData { data, .. } => stderr.extend_from_slice(&data),
+            ChannelMsg::ExitStatus { exit_status } => code = Some(exit_status),
+            _ => {}
+        }
+    }
+    Ok((code, String::from_utf8_lossy(&stderr).into_owned()))
+}
+
+/// 同连接快路径：服务器内 `cp -a`，零下行/上行带宽。
+/// Ok(true)=已复制；Ok(false)=快路径不可用（无 cp / exec 失败），调用方回退流式；
+/// Err=真实失败（权限/空间等，流式多半也会失败，直接上报）或已取消。
+async fn try_server_side_cp(
+    conn: &Arc<Connection>,
+    ctl: &TransferCtl,
+    src: &str,
+    dst_dir: &str,
+) -> Result<bool> {
+    let cmd = format!("cp -a -- {} {}/", sh_quote(src), sh_quote(dst_dir));
+    let (code, stderr) = match ctl.preempt(exec_status(conn, &cmd)).await {
+        Ok(r) => r,
+        Err(Error::Cancelled) => return Err(Error::Cancelled),
+        Err(_) => return Ok(false), // exec 通道打开/请求失败 → 回退流式
+    };
+    match code {
+        Some(0) => Ok(true),
+        // 126/127（cp 不可执行/不存在，如 Windows sshd）或未上报退出码 → 回退流式
+        Some(126) | Some(127) | None => Ok(false),
+        Some(c) => Err(Error::msg(format!(
+            "服务器内复制失败（退出码 {c}）: {}",
+            stderr.trim()
+        ))),
+    }
+}
+
+/// 跨会话单文件流式复制：src 连接读 → dst 连接写，不落本地盘。
+/// 先写临时名、全部写完再 rename 覆盖——即使目标与源是同一物理文件
+/// （不同连接名指向同一服务器的未检出别名），也绝不会发生「先截断后读空」的数据丢失。
+#[allow(clippy::too_many_arguments)]
+async fn copy_file_between(
+    app: &AppHandle,
+    src_sftp: &SftpSession,
+    dst_sftp: &SftpSession,
+    ctl: &TransferCtl,
+    src: &str,
+    dst: &str,
+    transfer_id: &str,
+    label: &str,
+    done: &mut u64,
+    total: u64,
+) -> Result<()> {
+    let mut sf = src_sftp.open(src).await?;
+    // 临时名带 transfer_id 前 8 位，避免并发复制到同一目标时互相踩踏
+    let tmp = format!("{dst}.{}.part", &transfer_id[..8.min(transfer_id.len())]);
+    let mut df = dst_sftp.create(&tmp).await?;
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        // 每块前过闸门（暂停/取消），取消时限时清理目标端临时文件
+        if let Err(e) = ctl.gate().await {
+            cleanup_bounded(async {
+                let _ = df.shutdown().await;
+                drop(df);
+                let _ = dst_sftp.remove_file(&tmp).await;
+            })
+            .await;
+            return Err(e);
+        }
+        // 读/写均可被取消抢占（网络停滞时不等当前块完成）
+        let n = tokio::select! {
+            biased;
+            _ = ctl.cancelled() => {
+                cleanup_bounded(async {
+                    let _ = df.shutdown().await;
+                    drop(df);
+                    let _ = dst_sftp.remove_file(&tmp).await;
+                })
+                .await;
+                return Err(Error::Cancelled);
+            }
+            r = sf.read(&mut buf) => r?,
+        };
+        if n == 0 {
+            break;
+        }
+        tokio::select! {
+            biased;
+            _ = ctl.cancelled() => {
+                cleanup_bounded(async {
+                    let _ = df.shutdown().await;
+                    drop(df);
+                    let _ = dst_sftp.remove_file(&tmp).await;
+                })
+                .await;
+                return Err(Error::Cancelled);
+            }
+            r = df.write_all(&buf[..n]) => r?,
+        }
+        *done += n as u64;
+        emit_progress(app, transfer_id, label, *done, total, "upload");
+    }
+    df.flush().await?;
+    df.shutdown().await?;
+    drop(df);
+    // SFTP RENAME 在目标已存在时会失败：先删旧目标（不存在则忽略）再改名。
+    // 源已完整读入临时文件，即便目标恰为源本身（别名），此序列也只是原地等价替换。
+    let _ = dst_sftp.remove_file(dst).await;
+    dst_sftp.rename(&tmp, dst).await?;
+    Ok(())
+}
+
+/// 远程 → 远程复制（文件或整个目录）：
+/// - 同一连接：优先服务器内 `cp -a`（零中转带宽），cp 不可用时回退流式；
+/// - 跨连接：经客户端流式中转（src 读 → dst 写），不落本地盘。
+/// 数据安全：两端路径先 canonicalize 消除符号链接别名；同一服务器
+/// （同连接，或不同连接但 host:port 相同）上拒绝「复制到自身」与「目录复制进自己的子树」。
+/// 目录复制被取消时**不回滚**已复制部分：目标树可能与源存在未检出的别名重叠，
+/// 批量删除是全功能中风险最高的操作——保留半成品优于任何误删源数据的可能。
+pub async fn copy_remote(
+    app: &AppHandle,
+    src_conn: &Arc<Connection>,
+    dst_conn: &Arc<Connection>,
+    ctl: &TransferCtl,
+    src_path: &str,
+    dst_dir: &str,
+    transfer_id: &str,
+) -> Result<String> {
+    let src_sftp = session(src_conn).await?;
+    let dst_sftp = session(dst_conn).await?;
+    let result = async {
+        // 规范化两端路径（消除 symlink 别名），数据安全判定以规范路径为准
+        let canon_src = ctl
+            .preempt(async { Ok(src_sftp.canonicalize(src_path).await?) })
+            .await?;
+        let canon_dst = ctl
+            .preempt(async { Ok(dst_sftp.canonicalize(dst_dir).await?) })
+            .await?;
+        let name = canon_src
+            .trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .unwrap_or("")
+            .to_string();
+        if name.is_empty() {
+            return Err(Error::msg("不支持复制根目录"));
+        }
+        let dst_root = format!("{}/{}", canon_dst.trim_end_matches('/'), name);
+        let meta = ctl
+            .preempt(async { Ok(src_sftp.metadata(&canon_src).await?) })
+            .await?;
+        let is_dir = is_dir_mode(meta.permissions.unwrap_or(0));
+
+        // 同一服务器判定：同连接必然同服务器；不同连接按 host:port 相同兜底
+        let same_conn = src_conn.id == dst_conn.id;
+        let same_server = same_conn
+            || (src_conn.params.host == dst_conn.params.host
+                && src_conn.params.port == dst_conn.params.port);
+        if same_server {
+            if dst_root == canon_src {
+                return Err(Error::msg("目标与源相同，无需复制"));
+            }
+            if is_dir && (canon_dst == canon_src || canon_dst.starts_with(&format!("{canon_src}/"))) {
+                return Err(Error::msg("不能把目录复制到它自己的子目录中"));
+            }
+        }
+
+        // 快路径：同一连接 → 服务器内 cp（仅同连接才 100% 确定两个路径在同一台机器上）
+        if same_conn {
+            match try_server_side_cp(src_conn, ctl, &canon_src, &canon_dst).await? {
+                true => {
+                    let total = if is_dir { 0 } else { meta.size.unwrap_or(0) };
+                    emit_progress(app, transfer_id, &name, total, total, "upload");
+                    return Ok(dst_root);
+                }
+                false => {} // cp 不可用，落回流式
+            }
+        }
+
+        // 流式中转
+        let mut done = 0u64;
+        if !is_dir {
+            let total = meta.size.unwrap_or(0);
+            copy_file_between(app, &src_sftp, &dst_sftp, ctl, &canon_src, &dst_root, transfer_id, &name, &mut done, total).await?;
+            emit_progress(app, transfer_id, &name, done, done.max(total), "upload");
+            return Ok(dst_root);
+        }
+        // 目录：走一遍源树 → 目标端建骨架 → 逐文件复制（骨架已存在则忽略，与上传一致）
+        let (dirs, files, total) = ctl.preempt(walk_remote(&src_sftp, &canon_src)).await?;
+        ctl.preempt(async {
+            let _ = dst_sftp.create_dir(&dst_root).await;
+            for d in &dirs {
+                let _ = dst_sftp.create_dir(&format!("{dst_root}/{d}")).await;
+            }
+            Ok(())
+        })
+        .await?;
+        let count = files.len();
+        for (i, (spath, rel, _)) in files.iter().enumerate() {
+            let label = format!("{name}/{rel} ({}/{count})", i + 1);
+            copy_file_between(app, &src_sftp, &dst_sftp, ctl, spath, &format!("{dst_root}/{rel}"), transfer_id, &label, &mut done, total).await?;
+        }
+        emit_progress(app, transfer_id, &name, done, total, "upload");
+        Ok(dst_root)
+    }
+    .await;
+    // 取消是主动行为不失效会话；真实故障时两端会话都可能已坏，均失效待重建
+    if matches!(&result, Err(e) if !matches!(e, Error::Cancelled)) {
+        invalidate(src_conn).await;
+        invalidate(dst_conn).await;
+    }
+    result
 }

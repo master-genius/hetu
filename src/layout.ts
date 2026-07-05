@@ -14,6 +14,8 @@ export type LayoutNode =
 export class Layout {
   root: LayoutNode;
   readonly container: HTMLElement;
+  /** 结构/比例变化通知（拖动分割线结束时触发，供上层持久化会话） */
+  onChange: (() => void) | null = null;
 
   constructor(firstPane: Pane) {
     this.root = { type: "leaf", pane: firstPane };
@@ -43,15 +45,16 @@ export class Layout {
     return out;
   }
 
-  /** 将 target pane 分裂为两半，新 pane 放在后半 */
-  split(target: Pane, dir: SplitDir, newPane: Pane): void {
+  /** 将 target pane 分裂为两半，新 pane 放在后半。ratio 供会话恢复还原比例。 */
+  split(target: Pane, dir: SplitDir, newPane: Pane, ratio = 0.5): void {
+    const r = Math.min(0.9, Math.max(0.1, ratio));
     const replace = (n: LayoutNode): LayoutNode => {
       if (n.type === "leaf") {
         if (n.pane === target) {
           return {
             type: "split",
             dir,
-            ratio: 0.5,
+            ratio: r,
             a: { type: "leaf", pane: target },
             b: { type: "leaf", pane: newPane },
           };
@@ -128,6 +131,7 @@ export class Layout {
       const up = () => {
         window.removeEventListener("mousemove", move);
         window.removeEventListener("mouseup", up);
+        this.onChange?.(); // 拖动结束：比例已定，通知上层持久化
       };
       window.addEventListener("mousemove", move);
       window.addEventListener("mouseup", up);

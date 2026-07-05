@@ -65,12 +65,19 @@ export interface Settings {
   keybindings: Record<string, string>;
 }
 
+/** 分屏布局快照：只记结构与比例（不含 pane 内容），随会话持久化 */
+export type SessionLayout =
+  | { type: "leaf" }
+  | { type: "split"; dir: "row" | "col"; ratio: number; a: SessionLayout; b: SessionLayout };
+
 /** 会话中一个标签页的可持久化描述（不含任何机密） */
 export interface SessionTab {
   local: boolean;
   name: string;
   /** 来源连接项 id；无（临时/手输连接）则不恢复 */
   profileId?: string | null;
+  /** 分屏结构快照；缺省/叶子 = 单 pane，不切分 */
+  layout?: SessionLayout | null;
 }
 
 export interface ConnParams {
