@@ -1,7 +1,7 @@
 {
   "name": "hetushell",
   "private": true,
-  "version": "1.0.3",
+  "version": "1.0.5",
   "author": "BraveMaster",
   "type": "module",
   "scripts": {

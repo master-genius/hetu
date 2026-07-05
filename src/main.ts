@@ -634,8 +634,11 @@ async function bootstrap() {
         if (src) void downloadFile(src, path, targetDir);
       };
     }
-    if (explorerPanel.firstChild !== tab.explorer.element) {
-      explorerPanel.textContent = "";
+    // 仅替换已挂载的 explorer 子节点，保留常驻的尺寸把手（.panel-resize-*）；
+    // 不能用 textContent="" 整体清空（会连把手一起删，令面板尺寸调节失效）。
+    const mounted = explorerPanel.querySelector(":scope > .explorer");
+    if (mounted !== tab.explorer.element) {
+      mounted?.remove();
       explorerPanel.appendChild(tab.explorer.element);
     }
     explorerPanel.classList.add("open");
@@ -698,8 +701,10 @@ async function bootstrap() {
       };
       remoteExplorers.set(connId, ex);
     }
-    if (remotePanel.firstChild !== ex.element) {
-      remotePanel.textContent = "";
+    // 同 syncExplorerPanel：只替换已挂载的 explorer，保留尺寸把手
+    const mounted = remotePanel.querySelector(":scope > .explorer");
+    if (mounted !== ex.element) {
+      mounted?.remove();
       remotePanel.appendChild(ex.element);
     }
     remotePanel.classList.add("open");
