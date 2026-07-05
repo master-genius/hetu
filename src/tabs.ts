@@ -297,7 +297,15 @@ export class TabManager {
     this.onPaneCreated?.(pane, tab);
     tab.layout.split(target, dir, pane, ratio);
     tab.activePaneId = pane.id;
-    await pane.open();
+    try {
+      await pane.open();
+    } catch (err) {
+      // 打开失败（如连接正处于重连等待）：从布局回收，不留无 shell 的死分屏
+      tab.layout.close(pane);
+      tab.activePaneId = target.id;
+      this.onLayoutChange?.();
+      throw err;
+    }
     this.onLayoutChange?.(); // 分屏结构变化 → 面板同步 + 会话快照
     return pane;
   }
@@ -307,7 +315,13 @@ export class TabManager {
     const tab = this.active;
     target = target ?? this.activePane(tab ?? undefined) ?? undefined;
     if (!tab || !target) return;
-    const pane = await this.splitPane(tab, target, dir);
+    let pane: Pane | null;
+    try {
+      pane = await this.splitPane(tab, target, dir);
+    } catch (err) {
+      toast(`切分失败: ${err}`, true);
+      return;
+    }
     if (!pane) {
       toast(`已达到最大切分层级（${TabManager.MAX_SPLIT_DEPTH} 级）`, true);
       return;
@@ -397,6 +411,10 @@ export class TabManager {
         this.onLayoutChange?.();
         this.onNewTabRequest?.();
       }
+    } else {
+      // 关闭非活动标签（标签头右键）不走 activate，也要触发会话快照，否则
+      // session.json 残留已关闭的标签，下次启动被错误恢复
+      this.onLayoutChange?.();
     }
   }
 

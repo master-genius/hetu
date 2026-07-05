@@ -288,7 +288,10 @@ async fn sftp_preview(
 #[tauri::command]
 async fn image_preview(state: State<'_>, conn_id: String, path: String) -> Result<cache::ImageData> {
     if conn_id == "local" {
-        cache::local_image(&path)
+        // 同步文件读取放到阻塞线程池，不占用异步执行器
+        tokio::task::spawn_blocking(move || cache::local_image(&path))
+            .await
+            .map_err(|e| Error::msg(format!("预览任务失败: {e}")))?
     } else {
         let conn = get_conn(&state, &conn_id).await?;
         cache::remote_image(&conn, &path).await

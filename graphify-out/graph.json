@@ -202,10 +202,28 @@
       "norm_label": "author"
     },
     {
-      "label": "type",
+      "label": "license",
       "file_type": "code",
       "source_file": "package.json",
       "source_location": "L6",
+      "id": "hetu_package_license",
+      "community": 5,
+      "norm_label": "license"
+    },
+    {
+      "label": "repository",
+      "file_type": "code",
+      "source_file": "package.json",
+      "source_location": "L7",
+      "id": "hetu_package_repository",
+      "community": 5,
+      "norm_label": "repository"
+    },
+    {
+      "label": "type",
+      "file_type": "code",
+      "source_file": "package.json",
+      "source_location": "L8",
       "id": "hetu_package_type",
       "community": 5,
       "norm_label": "type"
@@ -214,7 +232,7 @@
       "label": "scripts",
       "file_type": "code",
       "source_file": "package.json",
-      "source_location": "L7",
+      "source_location": "L9",
       "id": "hetu_package_scripts",
       "community": 5,
       "norm_label": "scripts"
@@ -223,7 +241,7 @@
       "label": "dev",
       "file_type": "code",
       "source_file": "package.json",
-      "source_location": "L8",
+      "source_location": "L10",
       "id": "hetu_package_scripts_dev",
       "community": 5,
       "norm_label": "dev"
@@ -232,7 +250,7 @@
       "label": "build",
       "file_type": "code",
       "source_file": "package.json",
-      "source_location": "L9",
+      "source_location": "L11",
       "id": "hetu_package_scripts_build",
       "community": 5,
       "norm_label": "build"
@@ -241,7 +259,7 @@
       "label": "preview",
       "file_type": "code",
       "source_file": "package.json",
-      "source_location": "L10",
+      "source_location": "L12",
       "id": "hetu_package_scripts_preview",
       "community": 5,
       "norm_label": "preview"
@@ -250,7 +268,7 @@
       "label": "tauri",
       "file_type": "code",
       "source_file": "package.json",
-      "source_location": "L11",
+      "source_location": "L13",
       "id": "hetu_package_scripts_tauri",
       "community": 5,
       "norm_label": "tauri"
@@ -259,7 +277,7 @@
       "label": "dependencies",
       "file_type": "code",
       "source_file": "package.json",
-      "source_location": "L13",
+      "source_location": "L15",
       "id": "hetu_package_dependencies",
       "community": 5,
       "norm_label": "dependencies"
@@ -268,7 +286,7 @@
       "label": "@tauri-apps/api",
       "file_type": "code",
       "source_file": "package.json",
-      "source_location": "L14",
+      "source_location": "L16",
       "id": "hetu_package_dependencies_tauri_apps_api",
       "community": 5,
       "norm_label": "@tauri-apps/api"
@@ -277,7 +295,7 @@
       "label": "@tauri-apps/plugin-clipboard-manager",
       "file_type": "code",
       "source_file": "package.json",
-      "source_location": "L15",
+      "source_location": "L17",
       "id": "hetu_package_dependencies_tauri_apps_plugin_clipboard_manager",
       "community": 5,
       "norm_label": "@tauri-apps/plugin-clipboard-manager"
@@ -286,7 +304,7 @@
       "label": "@tauri-apps/plugin-dialog",
       "file_type": "code",
       "source_file": "package.json",
-      "source_location": "L16",
+      "source_location": "L18",
       "id": "hetu_package_dependencies_tauri_apps_plugin_dialog",
       "community": 5,
       "norm_label": "@tauri-apps/plugin-dialog"
@@ -295,7 +313,7 @@
       "label": "@xterm/addon-fit",
       "file_type": "code",
       "source_file": "package.json",
-      "source_location": "L17",
+      "source_location": "L19",
       "id": "hetu_package_dependencies_xterm_addon_fit",
       "community": 5,
       "norm_label": "@xterm/addon-fit"
@@ -304,7 +322,7 @@
       "label": "@xterm/addon-web-links",
       "file_type": "code",
       "source_file": "package.json",
-      "source_location": "L18",
+      "source_location": "L20",
       "id": "hetu_package_dependencies_xterm_addon_web_links",
       "community": 5,
       "norm_label": "@xterm/addon-web-links"
@@ -313,7 +331,7 @@
       "label": "@xterm/addon-webgl",
       "file_type": "code",
       "source_file": "package.json",
-      "source_location": "L19",
+      "source_location": "L21",
       "id": "hetu_package_dependencies_xterm_addon_webgl",
       "community": 5,
       "norm_label": "@xterm/addon-webgl"
@@ -322,7 +340,7 @@
       "label": "@xterm/xterm",
       "file_type": "code",
       "source_file": "package.json",
-      "source_location": "L20",
+      "source_location": "L22",
       "id": "hetu_package_dependencies_xterm_xterm",
       "community": 5,
       "norm_label": "@xterm/xterm"
@@ -331,7 +349,7 @@
       "label": "devDependencies",
       "file_type": "code",
       "source_file": "package.json",
-      "source_location": "L22",
+      "source_location": "L24",
       "id": "hetu_package_devdependencies",
       "community": 5,
       "norm_label": "devdependencies"
@@ -340,7 +358,7 @@
       "label": "@tauri-apps/cli",
       "file_type": "code",
       "source_file": "package.json",
-      "source_location": "L23",
+      "source_location": "L25",
       "id": "hetu_package_devdependencies_tauri_apps_cli",
       "community": 5,
       "norm_label": "@tauri-apps/cli"
@@ -349,7 +367,7 @@
       "label": "typescript",
       "file_type": "code",
       "source_file": "package.json",
-      "source_location": "L24",
+      "source_location": "L26",
       "id": "hetu_package_devdependencies_typescript",
       "community": 5,
       "norm_label": "typescript"
@@ -358,7 +376,7 @@
       "label": "vite",
       "file_type": "code",
       "source_file": "package.json",
-      "source_location": "L25",
+      "source_location": "L27",
       "id": "hetu_package_devdependencies_vite",
       "community": 5,
       "norm_label": "vite"
@@ -1233,7 +1251,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "root_source_superssh_src_tauri_gen_schemas_acl_manifests_json",
-      "community": 40,
+      "community": 3,
       "norm_label": "acl-manifests.json"
     },
     {
@@ -1242,7 +1260,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_clipboard_manager",
-      "community": 40,
+      "community": 7,
       "norm_label": "clipboard-manager"
     },
     {
@@ -1251,7 +1269,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_clipboard_manager_default_permission",
-      "community": 40,
+      "community": 3,
       "norm_label": "default_permission"
     },
     {
@@ -1260,7 +1278,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_default_permission_identifier",
-      "community": 40,
+      "community": 3,
       "norm_label": "identifier"
     },
     {
@@ -1269,7 +1287,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_default_permission_description",
-      "community": 40,
+      "community": 3,
       "norm_label": "description"
     },
     {
@@ -1278,7 +1296,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_default_permission_permissions",
-      "community": 40,
+      "community": 3,
       "norm_label": "permissions"
     },
     {
@@ -1296,7 +1314,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_allow_clear",
-      "community": 42,
+      "community": 7,
       "norm_label": "allow-clear"
     },
     {
@@ -1305,7 +1323,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_clear_identifier",
-      "community": 42,
+      "community": 7,
       "norm_label": "identifier"
     },
     {
@@ -1314,7 +1332,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_clear_description",
-      "community": 42,
+      "community": 7,
       "norm_label": "description"
     },
     {
@@ -1323,7 +1341,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_clear_commands",
-      "community": 42,
+      "community": 7,
       "norm_label": "commands"
     },
     {
@@ -1332,7 +1350,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_commands_allow",
-      "community": 37,
+      "community": 38,
       "norm_label": "allow"
     },
     {
@@ -1458,7 +1476,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_allow_write_image",
-      "community": 7,
+      "community": 38,
       "norm_label": "allow-write-image"
     },
     {
@@ -1467,7 +1485,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_write_image_identifier",
-      "community": 7,
+      "community": 38,
       "norm_label": "identifier"
     },
     {
@@ -1476,7 +1494,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_write_image_description",
-      "community": 7,
+      "community": 38,
       "norm_label": "description"
     },
     {
@@ -1485,7 +1503,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_write_image_commands",
-      "community": 7,
+      "community": 38,
       "norm_label": "commands"
     },
     {
@@ -1566,7 +1584,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_deny_read_image",
-      "community": 54,
+      "community": 7,
       "norm_label": "deny-read-image"
     },
     {
@@ -1575,7 +1593,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_read_image_identifier",
-      "community": 54,
+      "community": 7,
       "norm_label": "identifier"
     },
     {
@@ -1584,7 +1602,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_read_image_description",
-      "community": 54,
+      "community": 7,
       "norm_label": "description"
     },
     {
@@ -1593,7 +1611,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_read_image_commands",
-      "community": 54,
+      "community": 7,
       "norm_label": "commands"
     },
     {
@@ -1602,7 +1620,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_deny_read_text",
-      "community": 56,
+      "community": 7,
       "norm_label": "deny-read-text"
     },
     {
@@ -1611,7 +1629,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_read_text_identifier",
-      "community": 56,
+      "community": 7,
       "norm_label": "identifier"
     },
     {
@@ -1620,7 +1638,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_read_text_description",
-      "community": 56,
+      "community": 7,
       "norm_label": "description"
     },
     {
@@ -1629,7 +1647,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_read_text_commands",
-      "community": 56,
+      "community": 7,
       "norm_label": "commands"
     },
     {
@@ -1638,7 +1656,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_deny_write_html",
-      "community": 58,
+      "community": 7,
       "norm_label": "deny-write-html"
     },
     {
@@ -1647,7 +1665,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_write_html_identifier",
-      "community": 58,
+      "community": 7,
       "norm_label": "identifier"
     },
     {
@@ -1656,7 +1674,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_write_html_description",
-      "community": 58,
+      "community": 7,
       "norm_label": "description"
     },
     {
@@ -1665,7 +1683,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_write_html_commands",
-      "community": 58,
+      "community": 7,
       "norm_label": "commands"
     },
     {
@@ -1746,7 +1764,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_clipboard_manager_permission_sets",
-      "community": 40,
+      "community": 7,
       "norm_label": "permission_sets"
     },
     {
@@ -1755,7 +1773,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_clipboard_manager_global_scope_schema",
-      "community": 40,
+      "community": 7,
       "norm_label": "global_scope_schema"
     },
     {
@@ -1764,7 +1782,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_core",
-      "community": 40,
+      "community": 3,
       "norm_label": "core"
     },
     {
@@ -1773,7 +1791,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_core_default_permission",
-      "community": 40,
+      "community": 3,
       "norm_label": "default_permission"
     },
     {
@@ -1782,7 +1800,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_core_permissions",
-      "community": 40,
+      "community": 3,
       "norm_label": "permissions"
     },
     {
@@ -1791,7 +1809,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_core_permission_sets",
-      "community": 40,
+      "community": 3,
       "norm_label": "permission_sets"
     },
     {
@@ -1800,7 +1818,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_core_global_scope_schema",
-      "community": 40,
+      "community": 3,
       "norm_label": "global_scope_schema"
     },
     {
@@ -1818,7 +1836,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_core_app_default_permission",
-      "community": 40,
+      "community": 3,
       "norm_label": "default_permission"
     },
     {
@@ -1872,7 +1890,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_allow_app_show",
-      "community": 20,
+      "community": 28,
       "norm_label": "allow-app-show"
     },
     {
@@ -1881,7 +1899,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_app_show_identifier",
-      "community": 20,
+      "community": 28,
       "norm_label": "identifier"
     },
     {
@@ -1890,7 +1908,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_app_show_description",
-      "community": 20,
+      "community": 28,
       "norm_label": "description"
     },
     {
@@ -1899,7 +1917,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_app_show_commands",
-      "community": 20,
+      "community": 28,
       "norm_label": "commands"
     },
     {
@@ -1944,7 +1962,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_allow_default_window_icon",
-      "community": 37,
+      "community": 68,
       "norm_label": "allow-default-window-icon"
     },
     {
@@ -1953,7 +1971,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_default_window_icon_identifier",
-      "community": 37,
+      "community": 68,
       "norm_label": "identifier"
     },
     {
@@ -1962,7 +1980,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_default_window_icon_description",
-      "community": 37,
+      "community": 68,
       "norm_label": "description"
     },
     {
@@ -1971,7 +1989,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_default_window_icon_commands",
-      "community": 37,
+      "community": 68,
       "norm_label": "commands"
     },
     {
@@ -2052,7 +2070,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_allow_name",
-      "community": 46,
+      "community": 28,
       "norm_label": "allow-name"
     },
     {
@@ -2061,7 +2079,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_name_identifier",
-      "community": 46,
+      "community": 28,
       "norm_label": "identifier"
     },
     {
@@ -2070,7 +2088,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_name_description",
-      "community": 46,
+      "community": 28,
       "norm_label": "description"
     },
     {
@@ -2079,7 +2097,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_name_commands",
-      "community": 46,
+      "community": 28,
       "norm_label": "commands"
     },
     {
@@ -2124,7 +2142,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_allow_remove_data_store",
-      "community": 28,
+      "community": 34,
       "norm_label": "allow-remove-data-store"
     },
     {
@@ -2133,7 +2151,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_remove_data_store_identifier",
-      "community": 28,
+      "community": 34,
       "norm_label": "identifier"
     },
     {
@@ -2142,7 +2160,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_remove_data_store_description",
-      "community": 28,
+      "community": 34,
       "norm_label": "description"
     },
     {
@@ -2151,7 +2169,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_remove_data_store_commands",
-      "community": 28,
+      "community": 34,
       "norm_label": "commands"
     },
     {
@@ -2160,7 +2178,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_allow_remove_listener",
-      "community": 52,
+      "community": 28,
       "norm_label": "allow-remove-listener"
     },
     {
@@ -2169,7 +2187,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_remove_listener_identifier",
-      "community": 52,
+      "community": 28,
       "norm_label": "identifier"
     },
     {
@@ -2178,7 +2196,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_remove_listener_description",
-      "community": 52,
+      "community": 28,
       "norm_label": "description"
     },
     {
@@ -2187,7 +2205,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_remove_listener_commands",
-      "community": 52,
+      "community": 28,
       "norm_label": "commands"
     },
     {
@@ -2304,7 +2322,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_allow_tauri_version",
-      "community": 1,
+      "community": 28,
       "norm_label": "allow-tauri-version"
     },
     {
@@ -2313,7 +2331,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_tauri_version_identifier",
-      "community": 1,
+      "community": 28,
       "norm_label": "identifier"
     },
     {
@@ -2322,7 +2340,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_tauri_version_description",
-      "community": 1,
+      "community": 28,
       "norm_label": "description"
     },
     {
@@ -2331,7 +2349,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_tauri_version_commands",
-      "community": 1,
+      "community": 28,
       "norm_label": "commands"
     },
     {
@@ -2340,7 +2358,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_allow_version",
-      "community": 28,
+      "community": 46,
       "norm_label": "allow-version"
     },
     {
@@ -2349,7 +2367,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_version_identifier",
-      "community": 28,
+      "community": 46,
       "norm_label": "identifier"
     },
     {
@@ -2358,7 +2376,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_version_description",
-      "community": 28,
+      "community": 46,
       "norm_label": "description"
     },
     {
@@ -2367,7 +2385,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_version_commands",
-      "community": 28,
+      "community": 46,
       "norm_label": "commands"
     },
     {
@@ -2412,7 +2430,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_deny_app_show",
-      "community": 68,
+      "community": 48,
       "norm_label": "deny-app-show"
     },
     {
@@ -2421,7 +2439,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_app_show_identifier",
-      "community": 68,
+      "community": 48,
       "norm_label": "identifier"
     },
     {
@@ -2430,7 +2448,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_app_show_description",
-      "community": 68,
+      "community": 48,
       "norm_label": "description"
     },
     {
@@ -2439,7 +2457,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_app_show_commands",
-      "community": 68,
+      "community": 48,
       "norm_label": "commands"
     },
     {
@@ -2556,7 +2574,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_deny_identifier",
-      "community": 37,
+      "community": 52,
       "norm_label": "deny-identifier"
     },
     {
@@ -2565,7 +2583,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_identifier_identifier",
-      "community": 37,
+      "community": 52,
       "norm_label": "identifier"
     },
     {
@@ -2574,7 +2592,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_identifier_description",
-      "community": 37,
+      "community": 52,
       "norm_label": "description"
     },
     {
@@ -2583,7 +2601,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_identifier_commands",
-      "community": 37,
+      "community": 52,
       "norm_label": "commands"
     },
     {
@@ -2592,7 +2610,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_deny_name",
-      "community": 28,
+      "community": 38,
       "norm_label": "deny-name"
     },
     {
@@ -2601,7 +2619,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_name_identifier",
-      "community": 28,
+      "community": 38,
       "norm_label": "identifier"
     },
     {
@@ -2610,7 +2628,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_name_description",
-      "community": 28,
+      "community": 38,
       "norm_label": "description"
     },
     {
@@ -2619,7 +2637,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_name_commands",
-      "community": 28,
+      "community": 38,
       "norm_label": "commands"
     },
     {
@@ -2664,7 +2682,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_deny_remove_data_store",
-      "community": 34,
+      "community": 68,
       "norm_label": "deny-remove-data-store"
     },
     {
@@ -2673,7 +2691,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_remove_data_store_identifier",
-      "community": 34,
+      "community": 68,
       "norm_label": "identifier"
     },
     {
@@ -2682,7 +2700,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_remove_data_store_description",
-      "community": 34,
+      "community": 68,
       "norm_label": "description"
     },
     {
@@ -2691,7 +2709,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_remove_data_store_commands",
-      "community": 34,
+      "community": 68,
       "norm_label": "commands"
     },
     {
@@ -2700,7 +2718,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_deny_remove_listener",
-      "community": 68,
+      "community": 54,
       "norm_label": "deny-remove-listener"
     },
     {
@@ -2709,7 +2727,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_remove_listener_identifier",
-      "community": 68,
+      "community": 54,
       "norm_label": "identifier"
     },
     {
@@ -2718,7 +2736,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_remove_listener_description",
-      "community": 68,
+      "community": 54,
       "norm_label": "description"
     },
     {
@@ -2727,7 +2745,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_remove_listener_commands",
-      "community": 68,
+      "community": 54,
       "norm_label": "commands"
     },
     {
@@ -2808,7 +2826,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_deny_supports_multiple_windows",
-      "community": 28,
+      "community": 56,
       "norm_label": "deny-supports-multiple-windows"
     },
     {
@@ -2817,7 +2835,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_supports_multiple_windows_identifier",
-      "community": 28,
+      "community": 56,
       "norm_label": "identifier"
     },
     {
@@ -2826,7 +2844,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_supports_multiple_windows_description",
-      "community": 28,
+      "community": 56,
       "norm_label": "description"
     },
     {
@@ -2835,7 +2853,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_supports_multiple_windows_commands",
-      "community": 28,
+      "community": 56,
       "norm_label": "commands"
     },
     {
@@ -2934,7 +2952,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_core_event",
-      "community": 40,
+      "community": 3,
       "norm_label": "core:event"
     },
     {
@@ -2943,7 +2961,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_core_event_default_permission",
-      "community": 40,
+      "community": 3,
       "norm_label": "default_permission"
     },
     {
@@ -3249,7 +3267,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_core_event_permission_sets",
-      "community": 40,
+      "community": 3,
       "norm_label": "permission_sets"
     },
     {
@@ -3258,7 +3276,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_core_event_global_scope_schema",
-      "community": 40,
+      "community": 3,
       "norm_label": "global_scope_schema"
     },
     {
@@ -3267,7 +3285,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_core_image",
-      "community": 40,
+      "community": 3,
       "norm_label": "core:image"
     },
     {
@@ -3276,7 +3294,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_core_image_default_permission",
-      "community": 40,
+      "community": 3,
       "norm_label": "default_permission"
     },
     {
@@ -3438,7 +3456,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_allow_size",
-      "community": 2,
+      "community": 43,
       "norm_label": "allow-size"
     },
     {
@@ -3447,7 +3465,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_size_identifier",
-      "community": 2,
+      "community": 43,
       "norm_label": "identifier"
     },
     {
@@ -3456,7 +3474,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_size_description",
-      "community": 2,
+      "community": 43,
       "norm_label": "description"
     },
     {
@@ -3465,7 +3483,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_size_commands",
-      "community": 2,
+      "community": 43,
       "norm_label": "commands"
     },
     {
@@ -3510,7 +3528,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_deny_from_path",
-      "community": 2,
+      "community": 50,
       "norm_label": "deny-from-path"
     },
     {
@@ -3519,7 +3537,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_from_path_identifier",
-      "community": 2,
+      "community": 50,
       "norm_label": "identifier"
     },
     {
@@ -3528,7 +3546,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_from_path_description",
-      "community": 2,
+      "community": 50,
       "norm_label": "description"
     },
     {
@@ -3537,7 +3555,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_deny_from_path_commands",
-      "community": 2,
+      "community": 50,
       "norm_label": "commands"
     },
     {
@@ -3654,7 +3672,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_core_image_permission_sets",
-      "community": 40,
+      "community": 3,
       "norm_label": "permission_sets"
     },
     {
@@ -3663,7 +3681,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_core_image_global_scope_schema",
-      "community": 40,
+      "community": 3,
       "norm_label": "global_scope_schema"
     },
     {
@@ -3672,7 +3690,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_core_menu",
-      "community": 40,
+      "community": 3,
       "norm_label": "core:menu"
     },
     {
@@ -3681,7 +3699,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_core_menu_default_permission",
-      "community": 40,
+      "community": 3,
       "norm_label": "default_permission"
     },
     {
@@ -3735,7 +3753,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_allow_create_default",
-      "community": 30,
+      "community": 1,
       "norm_label": "allow-create-default"
     },
     {
@@ -3744,7 +3762,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_create_default_identifier",
-      "community": 30,
+      "community": 1,
       "norm_label": "identifier"
     },
     {
@@ -3753,7 +3771,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_create_default_description",
-      "community": 30,
+      "community": 1,
       "norm_label": "description"
     },
     {
@@ -3762,7 +3780,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_create_default_commands",
-      "community": 30,
+      "community": 1,
       "norm_label": "commands"
     },
     {
@@ -3843,7 +3861,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_allow_is_checked",
-      "community": 43,
+      "community": 30,
       "norm_label": "allow-is-checked"
     },
     {
@@ -3852,7 +3870,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_is_checked_identifier",
-      "community": 43,
+      "community": 30,
       "norm_label": "identifier"
     },
     {
@@ -3861,7 +3879,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_is_checked_description",
-      "community": 43,
+      "community": 30,
       "norm_label": "description"
     },
     {
@@ -3870,7 +3888,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_is_checked_commands",
-      "community": 43,
+      "community": 30,
       "norm_label": "commands"
     },
     {
@@ -3987,7 +4005,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_allow_prepend",
-      "community": 30,
+      "community": 20,
       "norm_label": "allow-prepend"
     },
     {
@@ -3996,7 +4014,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_prepend_identifier",
-      "community": 30,
+      "community": 20,
       "norm_label": "identifier"
     },
     {
@@ -4005,7 +4023,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_prepend_description",
-      "community": 30,
+      "community": 20,
       "norm_label": "description"
     },
     {
@@ -4014,7 +4032,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_prepend_commands",
-      "community": 30,
+      "community": 20,
       "norm_label": "commands"
     },
     {
@@ -4023,7 +4041,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_allow_remove",
-      "community": 48,
+      "community": 30,
       "norm_label": "allow-remove"
     },
     {
@@ -4032,7 +4050,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_remove_identifier",
-      "community": 48,
+      "community": 30,
       "norm_label": "identifier"
     },
     {
@@ -4041,7 +4059,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_remove_description",
-      "community": 48,
+      "community": 30,
       "norm_label": "description"
     },
     {
@@ -4050,7 +4068,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_remove_commands",
-      "community": 48,
+      "community": 30,
       "norm_label": "commands"
     },
     {
@@ -4095,7 +4113,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_allow_set_accelerator",
-      "community": 30,
+      "community": 40,
       "norm_label": "allow-set-accelerator"
     },
     {
@@ -4104,7 +4122,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_set_accelerator_identifier",
-      "community": 30,
+      "community": 40,
       "norm_label": "identifier"
     },
     {
@@ -4113,7 +4131,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_set_accelerator_description",
-      "community": 30,
+      "community": 40,
       "norm_label": "description"
     },
     {
@@ -4122,7 +4140,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_set_accelerator_commands",
-      "community": 30,
+      "community": 40,
       "norm_label": "commands"
     },
     {
@@ -4131,7 +4149,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_allow_set_as_app_menu",
-      "community": 30,
+      "community": 42,
       "norm_label": "allow-set-as-app-menu"
     },
     {
@@ -4140,7 +4158,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_set_as_app_menu_identifier",
-      "community": 30,
+      "community": 42,
       "norm_label": "identifier"
     },
     {
@@ -4149,7 +4167,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_set_as_app_menu_description",
-      "community": 30,
+      "community": 42,
       "norm_label": "description"
     },
     {
@@ -4158,7 +4176,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_set_as_app_menu_commands",
-      "community": 30,
+      "community": 42,
       "norm_label": "commands"
     },
     {
@@ -4167,7 +4185,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_permissions_allow_set_as_help_menu_for_nsapp",
-      "community": 50,
+      "community": 30,
       "norm_label": "allow-set-as-help-menu-for-nsapp"
     },
     {
@@ -4176,7 +4194,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_set_as_help_menu_for_nsapp_identifier",
-      "community": 50,
+      "community": 30,
       "norm_label": "identifier"
     },
     {
@@ -4185,7 +4203,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_set_as_help_menu_for_nsapp_description",
-      "community": 50,
+      "community": 30,
       "norm_label": "description"
     },
     {
@@ -4194,7 +4212,7 @@
       "source_file": "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
       "id": "schemas_acl_manifests_allow_set_as_help_menu_for_nsapp_commands",
-      "community": 50,
+      "community": 30,
       "norm_label": "commands"
     },
     {
@@ -4948,7 +4966,7 @@
       "label": "remote_image()",
       "file_type": "code",
       "source_file": "src-tauri/src/cache.rs",
-      "source_location": "L68",
+      "source_location": "L81",
       "id": "src_cache_remote_image",
       "community": 21,
       "norm_label": "remote_image()"
@@ -4957,7 +4975,7 @@
       "label": "sweep()",
       "file_type": "code",
       "source_file": "src-tauri/src/cache.rs",
-      "source_location": "L109",
+      "source_location": "L129",
       "id": "src_cache_sweep",
       "community": 21,
       "norm_label": "sweep()"
@@ -5400,7 +5418,7 @@
       "source_file": "src-tauri/src/lib.rs",
       "source_location": "L1",
       "id": "src_tauri_src_lib_rs",
-      "community": 21,
+      "community": 10,
       "norm_label": "lib.rs"
     },
     {
@@ -5409,7 +5427,7 @@
       "source_file": "src-tauri/src/lib.rs",
       "source_location": "L24",
       "id": "src_lib_appstate",
-      "community": 21,
+      "community": 10,
       "norm_label": "appstate"
     },
     {
@@ -5418,7 +5436,7 @@
       "source_file": "src-tauri/src/lib.rs",
       "source_location": "L36",
       "id": "src_lib_get_conn",
-      "community": 21,
+      "community": 10,
       "norm_label": "get_conn()"
     },
     {
@@ -5427,7 +5445,7 @@
       "source_file": "src-tauri/src/lib.rs",
       "source_location": "L49",
       "id": "src_lib_settings_get",
-      "community": 21,
+      "community": 10,
       "norm_label": "settings_get()"
     },
     {
@@ -5490,7 +5508,7 @@
       "source_file": "src-tauri/src/lib.rs",
       "source_location": "L106",
       "id": "src_lib_ssh_connect",
-      "community": 4,
+      "community": 10,
       "norm_label": "ssh_connect()"
     },
     {
@@ -5499,7 +5517,7 @@
       "source_file": "src-tauri/src/lib.rs",
       "source_location": "L117",
       "id": "src_lib_ssh_disconnect",
-      "community": 21,
+      "community": 10,
       "norm_label": "ssh_disconnect()"
     },
     {
@@ -5508,7 +5526,7 @@
       "source_file": "src-tauri/src/lib.rs",
       "source_location": "L140",
       "id": "src_lib_pane_open",
-      "community": 21,
+      "community": 10,
       "norm_label": "pane_open()"
     },
     {
@@ -5517,7 +5535,7 @@
       "source_file": "src-tauri/src/lib.rs",
       "source_location": "L177",
       "id": "src_lib_pane_open_local",
-      "community": 21,
+      "community": 10,
       "norm_label": "pane_open_local()"
     },
     {
@@ -5544,7 +5562,7 @@
       "source_file": "src-tauri/src/lib.rs",
       "source_location": "L239",
       "id": "src_lib_pane_input",
-      "community": 21,
+      "community": 10,
       "norm_label": "pane_input()"
     },
     {
@@ -5553,7 +5571,7 @@
       "source_file": "src-tauri/src/lib.rs",
       "source_location": "L251",
       "id": "src_lib_pane_resize",
-      "community": 21,
+      "community": 10,
       "norm_label": "pane_resize()"
     },
     {
@@ -5562,7 +5580,7 @@
       "source_file": "src-tauri/src/lib.rs",
       "source_location": "L260",
       "id": "src_lib_pane_close",
-      "community": 21,
+      "community": 10,
       "norm_label": "pane_close()"
     },
     {
@@ -5571,7 +5589,7 @@
       "source_file": "src-tauri/src/lib.rs",
       "source_location": "L270",
       "id": "src_lib_sftp_stat",
-      "community": 21,
+      "community": 10,
       "norm_label": "sftp_stat()"
     },
     {
@@ -5580,7 +5598,7 @@
       "source_file": "src-tauri/src/lib.rs",
       "source_location": "L276",
       "id": "src_lib_sftp_preview",
-      "community": 21,
+      "community": 10,
       "norm_label": "sftp_preview()"
     },
     {
@@ -5596,115 +5614,115 @@
       "label": "register_transfer()",
       "file_type": "code",
       "source_file": "src-tauri/src/lib.rs",
-      "source_location": "L299",
+      "source_location": "L302",
       "id": "src_lib_register_transfer",
-      "community": 21,
+      "community": 10,
       "norm_label": "register_transfer()"
     },
     {
       "label": "unregister_transfer()",
       "file_type": "code",
       "source_file": "src-tauri/src/lib.rs",
-      "source_location": "L305",
+      "source_location": "L308",
       "id": "src_lib_unregister_transfer",
-      "community": 21,
+      "community": 10,
       "norm_label": "unregister_transfer()"
     },
     {
       "label": "sftp_download()",
       "file_type": "code",
       "source_file": "src-tauri/src/lib.rs",
-      "source_location": "L310",
+      "source_location": "L313",
       "id": "src_lib_sftp_download",
-      "community": 21,
+      "community": 10,
       "norm_label": "sftp_download()"
     },
     {
       "label": "sftp_upload()",
       "file_type": "code",
       "source_file": "src-tauri/src/lib.rs",
-      "source_location": "L326",
+      "source_location": "L329",
       "id": "src_lib_sftp_upload",
-      "community": 21,
+      "community": 10,
       "norm_label": "sftp_upload()"
     },
     {
       "label": "sftp_copy_remote()",
       "file_type": "code",
       "source_file": "src-tauri/src/lib.rs",
-      "source_location": "L344",
+      "source_location": "L347",
       "id": "src_lib_sftp_copy_remote",
-      "community": 21,
+      "community": 10,
       "norm_label": "sftp_copy_remote()"
     },
     {
       "label": "with_transfer()",
       "file_type": "code",
       "source_file": "src-tauri/src/lib.rs",
-      "source_location": "L362",
+      "source_location": "L365",
       "id": "src_lib_with_transfer",
-      "community": 21,
+      "community": 10,
       "norm_label": "with_transfer()"
     },
     {
       "label": "transfer_pause()",
       "file_type": "code",
       "source_file": "src-tauri/src/lib.rs",
-      "source_location": "L370",
+      "source_location": "L373",
       "id": "src_lib_transfer_pause",
-      "community": 21,
+      "community": 10,
       "norm_label": "transfer_pause()"
     },
     {
       "label": "transfer_resume()",
       "file_type": "code",
       "source_file": "src-tauri/src/lib.rs",
-      "source_location": "L376",
+      "source_location": "L379",
       "id": "src_lib_transfer_resume",
-      "community": 21,
+      "community": 10,
       "norm_label": "transfer_resume()"
     },
     {
       "label": "transfer_cancel()",
       "file_type": "code",
       "source_file": "src-tauri/src/lib.rs",
-      "source_location": "L382",
+      "source_location": "L385",
       "id": "src_lib_transfer_cancel",
-      "community": 21,
+      "community": 10,
       "norm_label": "transfer_cancel()"
     },
     {
       "label": "sftp_list()",
       "file_type": "code",
       "source_file": "src-tauri/src/lib.rs",
-      "source_location": "L388",
+      "source_location": "L391",
       "id": "src_lib_sftp_list",
-      "community": 21,
+      "community": 10,
       "norm_label": "sftp_list()"
     },
     {
       "label": "remote_home()",
       "file_type": "code",
       "source_file": "src-tauri/src/lib.rs",
-      "source_location": "L398",
+      "source_location": "L401",
       "id": "src_lib_remote_home",
-      "community": 21,
+      "community": 10,
       "norm_label": "remote_home()"
     },
     {
       "label": "remote_cwd()",
       "file_type": "code",
       "source_file": "src-tauri/src/lib.rs",
-      "source_location": "L405",
+      "source_location": "L408",
       "id": "src_lib_remote_cwd",
-      "community": 21,
+      "community": 10,
       "norm_label": "remote_cwd()"
     },
     {
       "label": "default_download_dir()",
       "file_type": "code",
       "source_file": "src-tauri/src/lib.rs",
-      "source_location": "L412",
+      "source_location": "L415",
       "id": "src_lib_default_download_dir",
       "community": 10,
       "norm_label": "default_download_dir()"
@@ -5713,16 +5731,16 @@
       "label": "list_fonts()",
       "file_type": "code",
       "source_file": "src-tauri/src/lib.rs",
-      "source_location": "L422",
+      "source_location": "L425",
       "id": "src_lib_list_fonts",
-      "community": 21,
+      "community": 10,
       "norm_label": "list_fonts()"
     },
     {
       "label": "local_list()",
       "file_type": "code",
       "source_file": "src-tauri/src/lib.rs",
-      "source_location": "L468",
+      "source_location": "L471",
       "id": "src_lib_local_list",
       "community": 10,
       "norm_label": "local_list()"
@@ -5731,7 +5749,7 @@
       "label": "local_home()",
       "file_type": "code",
       "source_file": "src-tauri/src/lib.rs",
-      "source_location": "L473",
+      "source_location": "L476",
       "id": "src_lib_local_home",
       "community": 10,
       "norm_label": "local_home()"
@@ -5740,16 +5758,16 @@
       "label": "read_key_file()",
       "file_type": "code",
       "source_file": "src-tauri/src/lib.rs",
-      "source_location": "L480",
+      "source_location": "L483",
       "id": "src_lib_read_key_file",
-      "community": 21,
+      "community": 10,
       "norm_label": "read_key_file()"
     },
     {
       "label": "run()",
       "file_type": "code",
       "source_file": "src-tauri/src/lib.rs",
-      "source_location": "L491",
+      "source_location": "L494",
       "id": "src_lib_run",
       "community": 4,
       "norm_label": "run()"
@@ -7189,7 +7207,7 @@
       "label": ".splitActive()",
       "file_type": "code",
       "source_file": "src/tabs.ts",
-      "source_location": "L306",
+      "source_location": "L314",
       "id": "src_tabs_tabmanager_splitactive",
       "community": 13,
       "norm_label": ".splitactive()"
@@ -7198,7 +7216,7 @@
       "label": ".switchPaneConnection()",
       "file_type": "code",
       "source_file": "src/tabs.ts",
-      "source_location": "L319",
+      "source_location": "L333",
       "id": "src_tabs_tabmanager_switchpaneconnection",
       "community": 13,
       "norm_label": ".switchpaneconnection()"
@@ -7207,7 +7225,7 @@
       "label": ".connInUse()",
       "file_type": "code",
       "source_file": "src/tabs.ts",
-      "source_location": "L342",
+      "source_location": "L356",
       "id": "src_tabs_tabmanager_conninuse",
       "community": 13,
       "norm_label": ".conninuse()"
@@ -7216,7 +7234,7 @@
       "label": ".gcConnections()",
       "file_type": "code",
       "source_file": "src/tabs.ts",
-      "source_location": "L350",
+      "source_location": "L364",
       "id": "src_tabs_tabmanager_gcconnections",
       "community": 13,
       "norm_label": ".gcconnections()"
@@ -7225,7 +7243,7 @@
       "label": ".closePane()",
       "file_type": "code",
       "source_file": "src/tabs.ts",
-      "source_location": "L360",
+      "source_location": "L374",
       "id": "src_tabs_tabmanager_closepane",
       "community": 13,
       "norm_label": ".closepane()"
@@ -7234,7 +7252,7 @@
       "label": ".hasBusyPane()",
       "file_type": "code",
       "source_file": "src/tabs.ts",
-      "source_location": "L376",
+      "source_location": "L390",
       "id": "src_tabs_tabmanager_hasbusypane",
       "community": 13,
       "norm_label": ".hasbusypane()"
@@ -7243,7 +7261,7 @@
       "label": ".closeTab()",
       "file_type": "code",
       "source_file": "src/tabs.ts",
-      "source_location": "L381",
+      "source_location": "L395",
       "id": "src_tabs_tabmanager_closetab",
       "community": 13,
       "norm_label": ".closetab()"
@@ -7252,7 +7270,7 @@
       "label": ".setBanner()",
       "file_type": "code",
       "source_file": "src/tabs.ts",
-      "source_location": "L403",
+      "source_location": "L421",
       "id": "src_tabs_tabmanager_setbanner",
       "community": 13,
       "norm_label": ".setbanner()"
@@ -7666,7 +7684,7 @@
       "label": "LIGHT",
       "file_type": "code",
       "source_file": "src/themes.ts",
-      "source_location": "L127",
+      "source_location": "L140",
       "id": "src_themes_light",
       "community": 0,
       "norm_label": "light"
@@ -7675,7 +7693,7 @@
       "label": "BUILTIN_THEMES",
       "file_type": "code",
       "source_file": "src/themes.ts",
-      "source_location": "L200",
+      "source_location": "L218",
       "id": "src_themes_builtin_themes",
       "community": 0,
       "norm_label": "builtin_themes"
@@ -7684,7 +7702,7 @@
       "label": "resolveTheme()",
       "file_type": "code",
       "source_file": "src/themes.ts",
-      "source_location": "L203",
+      "source_location": "L221",
       "id": "src_themes_resolvetheme",
       "community": 0,
       "norm_label": "resolvetheme()"
@@ -7693,7 +7711,7 @@
       "label": "allThemes()",
       "file_type": "code",
       "source_file": "src/themes.ts",
-      "source_location": "L213",
+      "source_location": "L231",
       "id": "src_themes_allthemes",
       "community": 0,
       "norm_label": "allthemes()"
@@ -7702,7 +7720,7 @@
       "label": "applyThemeToUI()",
       "file_type": "code",
       "source_file": "src/themes.ts",
-      "source_location": "L218",
+      "source_location": "L236",
       "id": "src_themes_applythemetoui",
       "community": 0,
       "norm_label": "applythemetoui()"
@@ -7711,7 +7729,7 @@
       "label": "hexToRgba()",
       "file_type": "code",
       "source_file": "src/themes.ts",
-      "source_location": "L243",
+      "source_location": "L261",
       "id": "src_themes_hextorgba",
       "community": 0,
       "norm_label": "hextorgba()"
@@ -7738,7 +7756,7 @@
       "label": "truncate()",
       "file_type": "code",
       "source_file": "src/main.ts",
-      "source_location": "L1073",
+      "source_location": "L1077",
       "id": "src_main_truncate",
       "community": 0,
       "norm_label": "truncate()"
@@ -7951,10 +7969,19 @@
       "norm_label": "cjk_fonts"
     },
     {
+      "label": "showAboutDialog()",
+      "file_type": "code",
+      "source_file": "src/dialogs.ts",
+      "source_location": "L41",
+      "id": "src_dialogs_showaboutdialog",
+      "community": 0,
+      "norm_label": "showaboutdialog()"
+    },
+    {
       "label": "showConnectDialog()",
       "file_type": "code",
       "source_file": "src/dialogs.ts",
-      "source_location": "L38",
+      "source_location": "L86",
       "id": "src_dialogs_showconnectdialog",
       "community": 0,
       "norm_label": "showconnectdialog()"
@@ -7963,7 +7990,7 @@
       "label": "THEME_COLOR_KEYS",
       "file_type": "code",
       "source_file": "src/dialogs.ts",
-      "source_location": "L289",
+      "source_location": "L337",
       "id": "src_dialogs_theme_color_keys",
       "community": 0,
       "norm_label": "theme_color_keys"
@@ -7972,7 +7999,7 @@
       "label": "showSettingsDialog()",
       "file_type": "code",
       "source_file": "src/dialogs.ts",
-      "source_location": "L296",
+      "source_location": "L344",
       "id": "src_dialogs_showsettingsdialog",
       "community": 0,
       "norm_label": "showsettingsdialog()"
@@ -7981,7 +8008,7 @@
       "label": "makeThemeCard()",
       "file_type": "code",
       "source_file": "src/dialogs.ts",
-      "source_location": "L724",
+      "source_location": "L772",
       "id": "src_dialogs_makethemecard",
       "community": 0,
       "norm_label": "makethemecard()"
@@ -7990,7 +8017,7 @@
       "label": "renderThemeEditor()",
       "file_type": "code",
       "source_file": "src/dialogs.ts",
-      "source_location": "L792",
+      "source_location": "L840",
       "id": "src_dialogs_renderthemeeditor",
       "community": 0,
       "norm_label": "renderthemeeditor()"
@@ -8504,7 +8531,7 @@
       "file_type": "code",
       "source_file": "src-tauri/gen/schemas/acl-manifests.json",
       "source_location": "L1",
-      "community": 40,
+      "community": 3,
       "norm_label": "acl-manifests.json",
       "id": "src_tauri_gen_schemas_acl_manifests_json"
     },
@@ -8863,6 +8890,26 @@
       "confidence_score": 1.0,
       "source": "package_json",
       "target": "hetu_package_author"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "package.json",
+      "source_location": "L6",
+      "weight": 1.0,
+      "source": "package_json",
+      "target": "hetu_package_license",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "package.json",
+      "source_location": "L7",
+      "weight": 1.0,
+      "source": "package_json",
+      "target": "hetu_package_repository",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -16177,6 +16224,17 @@
       "context": "call",
       "confidence": "INFERRED",
       "confidence_score": 0.8,
+      "source_file": "src-tauri/src/cache.rs",
+      "source_location": "L64",
+      "weight": 1.0,
+      "source": "src_cache_local_image",
+      "target": "src_error_error_msg"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
       "source_file": "src-tauri/src/lib.rs",
       "source_location": "L291",
       "weight": 1.0,
@@ -16375,6 +16433,17 @@
       "source_location": "L139",
       "weight": 1.0,
       "source": "src_lib_pane_input",
+      "target": "src_error_error_msg"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "src-tauri/src/lib.rs",
+      "source_location": "L294",
+      "weight": 1.0,
+      "source": "src_lib_image_preview",
       "target": "src_error_error_msg"
     },
     {
@@ -24017,6 +24086,17 @@
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "src/main.ts",
+      "source_location": "L21",
+      "weight": 1.0,
+      "source": "src_main_ts",
+      "target": "src_dialogs_showaboutdialog",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.ts",
       "source_location": "L11",
       "weight": 1.0,
       "confidence_score": 1.0,
@@ -24549,6 +24629,16 @@
       "confidence_score": 1.0,
       "source": "src_dialogs_ts",
       "target": "src_dialogs_cjk_fonts"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/dialogs.ts",
+      "source_location": "L41",
+      "weight": 1.0,
+      "source": "src_dialogs_ts",
+      "target": "src_dialogs_showaboutdialog",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -25092,5 +25182,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "8a5abb44f0bc38820d462b00c0ffda0ec27d7b75"
+  "built_at_commit": "958d9eddcf6aab27083b401e91a1ee04cb69a9bd"
 }

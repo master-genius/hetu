@@ -1,4 +1,4 @@
-/** 连接对话框（新建标签页选择连接项）与设置对话框 */
+/** 连接对话框（新建标签页选择连接项）、设置对话框与关于弹窗 */
 
 import { api } from "./ipc";
 import { getSettings, updateSettings } from "./settings";
@@ -32,6 +32,54 @@ const CJK_FONTS = [
   "WenQuanYi Micro Hei",
   "sans-serif",
 ];
+
+// ---------- 关于弹窗 ----------
+
+const REPO_URL = "https://github.com/master-genius/hetu";
+
+/** 标题栏「？」：软件简要信息（版本 / 开发者 / 许可证 / 仓库，仓库地址点击复制） */
+export function showAboutDialog(): void {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal small about">
+      <h3>HetuShell · 河图</h3>
+      <div class="about-body">
+        <p class="about-desc">河图终端：终端 + AI/工具链的融合体验，原生支持自实现 SSH。</p>
+        <div class="about-grid">
+          <span>版本</span><b class="about-version">—</b>
+          <span>开发者</span><b>BraveWang</b>
+          <span>许可证</span><b>木兰宽松许可证 第2版（Mulan PSL v2）</b>
+          <span>仓库</span><b><button type="button" class="about-repo" title="点击复制地址"></button></b>
+        </div>
+      </div>
+      <div class="modal-actions center">
+        <button type="button" class="btn primary" data-act="close">关闭</button>
+      </div>
+    </div>`;
+  const repoBtn = overlay.querySelector(".about-repo") as HTMLButtonElement;
+  repoBtn.textContent = REPO_URL;
+  repoBtn.addEventListener("click", async () => {
+    try {
+      const { writeText } = await import("@tauri-apps/plugin-clipboard-manager");
+      await writeText(REPO_URL);
+      toast("仓库地址已复制到剪贴板");
+    } catch {
+      toast("复制失败", true);
+    }
+  });
+  // 版本号取自 tauri.conf.json（打包元数据），避免前端硬编码不同步
+  void import("@tauri-apps/api/app")
+    .then(({ getVersion }) => getVersion())
+    .then((v) => ((overlay.querySelector(".about-version") as HTMLElement).textContent = `v${v}`))
+    .catch(() => {});
+  const close = () => overlay.remove();
+  overlay.querySelector('[data-act="close"]')!.addEventListener("click", close);
+  overlay.addEventListener("mousedown", (e) => {
+    if (e.target === overlay) close();
+  });
+  document.body.appendChild(overlay);
+}
 
 // ---------- 连接对话框 ----------
 
@@ -319,7 +367,7 @@ export function showSettingsDialog() {
         </section>
         <section>
           <h4>主题</h4>
-          <p class="section-desc">内置 22 套暗色、17 套亮色/中性（按名称排序），可基于任一主题派生自定义配色。点击色板即可切换。</p>
+          <p class="section-desc">内置 25 套暗色、18 套亮色/中性（含 Sweet 糖果系列，按名称排序），可基于任一主题派生自定义配色。点击色板即可切换。</p>
           <div class="theme-picker-head">
             <span>配色主题</span>
             <button type="button" class="btn new-theme">基于当前新建</button>

@@ -1,4 +1,4 @@
-/** 内置主题库（暗色 22 / 亮色·中性 17，收录主流配色）+ 自定义主题解析。
+/** 内置主题库（暗色 25 / 亮色·中性 18，收录主流配色与 Sweet 糖果系列）+ 自定义主题解析。
  *  colors 键与 xterm ITheme 对齐。 */
 
 import type { ThemeDef } from "./types";
@@ -120,6 +120,19 @@ const DARK: ThemeDef[] = [
     "#3f3f3f", "#cc9393", "#7f9f7f", "#e3ceab", "#8cd0d3", "#dc8cc3", "#93e0e3", "#dcdccc",
     "#709080", "#dca3a3", "#bfebbf", "#f0dfaf", "#a2d7dd", "#ec93d3", "#b3ffff", "#ffffff",
   ]),
+  // ——— Sweet 系列（糖果风：深蓝紫底 + 粉紫霓虹强调）———
+  t("sweet", "Sweet 糖果", "dark", "#e3e6f0", "#222235", "#dd5299", "#6a5cdc55", [
+    "#16161f", "#ed254e", "#71f79f", "#f9dc5c", "#7cb7ff", "#c74ded", "#00c1e4", "#dbe1e8",
+    "#5c5e70", "#f25e77", "#93fab5", "#fce780", "#9ac8ff", "#d47ff2", "#4fd4ef", "#f2f4fa",
+  ]),
+  t("sweet-mars", "Sweet Mars 蜜桃", "dark", "#eadfe4", "#231a20", "#ff5c8a", "#a4506c55", [
+    "#191218", "#ff5c8a", "#9ff28f", "#ffcc66", "#7aa5ff", "#e07dce", "#6cd8d0", "#e5dae0",
+    "#665260", "#ff7ca1", "#b8f7ab", "#ffd985", "#98baff", "#ea9cdc", "#8ce4dd", "#f6edf2",
+  ]),
+  t("sweet-grape", "Sweet 葡萄", "dark", "#e6e0f2", "#1d1728", "#a06ef5", "#7a4fd655", [
+    "#141020", "#f2568c", "#7ee8a2", "#f5d76e", "#8f9bff", "#b07df2", "#5cd6e8", "#ddd6ee",
+    "#5a5272", "#f677a3", "#9ceeb8", "#f8e18d", "#a8b2ff", "#c298f6", "#7fe0ef", "#f1edf9",
+  ]),
 ];
 
 // ---------- 亮色（11） ----------
@@ -194,6 +207,11 @@ const LIGHT: ThemeDef[] = [
   t("cool-slate", "青灰 Cool Slate", "light", "#2b3138", "#c9d0d4", "#2b3138", "#aeb8bf90", [
     "#363d45", "#a83b46", "#3f7d5f", "#8a7d2f", "#3f66aa", "#7a5fa0", "#2f8a90", "#6b737b",
     "#232a31", "#b84b56", "#4f8d6f", "#9a8d3f", "#4f76ba", "#8a6fb0", "#3f9aa0", "#878f97",
+  ]),
+  // ——— Sweet 系列亮色 ———
+  t("sweet-milkshake", "Sweet 奶昔", "light", "#4a3a50", "#faf1f6", "#d9418f", "#f0c2dc80", [
+    "#4a3a50", "#d6336c", "#2f9e5f", "#b8860b", "#4a63d9", "#a63bbf", "#0f95a8", "#a894a6",
+    "#6d5a72", "#e0507f", "#3fae6f", "#c8961b", "#5a73e9", "#b64bcf", "#1fa5b8", "#c7b6c5",
   ]),
 ];
 

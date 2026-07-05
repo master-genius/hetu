@@ -142,7 +142,8 @@ body {
   font-family: var(--tab-font);
   font-size: var(--tab-font-size);
   cursor: pointer;
-  opacity: 0.72;
+  /* 未选中标签不降字体亮度（保持清晰可读）；选中态靠背景与顶部强调条区分 */
+  opacity: 1;
   white-space: nowrap;
   transition: opacity 0.15s, background 0.15s;
   /* 顶部圆角、底部与终端对接不做圆角 */
@@ -154,12 +155,10 @@ body {
 }
 
 .tab:hover {
-  opacity: 0.92;
   background: color-mix(in srgb, var(--term-fg) 6%, transparent);
 }
 
 .tab.active {
-  opacity: 1;
   background: color-mix(in srgb, var(--term-fg) 9%, transparent);
 }
 
@@ -1493,6 +1492,48 @@ input[type="checkbox"] {
   max-width: 100%;
   display: block;
   margin: 0 auto;
+}
+
+/* ---------- 关于弹窗 ---------- */
+
+.about-desc {
+  font-size: 13px;
+  opacity: 0.85;
+  margin: 4px 0 14px;
+  line-height: 1.6;
+}
+
+.about-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 16px;
+  font-size: 12.5px;
+  margin-bottom: 6px;
+}
+
+.about-grid > span {
+  opacity: 0.62;
+}
+
+.about-grid > b {
+  font-weight: 400;
+  word-break: break-all;
+}
+
+/* 仓库地址：按钮语义（点击复制），观感为链接 */
+.about-repo {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: left;
+  word-break: break-all;
+}
+
+.about-repo:hover {
+  text-decoration: underline;
 }
 
 /* ---------- 图片查看器（文件面板右键预览：缩放/旋转/拖拽平移） ---------- */

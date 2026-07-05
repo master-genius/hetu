@@ -18,7 +18,7 @@ import {
   type ExplorerBackend,
 } from "./explorer";
 import { type Action, matchAction, resolveBindings } from "./keybindings";
-import { showConnectDialog, showSettingsDialog } from "./dialogs";
+import { showAboutDialog, showConnectDialog, showSettingsDialog } from "./dialogs";
 import { initPanelResize } from "./panelResize";
 import {
   confirmDialog, confirmOverwriteDialog, formatSize, showFileTooltip, showMenu, showPreview,
@@ -646,6 +646,7 @@ async function bootstrap() {
   // ---------- 窗口控制（自定义标题栏） ----------
 
   const win = getCurrentWindow();
+  document.getElementById("btn-about")!.addEventListener("click", showAboutDialog);
   document.getElementById("btn-min")!.addEventListener("click", () => void win.minimize());
   document.getElementById("btn-max")!.addEventListener("click", () => void win.toggleMaximize());
   document.getElementById("btn-close")!.addEventListener("click", async () => {
@@ -1020,14 +1021,17 @@ async function bootstrap() {
     snapshotSession();
   } else {
     restoring = true;
-    const profiles = session.some((s) => !s.local && s.profileId)
+    // 防御损坏/异常膨胀的 session.json：布局树深度已有 MAX_SPLIT_DEPTH 防护，
+    // 顶层标签数量也要设限，避免启动时无界并发拉起标签与 PTY
+    const capped = session.slice(0, 20);
+    const profiles = capped.some((s) => !s.local && s.profileId)
       ? await api.profilesList().catch(() => [] as Awaited<ReturnType<typeof api.profilesList>>)
       : [];
     // 本地终端立即打开（秒开）；SSH 连接**并行在后台建立、不阻塞界面**——
     // 任何一个连接慢/挂起都不会卡死整个应用，其它标签页照常可用。
     const pending: Promise<unknown>[] = [];
     // order = 会话中的原始序号：后台并行连接完成顺序不定，最后按 order 归位
-    session.forEach((st, order) => {
+    capped.forEach((st, order) => {
       if (st.local) {
         pending.push(openLocalTab(order).then((tab) => applySessionLayout(tab, st.layout)));
         return;

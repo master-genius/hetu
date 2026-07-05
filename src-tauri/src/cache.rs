@@ -57,11 +57,24 @@ fn encode(bytes: Vec<u8>) -> ImageData {
 
 /// 本地图片：直接整读，无需缓存
 pub fn local_image(path: &str) -> Result<ImageData> {
+    use std::io::Read;
     let meta = std::fs::metadata(path)?;
+    // 拒绝非常规文件：字符设备（如 /dev/zero，无界）、FIFO（open 会阻塞）、目录等
+    if !meta.is_file() {
+        return Err(Error::msg("不是常规文件，无法预览"));
+    }
     if meta.len() > MAX_IMAGE_BYTES {
         return Err(too_big(meta.len()));
     }
-    Ok(encode(std::fs::read(path)?))
+    // take 兜底：stat 与 read 之间文件可能增长（TOCTOU），按实际读取量二次设限
+    let mut buf = Vec::with_capacity(meta.len() as usize);
+    std::fs::File::open(path)?
+        .take(MAX_IMAGE_BYTES + 1)
+        .read_to_end(&mut buf)?;
+    if buf.len() as u64 > MAX_IMAGE_BYTES {
+        return Err(too_big(buf.len() as u64));
+    }
+    Ok(encode(buf))
 }
 
 /// 远端图片：查磁盘缓存（键含 size+mtime，命中即免网络往返），未命中整读远端并落盘
@@ -75,17 +88,24 @@ pub async fn remote_image(conn: &Arc<Connection>, path: &str) -> Result<ImageDat
         return Err(too_big(size));
     }
 
-    // DefaultHasher 在同一 Rust 版本内确定；跨版本变化的代价只是缓存失效重取，可接受
+    // 服务端未提供 mtime 时无法构造可靠的失效键（同尺寸修改会永久命中旧内容）：
+    // 跳过缓存，直接整读
+    let Some(mtime) = meta.mtime else {
+        return Ok(encode(
+            crate::ssh::sftp::read_file_bytes(conn, path, MAX_IMAGE_BYTES).await?,
+        ));
+    };
+
+    // 键含 user：同一 host:port 上不同用户可能看到不同文件（chroot/权限视图），
+    // 绝不能共享缓存条目。DefaultHasher 在同一 Rust 版本内确定；跨版本变化的
+    // 代价只是缓存失效重取，可接受。
     let key = {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (&conn.params.host, conn.params.port, path).hash(&mut h);
+        (&conn.params.host, conn.params.port, &conn.params.user, path).hash(&mut h);
         h.finish()
     };
-    let file = preview_dir()?.join(format!(
-        "{key:016x}-{size}-{}.img",
-        meta.mtime.unwrap_or(0)
-    ));
+    let file = preview_dir()?.join(format!("{key:016x}-{size}-{mtime}.img"));
     if let Ok(bytes) = std::fs::read(&file) {
         if bytes.len() as u64 == size {
             return Ok(encode(bytes));

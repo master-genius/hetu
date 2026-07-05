@@ -1,8 +1,10 @@
 [package]
 name = "hetushell"
-version = "1.0.6"
+version = "1.0.7"
 description = "河图终端 HetuShell：终端 + AI/工具链的融合体验，原生支持自实现 SSH"
-authors = ["BraveMaster"]
+authors = ["BraveWang"]
+license = "MulanPSL-2.0"
+repository = "https://github.com/master-genius/hetu"
 edition = "2021"
 
 [lib]
