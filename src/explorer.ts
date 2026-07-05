@@ -240,6 +240,16 @@ export class Explorer {
     }
   }
 
+  /**
+   * 显式打开面板时定位目录：未初始化则作为初始目录；已初始化且目录不同则跳转。
+   * （被动同步走 init：不打断用户正在浏览的目录）
+   */
+  async reveal(dir?: string): Promise<void> {
+    if (!this.initialized) return this.init(dir);
+    const d = dir?.trim();
+    if (d && d !== this.cwd) await this.navigate(d);
+  }
+
   async navigate(dir: string): Promise<void> {
     const prev = this.cwd;
     this.cwd = dir;

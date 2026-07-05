@@ -256,6 +256,9 @@ export function applyThemeToUI(
   root.style.setProperty("--titlebar-rgba", hexToRgba(titlebarColor || bg, chromeAlpha));
   const px = Math.max(0, Math.round(blurAmount));
   root.style.setProperty("--blur", blur && px > 0 ? `blur(${px}px) saturate(1.3)` : "none");
+  // 磨砂质感层开关（styles.css 的 #app::before）：桌面级真模糊在网页内不可得，
+  // 开启毛玻璃时用噪点+光泽模拟磨砂玻璃观感
+  root.dataset.blur = blur && px > 0 ? "1" : "0";
 }
 
 export function hexToRgba(hex: string, alpha: number): string {

@@ -7,8 +7,8 @@
  * 行名悬停显示完整目标路径（下载落地位置 / 上传目标目录）。
  *
  * 面板标题栏的 × 仅**隐藏**面板，不影响任何传输；只要列表非空，标题栏（设置右侧）
- * 的下载图标会亮起，点击重新展开。列表清空后图标随之隐藏。用户主动隐藏的偏好会保留，
- * 后续新传输只点亮图标、不再自动弹出。
+ * 的下载图标会亮起，点击重新展开。列表清空后图标随之隐藏。隐藏只对当前这批传输
+ * 有效：新传输开始时面板重新自动弹出（用户需要看到每次下载的去向与状态）。
  *
  * 暂停/继续/取消是真实的 IO 控制，经 transfer_pause/resume/cancel 命令下达到后端；
  * 大小与速度则由前端从 transfer-progress 事件的字节增量本地计算。
@@ -129,6 +129,9 @@ export function beginTransfer(
   dest?: string,
 ): void {
   if (rows.has(id)) return;
+  // 新传输一律重新弹出面板：之前的隐藏偏好只作用于当批传输，
+  // 否则关过一次面板后，后续下载看起来像「没有任何反应」
+  userHidden = false;
   const list = ensurePanel();
   const el = document.createElement("div");
   el.className = "transfer-row";

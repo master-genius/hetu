@@ -697,6 +697,7 @@ async function bootstrap() {
         // 优先用拖拽发起的源 pane 解析相对路径，回退到该连接任一 pane
         const src = (srcPaneId && tabs.findPane(srcPaneId)?.pane) || tabs.panesByConn(connId)[0]?.pane;
         if (src) void downloadFile(src, path, targetDir);
+        else toast("该连接已无终端，无法下载", true); // 不再静默：用户能知道为什么没反应
       };
     }
     // 仅替换已挂载的 explorer 子节点，保留常驻的尺寸把手（.panel-resize-*）；
@@ -735,7 +736,9 @@ async function bootstrap() {
     return pane && !pane.isLocal ? pane.connId : null;
   };
 
-  const syncRemotePanel = () => {
+  /** revealDir=true（用户显式点击打开）时，定位到聚焦终端的实时 cwd；
+   *  被动同步（切焦点/切标签）不打断用户正在浏览的目录 */
+  const syncRemotePanel = (revealDir = false) => {
     const tab = tabs.active;
     const connId = focusedConnId();
     if (!tab || !tab.remoteOpen || !connId) {
@@ -754,6 +757,7 @@ async function bootstrap() {
       ex.onDownloadRequest = (cid, path, targetDir) => {
         const found = tabs.panesByConn(cid)[0];
         if (found) void downloadFile(found.pane, path, targetDir || undefined);
+        else toast("该连接已无终端，无法下载", true); // 不再静默：用户能知道为什么没反应
       };
       ex.onUploadHere = (localPaths, remoteDir) => {
         const found = tabs.panesByConn(connId)[0];
@@ -778,8 +782,13 @@ async function bootstrap() {
     const inst = ex;
     const active = tabs.activePane();
     const pane = (active && active.connId === connId ? active : tabs.panesByConn(connId)[0]?.pane) || undefined;
-    if (pane) void pane.currentDir().then(({ dir }) => void inst.init(dir ?? undefined));
-    else void inst.init();
+    if (pane) {
+      void pane.currentDir().then(({ dir }) =>
+        // 显式打开 → 跳到聚焦终端当前目录（终端 cd 之后再开面板要看到新目录）；
+        // 被动同步 → 仅首次初始化定位，不改动用户当前浏览目录
+        revealDir ? void inst.reveal(dir ?? undefined) : void inst.init(dir ?? undefined),
+      );
+    } else void inst.init();
   };
 
   /** 远程按钮点亮/禁用：仅当聚焦终端有活跃 SSH 连接时可用（点亮态用强调色） */
@@ -873,7 +882,7 @@ async function bootstrap() {
       return;
     }
     tab.remoteOpen = !tab.remoteOpen;
-    syncRemotePanel();
+    syncRemotePanel(tab.remoteOpen); // 打开时定位到聚焦终端当前目录
     updateRemoteBtn();
   });
 
