@@ -8,9 +8,95 @@ use russh_sftp::client::SftpSession;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::watch;
 
 use crate::error::{Error, Result};
 use crate::ssh::conn::Connection;
+
+// ---------- 传输控制（暂停/继续/取消）----------
+
+pub const T_RUNNING: u8 = 0;
+pub const T_PAUSED: u8 = 1;
+pub const T_CANCELLED: u8 = 2;
+
+/// 单次传输的控制句柄：存于 AppState.transfers（按 transfer_id 索引），
+/// 由 transfer_pause/resume/cancel 命令改写状态，传输循环在每块前过 `gate` 响应。
+/// 用 watch 通道而非 Notify，天然避免「检查—唤醒」之间的丢失唤醒。
+pub struct TransferCtl {
+    tx: watch::Sender<u8>,
+}
+
+impl TransferCtl {
+    pub fn new() -> Self {
+        Self {
+            tx: watch::channel(T_RUNNING).0,
+        }
+    }
+
+    /// 暂停（仅当前处于运行态时生效，不覆盖已取消）
+    pub fn pause(&self) {
+        self.tx.send_if_modified(|s| {
+            if *s == T_RUNNING {
+                *s = T_PAUSED;
+                true
+            } else {
+                false
+            }
+        });
+    }
+
+    /// 继续（仅当前处于暂停态时生效）
+    pub fn resume(&self) {
+        self.tx.send_if_modified(|s| {
+            if *s == T_PAUSED {
+                *s = T_RUNNING;
+                true
+            } else {
+                false
+            }
+        });
+    }
+
+    /// 取消（终态，不可逆）
+    pub fn cancel(&self) {
+        self.tx.send_if_modified(|s| {
+            if *s != T_CANCELLED {
+                *s = T_CANCELLED;
+                true
+            } else {
+                false
+            }
+        });
+    }
+
+    /// 传输循环闸门：运行→立即放行；暂停→挂起等待；取消→返回错误中止本次传输。
+    async fn gate(&self) -> Result<()> {
+        // 快路径：运行态零开销放行（绝大多数块走这里）
+        match *self.tx.borrow() {
+            T_CANCELLED => return Err(Error::msg("传输已取消")),
+            T_RUNNING => return Ok(()),
+            _ => {}
+        }
+        // 慢路径：已暂停，订阅后等待恢复或取消
+        let mut rx = self.tx.subscribe();
+        loop {
+            match *rx.borrow_and_update() {
+                T_CANCELLED => return Err(Error::msg("传输已取消")),
+                T_RUNNING => return Ok(()),
+                _ => {}
+            }
+            if rx.changed().await.is_err() {
+                return Err(Error::msg("传输已取消")); // 发送端被丢弃，视同取消
+            }
+        }
+    }
+}
+
+impl Default for TransferCtl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// 获取（或懒创建）该连接的 SFTP 会话
 pub async fn session(conn: &Arc<Connection>) -> Result<Arc<SftpSession>> {
@@ -214,6 +300,7 @@ fn emit_progress(app: &AppHandle, id: &str, name: &str, done: u64, total: u64, d
 async fn download_file(
     app: &AppHandle,
     sftp: &SftpSession,
+    ctl: &TransferCtl,
     remote: &str,
     local: &str,
     transfer_id: &str,
@@ -225,6 +312,12 @@ async fn download_file(
     let mut dst = tokio::fs::File::create(local).await?;
     let mut buf = vec![0u8; 64 * 1024];
     loop {
+        // 每块前过闸门：暂停则挂起，取消则中止并清理半成品文件
+        if let Err(e) = ctl.gate().await {
+            drop(dst);
+            let _ = tokio::fs::remove_file(local).await;
+            return Err(e);
+        }
         let n = src.read(&mut buf).await?;
         if n == 0 {
             break;
@@ -241,6 +334,7 @@ async fn download_file(
 async fn upload_file(
     app: &AppHandle,
     sftp: &SftpSession,
+    ctl: &TransferCtl,
     local: &str,
     remote: &str,
     transfer_id: &str,
@@ -252,6 +346,13 @@ async fn upload_file(
     let mut dst = sftp.create(remote).await?;
     let mut buf = vec![0u8; 64 * 1024];
     loop {
+        // 每块前过闸门：暂停则挂起，取消则中止并清理半成品远端文件
+        if let Err(e) = ctl.gate().await {
+            let _ = dst.shutdown().await;
+            drop(dst);
+            let _ = sftp.remove_file(remote).await;
+            return Err(e);
+        }
         let n = src.read(&mut buf).await?;
         if n == 0 {
             break;
@@ -359,6 +460,7 @@ fn walk_local(base: &std::path::Path) -> Result<(Vec<String>, Vec<(String, Strin
 pub async fn download(
     app: &AppHandle,
     conn: &Arc<Connection>,
+    ctl: &TransferCtl,
     remote: &str,
     local: &str,
     transfer_id: &str,
@@ -372,7 +474,7 @@ pub async fn download(
 
         if !is_dir_mode(meta.permissions.unwrap_or(0)) {
             let total = meta.size.unwrap_or(0);
-            download_file(app, &sftp, remote, local, transfer_id, &name, &mut done, total).await?;
+            download_file(app, &sftp, ctl, remote, local, transfer_id, &name, &mut done, total).await?;
             emit_progress(app, transfer_id, &name, done, done.max(total), "download");
             return Ok(());
         }
@@ -387,7 +489,7 @@ pub async fn download(
         let count = files.len();
         for (i, (rpath, rel, _)) in files.iter().enumerate() {
             let label = format!("{name}/{rel} ({}/{count})", i + 1);
-            download_file(app, &sftp, rpath, &format!("{root}/{rel}"), transfer_id, &label, &mut done, total).await?;
+            download_file(app, &sftp, ctl, rpath, &format!("{root}/{rel}"), transfer_id, &label, &mut done, total).await?;
         }
         emit_progress(app, transfer_id, &name, done, done.max(total), "download");
         Ok(())
@@ -403,6 +505,7 @@ pub async fn download(
 pub async fn upload(
     app: &AppHandle,
     conn: &Arc<Connection>,
+    ctl: &TransferCtl,
     local: &str,
     remote_dir: &str,
     transfer_id: &str,
@@ -422,7 +525,7 @@ pub async fn upload(
 
         if !meta.is_dir() {
             let total = meta.len();
-            upload_file(app, &sftp, local, &remote_root, transfer_id, &name, &mut done, total).await?;
+            upload_file(app, &sftp, ctl, local, &remote_root, transfer_id, &name, &mut done, total).await?;
             emit_progress(app, transfer_id, &name, done, total, "upload");
             return Ok(());
         }
@@ -436,7 +539,7 @@ pub async fn upload(
         let count = files.len();
         for (i, (lpath, rel)) in files.iter().enumerate() {
             let label = format!("{name}/{rel} ({}/{count})", i + 1);
-            upload_file(app, &sftp, lpath, &format!("{remote_root}/{rel}"), transfer_id, &label, &mut done, total).await?;
+            upload_file(app, &sftp, ctl, lpath, &format!("{remote_root}/{rel}"), transfer_id, &label, &mut done, total).await?;
         }
         emit_progress(app, transfer_id, &name, done, total, "upload");
         Ok(())

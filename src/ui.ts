@@ -1,6 +1,6 @@
-/** 通用 UI 组件：上下文菜单、确认框、tooltip、文件预览、传输进度、自定义下拉 */
+/** 通用 UI 组件：上下文菜单、确认框、tooltip、文件预览、自定义下拉 */
 
-import type { FileMeta, Preview, TransferProgressEvent } from "./types";
+import type { FileMeta, Preview } from "./types";
 
 // ---------- 自定义下拉（替代原生 select，避免 webkit2gtk 白底弹出列表不跟随主题）----------
 
@@ -326,40 +326,4 @@ export function showPreview(path: string, preview: Preview) {
   document.body.appendChild(overlay);
 }
 
-// ---------- 传输进度 ----------
-
-let transferBox: HTMLElement | null = null;
-const transferRows = new Map<string, HTMLElement>();
-
-export function updateTransfer(e: TransferProgressEvent) {
-  if (!transferBox) {
-    transferBox = document.createElement("div");
-    transferBox.className = "transfer-box";
-    document.body.appendChild(transferBox);
-  }
-  let row = transferRows.get(e.id);
-  if (!row) {
-    row = document.createElement("div");
-    row.className = "transfer-row";
-    row.innerHTML = `<span class="t-name"></span><div class="t-bar"><div class="t-fill"></div></div><span class="t-pct"></span>`;
-    transferBox.appendChild(row);
-    transferRows.set(e.id, row);
-  }
-  const pct = e.total > 0 ? Math.min(100, Math.round((e.done / e.total) * 100)) : 100;
-  row.querySelector(".t-name")!.textContent = `${e.direction === "upload" ? "↑" : "↓"} ${e.name}`;
-  (row.querySelector(".t-fill") as HTMLElement).style.width = `${pct}%`;
-  row.querySelector(".t-pct")!.textContent = `${pct}%`;
-  // 完成即移除。done>=total 在末次事件成立；空文件/空目录 total=0 时 0>=0 亦成立，
-  // 故不能再加 total>0 的条件，否则空传输的进度行会永久残留。
-  if (e.done >= e.total) {
-    const r = row;
-    window.setTimeout(() => {
-      r.remove();
-      transferRows.delete(e.id);
-      if (transferBox && transferRows.size === 0) {
-        transferBox.remove();
-        transferBox = null;
-      }
-    }, 1500);
-  }
-}
+// 传输进度面板已迁出到 transfers.ts（列表化、含暂停/取消/删除与速度展示）。

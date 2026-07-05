@@ -21,8 +21,11 @@ import { type Action, matchAction, resolveBindings } from "./keybindings";
 import { showConnectDialog, showSettingsDialog } from "./dialogs";
 import {
   confirmDialog, confirmOverwriteDialog, formatSize, showFileTooltip, showMenu, showPreview,
-  toast, updateTransfer,
+  toast,
 } from "./ui";
+import {
+  beginTransfer, completeTransfer, failTransfer, initTransfers, updateTransfer,
+} from "./transfers";
 import type { ConnParams } from "./types";
 
 const PREVIEW_MAX_BYTES = 512 * 1024;
@@ -279,6 +282,7 @@ async function bootstrap() {
   });
 
   void events.onTransferProgress(updateTransfer);
+  initTransfers(document.getElementById("btn-transfers")!);
 
   // ---------- 上传：工具栏按钮 + 拖拽 ----------
 
@@ -338,11 +342,14 @@ async function bootstrap() {
           }
         }
       }
+      // 传输的成败/进度均由右下角传输面板呈现，不再用 toast，避免刷屏
+      const tid = crypto.randomUUID();
+      beginTransfer(tid, name, "upload");
       try {
-        await api.sftpUpload(target.connId, p, dir, crypto.randomUUID());
-        toast(`已上传到 ${dir}`);
+        await api.sftpUpload(target.connId, p, dir, tid);
+        completeTransfer(tid);
       } catch (err) {
-        toast(`上传失败: ${err}`, true);
+        failTransfer(tid, String(err));
       }
     }
   };
@@ -495,9 +502,17 @@ async function bootstrap() {
         local = meta.isDir ? dir : `${dir.replace(/\/+$/, "")}/${name}`;
       }
       if (!local) return;
-      await api.sftpDownload(pane.connId, remotePath, local, crypto.randomUUID());
-      toast(`已下载到 ${meta.isDir ? `${local.replace(/\/+$/, "")}/${name}` : local}`);
+      // 传输进度与成败由右下角面板呈现（可暂停/取消/删除），不再用 toast
+      const tid = crypto.randomUUID();
+      beginTransfer(tid, name, "download");
+      try {
+        await api.sftpDownload(pane.connId, remotePath, local, tid);
+        completeTransfer(tid);
+      } catch (err) {
+        failTransfer(tid, String(err));
+      }
     } catch (err) {
+      // 路径解析 / stat 等传输前的错误仍用 toast 提示
       toast(`下载失败: ${err}`, true);
     }
   };

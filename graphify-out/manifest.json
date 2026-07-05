@@ -1,415 +1,420 @@
 {
-  "/root/source/superssh/vite.config.ts": {
+  "/root/source/hetu/vite.config.ts": {
     "mtime": 1783180373.728796,
     "ast_hash": "a791381d240fe7d044b3df22fc8991df",
     "semantic_hash": ""
   },
-  "/root/source/superssh/tsconfig.json": {
+  "/root/source/hetu/tsconfig.json": {
     "mtime": 1783180375.7287614,
     "ast_hash": "79bc8f9c8ab6915619722565dbc7dc38",
     "semantic_hash": ""
   },
-  "/root/source/superssh/package.json": {
-    "mtime": 1783197029.707714,
-    "ast_hash": "ab22b9be8d5a478dc2c41bba6cad465a",
+  "/root/source/hetu/package.json": {
+    "mtime": 1783201898.3504713,
+    "ast_hash": "8102ddf3bc8f4c01a756bfeb853707ea",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/tauri.conf.json": {
-    "mtime": 1783197029.707714,
-    "ast_hash": "7e569adb70b24a4c7747f6f011981a61",
+  "/root/source/hetu/src-tauri/tauri.conf.json": {
+    "mtime": 1783201902.4024334,
+    "ast_hash": "46ceb4cbb1436fb8846e436ca5b05d16",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/build.rs": {
+  "/root/source/hetu/src-tauri/build.rs": {
     "mtime": 1783180385.924585,
     "ast_hash": "1be34a5c61c2c35365de3dab14298f0b",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/gen/schemas/desktop-schema.json": {
+  "/root/source/hetu/src-tauri/gen/schemas/desktop-schema.json": {
     "mtime": 1783187835.8303869,
     "ast_hash": "dc59ead19edf34a66f279bf976e49d94",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/gen/schemas/capabilities.json": {
+  "/root/source/hetu/src-tauri/gen/schemas/capabilities.json": {
     "mtime": 1783187835.8303869,
     "ast_hash": "98acf09ac4b2fea4c4a458626a405bac",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/gen/schemas/acl-manifests.json": {
+  "/root/source/hetu/src-tauri/gen/schemas/acl-manifests.json": {
     "mtime": 1783187835.814387,
     "ast_hash": "454d1fddc834b2829e7d7d5841c96198",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/gen/schemas/linux-schema.json": {
+  "/root/source/hetu/src-tauri/gen/schemas/linux-schema.json": {
     "mtime": 1783187835.8303869,
     "ast_hash": "dc59ead19edf34a66f279bf976e49d94",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/capabilities/default.json": {
+  "/root/source/hetu/src-tauri/capabilities/default.json": {
     "mtime": 1783187817.8108165,
     "ast_hash": "0115324702b2563f75042d24e8e24bf3",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/src/error.rs": {
+  "/root/source/hetu/src-tauri/src/error.rs": {
     "mtime": 1783180948.7388582,
     "ast_hash": "7c5d1797540da31a93c890678337622f",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/src/main.rs": {
+  "/root/source/hetu/src-tauri/src/main.rs": {
     "mtime": 1783185967.3519866,
     "ast_hash": "6c6029bef0918cdd28f2dd2149ad73ab",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/src/settings.rs": {
-    "mtime": 1783195648.1721146,
-    "ast_hash": "c6dfa936210f523a440d13b8d0faecb5",
+  "/root/source/hetu/src-tauri/src/settings.rs": {
+    "mtime": 1783201887.2425742,
+    "ast_hash": "c122afc19d79d7c41473add1eba9ed8b",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/src/sshcfg.rs": {
+  "/root/source/hetu/src-tauri/src/sshcfg.rs": {
     "mtime": 1783188140.4555936,
     "ast_hash": "d936facce331d5813fef34b91bc52c6c",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/src/local.rs": {
+  "/root/source/hetu/src-tauri/src/local.rs": {
     "mtime": 1783193899.2047777,
     "ast_hash": "e3c061633080b20f3ac780878b7d626a",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/src/lib.rs": {
-    "mtime": 1783195676.175401,
-    "ast_hash": "d5e8a41371240c01e9f994bb871e1594",
+  "/root/source/hetu/src-tauri/src/lib.rs": {
+    "mtime": 1783215227.4927745,
+    "ast_hash": "b7c0106234c3cc863f97e68713d8223a",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/src/ssh/mod.rs": {
+  "/root/source/hetu/src-tauri/src/ssh/mod.rs": {
     "mtime": 1783180471.5151057,
     "ast_hash": "7e777796f7f08d9bd6ed93890b8b0813",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/src/ssh/sftp.rs": {
-    "mtime": 1783195661.1557825,
-    "ast_hash": "b2bd1353c9096ca2c2a40e28b3645dd4",
+  "/root/source/hetu/src-tauri/src/ssh/sftp.rs": {
+    "mtime": 1783215182.7816052,
+    "ast_hash": "b28a8366dd7421c4d8c943b16f2e7f35",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/src/ssh/conn.rs": {
+  "/root/source/hetu/src-tauri/src/ssh/conn.rs": {
     "mtime": 1783190122.9925961,
     "ast_hash": "ebd8a6229277d7fc166b4696dfb49c5e",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/src/ssh/pane.rs": {
+  "/root/source/hetu/src-tauri/src/ssh/pane.rs": {
     "mtime": 1783180516.1703339,
     "ast_hash": "0fa4d0739b04b688f46f610f8a63d2b8",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src/ui.ts": {
-    "mtime": 1783196383.0799384,
-    "ast_hash": "42a21d8db6f1a50c75cb74d89e48d2a4",
+  "/root/source/hetu/src/ui.ts": {
+    "mtime": 1783215361.626298,
+    "ast_hash": "33514a2dcb6d781c4b8b9e4c764fe535",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src/pane.ts": {
-    "mtime": 1783198199.1031427,
-    "ast_hash": "38388271cc2e8d318370b7680c6cfe3f",
+  "/root/source/hetu/src/pane.ts": {
+    "mtime": 1783199522.0958967,
+    "ast_hash": "27fede98d8f9c2cfc18247dd6a08c0d4",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src/layout.ts": {
+  "/root/source/hetu/src/layout.ts": {
     "mtime": 1783184444.7059844,
     "ast_hash": "988a12a1f6561710d39175472d26544d",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src/keybindings.ts": {
+  "/root/source/hetu/src/keybindings.ts": {
     "mtime": 1783191497.9228902,
     "ast_hash": "606d85da848419a379568c1c4254cc62",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src/ipc.ts": {
-    "mtime": 1783195708.1346004,
-    "ast_hash": "9254d1619c1ac3da3b16ed12e8b18133",
+  "/root/source/hetu/src/ipc.ts": {
+    "mtime": 1783215248.296389,
+    "ast_hash": "b8d1f0c6c91803c6cea948b054f7578d",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src/tabs.ts": {
-    "mtime": 1783196937.333416,
-    "ast_hash": "cd2636bdfb017f6bebc751e09cc1fd77",
+  "/root/source/hetu/src/tabs.ts": {
+    "mtime": 1783199125.6468983,
+    "ast_hash": "6d85aa60c2d00aff49bbb0376c8dda8c",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src/settings.ts": {
+  "/root/source/hetu/src/settings.ts": {
     "mtime": 1783192274.7871923,
     "ast_hash": "6400cabc5bc4dd397448b15f404b7c34",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src/types.ts": {
-    "mtime": 1783195699.8268073,
-    "ast_hash": "4956a05798af928400ad4cf43e34e80a",
+  "/root/source/hetu/src/types.ts": {
+    "mtime": 1783198923.4464626,
+    "ast_hash": "08b66856fe907d71172c6a77ce737544",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src/explorer.ts": {
-    "mtime": 1783196129.9170675,
-    "ast_hash": "3286b65085aa5c66389fa9e0455ff5ac",
+  "/root/source/hetu/src/explorer.ts": {
+    "mtime": 1783200433.8510122,
+    "ast_hash": "784ff0cc3a50b7902b97ed7e49e5ce52",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src/themes.ts": {
-    "mtime": 1783197001.2922366,
-    "ast_hash": "40ae6461149b8692e3f7b35460d66010",
+  "/root/source/hetu/src/themes.ts": {
+    "mtime": 1783199906.496759,
+    "ast_hash": "d5a082be5604d699fe107d3b71db59ff",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src/main.ts": {
-    "mtime": 1783198245.138344,
-    "ast_hash": "d6b24fc613beb4d410a386413d15db55",
+  "/root/source/hetu/src/main.ts": {
+    "mtime": 1783215417.3212752,
+    "ast_hash": "a5f6e487dffb41717a242e2202ca5975",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src/dialogs.ts": {
-    "mtime": 1783197009.3400886,
-    "ast_hash": "cfd92816b8267408f3394debebd755d4",
+  "/root/source/hetu/src/transfers.ts": {
+    "mtime": 1783215755.647113,
+    "ast_hash": "983fa5883bec95057157e2161780509f",
     "semantic_hash": ""
   },
-  "/root/source/superssh/README.md": {
+  "/root/source/hetu/src/dialogs.ts": {
+    "mtime": 1783201624.1215606,
+    "ast_hash": "f656027ee2047b4dc5713de08802852c",
+    "semantic_hash": ""
+  },
+  "/root/source/hetu/README.md": {
     "mtime": 1783196419.3232265,
     "ast_hash": "1e287bbb5f38e5f78995b8dc310c4328",
     "semantic_hash": ""
   },
-  "/root/source/superssh/index.html": {
-    "mtime": 1783192423.6646988,
-    "ast_hash": "adaf32dd82429d214d415da48e0fb63c",
+  "/root/source/hetu/index.html": {
+    "mtime": 1783215432.88099,
+    "ast_hash": "1e39ae921663db872bf02ac8136c06be",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/128x128@2x.png": {
+  "/root/source/hetu/src-tauri/icons/128x128@2x.png": {
     "mtime": 1783188469.5609233,
     "ast_hash": "46202a5ae20a40e8cc11f87623669189",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/Square44x44Logo.png": {
+  "/root/source/hetu/src-tauri/icons/Square44x44Logo.png": {
     "mtime": 1783188461.7010772,
     "ast_hash": "bb03135d0dcff9a5e57640433c7bfc31",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/Square30x30Logo.png": {
+  "/root/source/hetu/src-tauri/icons/Square30x30Logo.png": {
     "mtime": 1783188461.5690799,
     "ast_hash": "5052c084550236282efa36038c65eb26",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/icon-source.svg": {
+  "/root/source/hetu/src-tauri/icons/icon-source.svg": {
     "mtime": 1783188459.9731112,
     "ast_hash": "aa0369e5c31c747c8d38e22e7ae353f7",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/icon.png": {
+  "/root/source/hetu/src-tauri/icons/icon.png": {
     "mtime": 1783188470.5609038,
     "ast_hash": "42a83caeba20b866c1a48d2f47e9649b",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/StoreLogo.png": {
+  "/root/source/hetu/src-tauri/icons/StoreLogo.png": {
     "mtime": 1783188461.3930833,
     "ast_hash": "62b9206603347297acf4d087603a5544",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/128x128.png": {
+  "/root/source/hetu/src-tauri/icons/128x128.png": {
     "mtime": 1783188469.1969304,
     "ast_hash": "da720343ec0a11a8211741d160e66fdf",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/32x32.png": {
+  "/root/source/hetu/src-tauri/icons/32x32.png": {
     "mtime": 1783188468.9009361,
     "ast_hash": "b260228cee670481da742d6c053c29e2",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/Square107x107Logo.png": {
+  "/root/source/hetu/src-tauri/icons/Square107x107Logo.png": {
     "mtime": 1783188462.1530685,
     "ast_hash": "aa77d78caae1375505a06a9ebbb1a221",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/Square310x310Logo.png": {
+  "/root/source/hetu/src-tauri/icons/Square310x310Logo.png": {
     "mtime": 1783188463.3090458,
     "ast_hash": "d0d4ce4f86df720f2099ad1ba6d99b9a",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/Square150x150Logo.png": {
+  "/root/source/hetu/src-tauri/icons/Square150x150Logo.png": {
     "mtime": 1783188462.533061,
     "ast_hash": "5317870fb8972b73efd7d13efec82dc2",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/64x64.png": {
+  "/root/source/hetu/src-tauri/icons/64x64.png": {
     "mtime": 1783188469.0249338,
     "ast_hash": "e8807fa29261f0921e81549f87a2cb40",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/Square71x71Logo.png": {
+  "/root/source/hetu/src-tauri/icons/Square71x71Logo.png": {
     "mtime": 1783188461.8490744,
     "ast_hash": "67c641bc3c8aafeec59bdc5d90921766",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/Square142x142Logo.png": {
+  "/root/source/hetu/src-tauri/icons/Square142x142Logo.png": {
     "mtime": 1783188462.329065,
     "ast_hash": "1ea201e3bbad251cd6f480724e68f7bf",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/Square89x89Logo.png": {
+  "/root/source/hetu/src-tauri/icons/Square89x89Logo.png": {
     "mtime": 1783188461.9970715,
     "ast_hash": "7b6f6ae66ce50849bc7e944735925ba2",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/Square284x284Logo.png": {
+  "/root/source/hetu/src-tauri/icons/Square284x284Logo.png": {
     "mtime": 1783188462.901054,
     "ast_hash": "2778d4a20926dbbaef878b765ea127ed",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/ios/AppIcon-40x40@1x.png": {
+  "/root/source/hetu/src-tauri/icons/ios/AppIcon-40x40@1x.png": {
     "mtime": 1783188472.5488648,
     "ast_hash": "0352aa9c10e965bc1c4ce1eb22a29957",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/ios/AppIcon-40x40@2x-1.png": {
+  "/root/source/hetu/src-tauri/icons/ios/AppIcon-40x40@2x-1.png": {
     "mtime": 1783188472.4168675,
     "ast_hash": "815c4869bfa10d1f161dac990768453a",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/ios/AppIcon-29x29@2x.png": {
+  "/root/source/hetu/src-tauri/icons/ios/AppIcon-29x29@2x.png": {
     "mtime": 1783188472.1208732,
     "ast_hash": "e87930d66dbab9a04aa062ee285e29e6",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/ios/AppIcon-29x29@2x-1.png": {
+  "/root/source/hetu/src-tauri/icons/ios/AppIcon-29x29@2x-1.png": {
     "mtime": 1783188471.5608842,
     "ast_hash": "e87930d66dbab9a04aa062ee285e29e6",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/ios/AppIcon-512@2x.png": {
+  "/root/source/hetu/src-tauri/icons/ios/AppIcon-512@2x.png": {
     "mtime": 1783188474.3448296,
     "ast_hash": "d78886d4c4c5eb1676bd54f7aca5ece4",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/ios/AppIcon-40x40@2x.png": {
+  "/root/source/hetu/src-tauri/icons/ios/AppIcon-40x40@2x.png": {
     "mtime": 1783188472.696862,
     "ast_hash": "815c4869bfa10d1f161dac990768453a",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/ios/AppIcon-76x76@1x.png": {
+  "/root/source/hetu/src-tauri/icons/ios/AppIcon-76x76@1x.png": {
     "mtime": 1783188473.3408494,
     "ast_hash": "1e1ba979af23805a7f64667913f743fe",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/ios/AppIcon-83.5x83.5@2x.png": {
+  "/root/source/hetu/src-tauri/icons/ios/AppIcon-83.5x83.5@2x.png": {
     "mtime": 1783188473.6328435,
     "ast_hash": "49d82a68e9c3b9ae5fec5bee879d9f01",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/ios/AppIcon-20x20@2x-1.png": {
+  "/root/source/hetu/src-tauri/icons/ios/AppIcon-20x20@2x-1.png": {
     "mtime": 1783188470.7289004,
     "ast_hash": "0352aa9c10e965bc1c4ce1eb22a29957",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/ios/AppIcon-20x20@1x.png": {
+  "/root/source/hetu/src-tauri/icons/ios/AppIcon-20x20@1x.png": {
     "mtime": 1783188471.0808935,
     "ast_hash": "d4aaf487ab7c454b3e4540e359ffcccd",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/ios/AppIcon-40x40@3x.png": {
+  "/root/source/hetu/src-tauri/icons/ios/AppIcon-40x40@3x.png": {
     "mtime": 1783188472.9528568,
     "ast_hash": "57c2e0c637f8587e11aa43d510fc7d57",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/ios/AppIcon-60x60@3x.png": {
+  "/root/source/hetu/src-tauri/icons/ios/AppIcon-60x60@3x.png": {
     "mtime": 1783188473.248851,
     "ast_hash": "7dc33ad8fd0cc84e7a9f8b443ffe045b",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/ios/AppIcon-76x76@2x.png": {
+  "/root/source/hetu/src-tauri/icons/ios/AppIcon-76x76@2x.png": {
     "mtime": 1783188473.516846,
     "ast_hash": "43f24b4a84da426a98350d4224bdb32e",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/ios/AppIcon-29x29@3x.png": {
+  "/root/source/hetu/src-tauri/icons/ios/AppIcon-29x29@3x.png": {
     "mtime": 1783188472.3008697,
     "ast_hash": "5dca78409f0a5d0ef5d8aeb3c630fedc",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/ios/AppIcon-20x20@3x.png": {
+  "/root/source/hetu/src-tauri/icons/ios/AppIcon-20x20@3x.png": {
     "mtime": 1783188471.4328866,
     "ast_hash": "78a3358aff9df690ae7d37cf0c58d053",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/ios/AppIcon-29x29@1x.png": {
+  "/root/source/hetu/src-tauri/icons/ios/AppIcon-29x29@1x.png": {
     "mtime": 1783188471.8888776,
     "ast_hash": "6cd2eea9584a2118524163d733a7caa9",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/ios/AppIcon-60x60@2x.png": {
+  "/root/source/hetu/src-tauri/icons/ios/AppIcon-60x60@2x.png": {
     "mtime": 1783188473.0888543,
     "ast_hash": "57c2e0c637f8587e11aa43d510fc7d57",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/ios/AppIcon-20x20@2x.png": {
+  "/root/source/hetu/src-tauri/icons/ios/AppIcon-20x20@2x.png": {
     "mtime": 1783188471.2848895,
     "ast_hash": "0352aa9c10e965bc1c4ce1eb22a29957",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher_foreground.png": {
+  "/root/source/hetu/src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher_foreground.png": {
     "mtime": 1783188475.6248045,
     "ast_hash": "1861fc289f1bd447d29df641644148a7",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher_round.png": {
+  "/root/source/hetu/src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher_round.png": {
     "mtime": 1783188476.576786,
     "ast_hash": "66f4990eda228767b90858c1339d987f",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher.png": {
+  "/root/source/hetu/src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher.png": {
     "mtime": 1783188476.7047834,
     "ast_hash": "be12204e522896963370d6036147587e",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/android/mipmap-hdpi/ic_launcher_foreground.png": {
+  "/root/source/hetu/src-tauri/icons/android/mipmap-hdpi/ic_launcher_foreground.png": {
     "mtime": 1783188474.532826,
     "ast_hash": "802a4b7e1ee5cafc457e3cfbe00ccefa",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/android/mipmap-hdpi/ic_launcher_round.png": {
+  "/root/source/hetu/src-tauri/icons/android/mipmap-hdpi/ic_launcher_round.png": {
     "mtime": 1783188475.7528021,
     "ast_hash": "ce90fead6fe68159083a226eaab328a2",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/android/mipmap-hdpi/ic_launcher.png": {
+  "/root/source/hetu/src-tauri/icons/android/mipmap-hdpi/ic_launcher.png": {
     "mtime": 1783188475.8648,
     "ast_hash": "db5458faf684d9f843f5430a8246dbac",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/android/mipmap-xxhdpi/ic_launcher_foreground.png": {
+  "/root/source/hetu/src-tauri/icons/android/mipmap-xxhdpi/ic_launcher_foreground.png": {
     "mtime": 1783188475.1008148,
     "ast_hash": "68ec9a65a61e3e9967337118ae722a4f",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/android/mipmap-xxhdpi/ic_launcher_round.png": {
+  "/root/source/hetu/src-tauri/icons/android/mipmap-xxhdpi/ic_launcher_round.png": {
     "mtime": 1783188476.3487904,
     "ast_hash": "ba035160b37d16fb065d2a58ae853429",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/android/mipmap-xxhdpi/ic_launcher.png": {
+  "/root/source/hetu/src-tauri/icons/android/mipmap-xxhdpi/ic_launcher.png": {
     "mtime": 1783188476.476788,
     "ast_hash": "36c6dfd4ada90e021ffdec51d0018224",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/android/mipmap-xhdpi/ic_launcher_foreground.png": {
+  "/root/source/hetu/src-tauri/icons/android/mipmap-xhdpi/ic_launcher_foreground.png": {
     "mtime": 1783188474.880819,
     "ast_hash": "04c2ee83f39aae5930971af8d3e0d14d",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/android/mipmap-xhdpi/ic_launcher_round.png": {
+  "/root/source/hetu/src-tauri/icons/android/mipmap-xhdpi/ic_launcher_round.png": {
     "mtime": 1783188476.160794,
     "ast_hash": "c833a8ab284625d3e19e395d53c15026",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/android/mipmap-xhdpi/ic_launcher.png": {
+  "/root/source/hetu/src-tauri/icons/android/mipmap-xhdpi/ic_launcher.png": {
     "mtime": 1783188476.2607923,
     "ast_hash": "46053aa56eb2e6b2b0bb2bdeed0ded2c",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/android/mipmap-mdpi/ic_launcher_foreground.png": {
+  "/root/source/hetu/src-tauri/icons/android/mipmap-mdpi/ic_launcher_foreground.png": {
     "mtime": 1783188474.696823,
     "ast_hash": "b2503bce71d30bd6d84d7f6989c0a28d",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/android/mipmap-mdpi/ic_launcher_round.png": {
+  "/root/source/hetu/src-tauri/icons/android/mipmap-mdpi/ic_launcher_round.png": {
     "mtime": 1783188475.960798,
     "ast_hash": "455027afd7d5fa45fe9f63aba11c762d",
     "semantic_hash": ""
   },
-  "/root/source/superssh/src-tauri/icons/android/mipmap-mdpi/ic_launcher.png": {
+  "/root/source/hetu/src-tauri/icons/android/mipmap-mdpi/ic_launcher.png": {
     "mtime": 1783188476.0727959,
     "ast_hash": "7f96d6ffa1a8a8ab16e5b87a14088d73",
     "semantic_hash": ""

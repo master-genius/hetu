@@ -1422,33 +1422,139 @@ input[type="checkbox"] {
   color: #e06c75;
 }
 
-.transfer-box {
+/* 顶部工具栏「重新打开传输面板」图标：面板隐藏且列表非空时才出现 */
+.tool-btn.hidden {
+  display: none;
+}
+
+/* ---------- 传输面板（右下角浮动列表） ---------- */
+
+.transfer-panel {
   position: fixed;
   right: 16px;
   bottom: 16px;
   z-index: 120;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  width: 300px;
-}
-
-.transfer-row {
-  display: grid;
-  grid-template-columns: 1fr 90px 38px;
-  align-items: center;
-  gap: 8px;
+  width: 320px;
+  max-height: 60vh;
   background: var(--chrome-rgba);
   border: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
-  border-radius: 8px;
-  padding: 8px 12px;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
   font-size: 12px;
 }
 
+.tp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 8px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--term-fg) 12%, transparent);
+}
+
+.tp-title {
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.tp-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.tp-close:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--term-fg) 12%, transparent);
+}
+
+.tp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  overflow-y: auto;
+}
+
+.transfer-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  background: color-mix(in srgb, var(--term-fg) 6%, transparent);
+  border-radius: 7px;
+  padding: 8px 10px;
+}
+
+.t-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .t-name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.t-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.t-act {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.65;
+  cursor: pointer;
+}
+
+.t-act:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--term-fg) 14%, transparent);
+}
+
+.t-act.t-cancel:hover,
+.t-act.t-del:hover {
+  color: #e5484d;
+}
+
+/* 动作可见性随状态切换：进行中/暂停显示 暂停·取消；终态只显示 删除 */
+.t-del {
+  display: none;
+}
+.transfer-row[data-state="done"] .t-pause,
+.transfer-row[data-state="done"] .t-cancel,
+.transfer-row[data-state="failed"] .t-pause,
+.transfer-row[data-state="failed"] .t-cancel,
+.transfer-row[data-state="cancelled"] .t-pause,
+.transfer-row[data-state="cancelled"] .t-cancel {
+  display: none;
+}
+.transfer-row[data-state="done"] .t-del,
+.transfer-row[data-state="failed"] .t-del,
+.transfer-row[data-state="cancelled"] .t-del {
+  display: flex;
 }
 
 .t-bar {
@@ -1464,9 +1570,31 @@ input[type="checkbox"] {
   transition: width 0.15s;
 }
 
-.t-pct {
-  text-align: right;
+/* 终态进度条着色：成功=绿、失败=红、取消=灰 */
+.transfer-row[data-state="done"] .t-fill {
+  background: #30a46c;
+}
+.transfer-row[data-state="failed"] .t-fill {
+  background: #e5484d;
+}
+.transfer-row[data-state="cancelled"] .t-fill {
+  background: color-mix(in srgb, var(--term-fg) 35%, transparent);
+}
+.transfer-row[data-state="paused"] .t-fill {
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.t-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   opacity: 0.6;
+}
+
+.t-speed {
+  flex-shrink: 0;
+  text-align: right;
 }
 
 /* 亮色主题下的阴影与遮罩微调 */

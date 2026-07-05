@@ -19,13 +19,15 @@ use settings::{Profile, SessionTab, Settings};
 use ssh::conn::{ConnParams, Connection};
 use ssh::pane::{PaneCmd, PaneCtl};
 
-/// 全局状态：连接注册表 + pane 注册表 + 设置 + 连接项
+/// 全局状态：连接注册表 + pane 注册表 + 设置 + 连接项 + 传输控制表
 pub struct AppState {
     conns: Mutex<HashMap<String, Arc<Connection>>>,
     panes: Mutex<HashMap<String, PaneCtl>>,
     settings: Mutex<Settings>,
     /// 连接项存于独立文件 profiles.json，与 settings 分离
     profiles: Mutex<Vec<Profile>>,
+    /// 进行中的传输：transfer_id → 控制句柄（暂停/继续/取消），传输结束即移除
+    transfers: Mutex<HashMap<String, Arc<ssh::sftp::TransferCtl>>>,
 }
 
 type State<'a> = tauri::State<'a, AppState>;
@@ -237,6 +239,17 @@ async fn sftp_preview(
     ssh::sftp::preview(&conn, &path, max_bytes).await
 }
 
+/// 注册一次传输的控制句柄，返回它；传输结束务必调用 unregister_transfer 清理。
+async fn register_transfer(state: &AppState, id: &str) -> Arc<ssh::sftp::TransferCtl> {
+    let ctl = Arc::new(ssh::sftp::TransferCtl::new());
+    state.transfers.lock().await.insert(id.to_string(), ctl.clone());
+    ctl
+}
+
+async fn unregister_transfer(state: &AppState, id: &str) {
+    state.transfers.lock().await.remove(id);
+}
+
 #[tauri::command]
 async fn sftp_download(
     app: tauri::AppHandle,
@@ -247,7 +260,10 @@ async fn sftp_download(
     transfer_id: String,
 ) -> Result<()> {
     let conn = get_conn(&state, &conn_id).await?;
-    ssh::sftp::download(&app, &conn, &remote_path, &local_path, &transfer_id).await
+    let ctl = register_transfer(&state, &transfer_id).await;
+    let r = ssh::sftp::download(&app, &conn, &ctl, &remote_path, &local_path, &transfer_id).await;
+    unregister_transfer(&state, &transfer_id).await;
+    r
 }
 
 #[tauri::command]
@@ -260,7 +276,36 @@ async fn sftp_upload(
     transfer_id: String,
 ) -> Result<String> {
     let conn = get_conn(&state, &conn_id).await?;
-    ssh::sftp::upload(&app, &conn, &local_path, &remote_dir, &transfer_id).await
+    let ctl = register_transfer(&state, &transfer_id).await;
+    let r = ssh::sftp::upload(&app, &conn, &ctl, &local_path, &remote_dir, &transfer_id).await;
+    unregister_transfer(&state, &transfer_id).await;
+    r
+}
+
+/// 暂停 / 继续 / 取消一个进行中的传输（按 transfer_id 定位控制句柄）。
+/// 传输已结束（句柄已移除）时静默忽略，前端幂等。
+#[tauri::command]
+async fn transfer_pause(state: State<'_>, transfer_id: String) -> Result<()> {
+    if let Some(ctl) = state.transfers.lock().await.get(&transfer_id) {
+        ctl.pause();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn transfer_resume(state: State<'_>, transfer_id: String) -> Result<()> {
+    if let Some(ctl) = state.transfers.lock().await.get(&transfer_id) {
+        ctl.resume();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn transfer_cancel(state: State<'_>, transfer_id: String) -> Result<()> {
+    if let Some(ctl) = state.transfers.lock().await.get(&transfer_id) {
+        ctl.cancel();
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -378,6 +423,7 @@ pub fn run() {
             panes: Mutex::new(HashMap::new()),
             settings: Mutex::new(settings::load()),
             profiles: Mutex::new(settings::load_profiles()),
+            transfers: Mutex::new(HashMap::new()),
         })
         .setup(|app| {
             let window = app.get_webview_window("main").expect("main window");
@@ -415,6 +461,9 @@ pub fn run() {
             sftp_preview,
             sftp_download,
             sftp_upload,
+            transfer_pause,
+            transfer_resume,
+            transfer_cancel,
             remote_home,
             remote_cwd,
             default_download_dir,

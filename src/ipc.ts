@@ -46,6 +46,9 @@ export const api = {
     invoke<void>("sftp_download", { connId, remotePath, localPath, transferId }),
   sftpUpload: (connId: string, localPath: string, remoteDir: string, transferId: string) =>
     invoke<string>("sftp_upload", { connId, localPath, remoteDir, transferId }),
+  transferPause: (transferId: string) => invoke<void>("transfer_pause", { transferId }),
+  transferResume: (transferId: string) => invoke<void>("transfer_resume", { transferId }),
+  transferCancel: (transferId: string) => invoke<void>("transfer_cancel", { transferId }),
   remoteHome: (connId: string) => invoke<string>("remote_home", { connId }),
   remoteList: (connId: string, path: string) =>
     invoke<RemoteEntry[]>("sftp_list", { connId, path }),
