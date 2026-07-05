@@ -155,10 +155,10 @@ body {
 
 /*
  * 玻璃内容层（终端背景真模糊）：backdrop-filter 够不到窗口外的桌面，
- * 所以自己垫「被模糊的内容」——几团主题同色系的柔和色斑，再用真 CSS blur 糊化。
- * 观感即「磨砂玻璃后有朦胧的光影」。层级 -2：在磨砂颗粒(-1)与所有内容之下、
- * #app 半透明底色之上；剩余透明度仍透出桌面，与整窗透明不冲突。
- * 跟随「毛玻璃虚化」开关与「模糊程度」滑杆（--glass-blur）。
+ * 所以自己垫「被模糊的内容」——全窗均匀的极细同色系交叉纹，再由上方玻璃面层真模糊。
+ * 均匀分布 → 无局部浓淡，不会在亮色背景上留下"水渍"斑；观感即一层均匀磨砂雾面。
+ * 层级 -3：在玻璃面层(-2)、磨砂颗粒(-1)与所有内容之下、#app 半透明底色之上；
+ * 剩余透明度仍透出桌面，与整窗透明不冲突。受「背景虚化」总开关控制。
  */
 :root[data-glass="1"] #app::after {
   content: "";
@@ -167,13 +167,17 @@ body {
   z-index: -3; /* 最后面：作为「玻璃后面的东西」，主要糊化交给上面的玻璃面层 */
   pointer-events: none;
   border-radius: inherit;
-  /* 极强预柔化：单团、中心只有一个小点，靠超大模糊半径彻底摊开，
-     不再出现任何"圆盘/色块"轮廓，只留最微弱的一处明暗起伏供玻璃层模糊。 */
-  filter: blur(64px);
-  /* 单团、中心小点（8%）、早早收敛为透明；颜色只比背景略掺一点前景，
-     暗色得极淡的略亮、亮色得极淡的略暗，与背景几乎无差。 */
-  background:
-    radial-gradient(9% 8% at 42% 34%, color-mix(in srgb, var(--term-fg) 3%, var(--term-bg)), transparent 55%);
+  /* 不再用「局部光晕」——局部亮斑经玻璃层模糊后在亮色背景上会显成一块"水渍"。
+     改为「全窗均匀的极细交叉纹」：均匀分布 → 没有任何局部浓淡，模糊后只读作一层
+     均匀磨砂雾气（正是真实毛玻璃的样子）。同色系、跟随主题，对比度极低几乎不可见。 */
+  /* 预柔化半径(9px) ≥ 图案周期(4px)：细纹被必然抹成均匀雾面，任何模糊档位下都不显网格 */
+  filter: blur(9px);
+  background-color: transparent;
+  background-image:
+    repeating-linear-gradient(45deg,
+      color-mix(in srgb, var(--term-fg) 3%, var(--term-bg)) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(-45deg,
+      color-mix(in srgb, var(--term-fg) 3%, var(--term-bg)) 0 1px, transparent 1px 4px);
 }
 
 /*
