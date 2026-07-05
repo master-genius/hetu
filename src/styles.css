@@ -73,8 +73,9 @@ body {
   isolation: isolate;
   /* 毛玻璃层：即使很透明，内容层仍有底色保证可读 */
   background: var(--bg-rgba);
-  backdrop-filter: var(--blur);
-  -webkit-backdrop-filter: var(--blur);
+  /* 终端背景虚化（受「背景虚化」开关 + 模糊程度控制；关闭时为 none，弹窗模糊不受影响） */
+  backdrop-filter: var(--bg-blur);
+  -webkit-backdrop-filter: var(--bg-blur);
   /* 整窗圆角随圆角级别变化（直角时为 0）；透明窗口下四角露出桌面，形成圆角窗口观感 */
   border-radius: var(--radius-modal);
   overflow: hidden;
@@ -163,15 +164,38 @@ body {
   content: "";
   position: absolute;
   inset: 0;
+  z-index: -3; /* 最后面：作为「玻璃后面的东西」，主要糊化交给上面的玻璃面层 */
+  pointer-events: none;
+  border-radius: inherit;
+  /* 极强预柔化：单团、中心只有一个小点，靠超大模糊半径彻底摊开，
+     不再出现任何"圆盘/色块"轮廓，只留最微弱的一处明暗起伏供玻璃层模糊。 */
+  filter: blur(64px);
+  /* 单团、中心小点（8%）、早早收敛为透明；颜色只比背景略掺一点前景，
+     暗色得极淡的略亮、亮色得极淡的略暗，与背景几乎无差。 */
+  background:
+    radial-gradient(9% 8% at 42% 34%, color-mix(in srgb, var(--term-fg) 3%, var(--term-bg)), transparent 55%);
+}
+
+/*
+ * 玻璃面层（#glass-veil，真实 div 以获得独立于两个伪元素的层级）：
+ * 毛玻璃的"玻璃本体"——对身后的光晕内容做 backdrop-filter 真模糊（跟随
+ * 「模糊程度」滑杆，复用 --blur），并罩一层主题底色的"玻璃膜"，让光晕呈现
+ * 「隔着玻璃看」的奶雾感，而非画在表面。位于光晕(-3)之上、磨砂颗粒(-1)之下。
+ */
+#glass-veil {
+  display: none;
+}
+
+:root[data-glass="1"] #glass-veil {
+  display: block;
+  position: absolute;
+  inset: 0;
   z-index: -2;
   pointer-events: none;
   border-radius: inherit;
-  filter: blur(var(--glass-blur, 40px));
-  background:
-    radial-gradient(42% 38% at 18% 20%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 70%),
-    radial-gradient(50% 44% at 84% 10%, color-mix(in srgb, var(--term-fg) 11%, transparent), transparent 70%),
-    radial-gradient(46% 42% at 72% 86%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%),
-    radial-gradient(38% 34% at 10% 80%, color-mix(in srgb, var(--term-fg) 8%, transparent), transparent 70%);
+  backdrop-filter: var(--bg-blur);
+  -webkit-backdrop-filter: var(--bg-blur);
+  background: color-mix(in srgb, var(--term-bg) 36%, transparent);
 }
 
 /* 仅一个标签页时不显示标签栏（由 JS 切换 .single 类） */

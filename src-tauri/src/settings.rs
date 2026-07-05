@@ -78,6 +78,9 @@ pub struct Settings {
     pub blur: bool,
     /// 毛玻璃模糊程度（px）
     pub blur_amount: f64,
+    /// 背景虚化：终端整体背景虚化/光晕/玻璃效果总开关（默认开）。
+    /// 关闭后透明度仍作用于底色，复杂背景效果停用，弹窗模糊不受影响。
+    pub bg_blur: bool,
     /// 磨砂质感：独立于毛玻璃的表面颗粒层（同色系噪点）
     pub frosted: bool,
     /// 磨砂程度 0–100（映射颗粒透明度）
@@ -128,6 +131,7 @@ impl Default for Settings {
             opacity: 0.85,
             blur: true,
             blur_amount: 30.0,
+            bg_blur: true,
             frosted: true,
             frost_strength: 20,
             corner_radius: "md".into(),

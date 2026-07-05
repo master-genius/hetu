@@ -7,6 +7,8 @@
   </head>
   <body>
     <div id="app">
+      <!-- 玻璃面层：盖在光晕内容层之上的"玻璃本体"（backdrop-filter 真模糊 + 主题色奶膜） -->
+      <div id="glass-veil" aria-hidden="true"></div>
       <header id="titlebar" data-tauri-drag-region>
         <div id="toolbar">
           <button id="btn-newtab" class="tool-btn" title="新建标签页 (Ctrl+Shift+T)">

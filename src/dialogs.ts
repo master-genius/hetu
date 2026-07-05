@@ -384,6 +384,7 @@ export function showSettingsDialog() {
           <p class="section-desc">半透明与毛玻璃效果依赖系统合成器（macOS / Windows / KDE 等）。</p>
           <label>背景不透明度 <span class="opacity-val"></span>
             <input name="opacity" type="range" min="0.3" max="1" step="0.01"></label>
+          <label class="check"><input name="bgBlur" type="checkbox"> 背景虚化（终端整体背景光晕/玻璃效果；关闭仅保留透明度，弹窗模糊不受影响）</label>
           <label class="check"><input name="blur" type="checkbox"> 毛玻璃虚化（透明时仍保持终端内容清晰）</label>
           <label>模糊程度 <span class="blur-val"></span>
             <input name="blurAmount" type="range" min="0" max="100" step="1"></label>
@@ -442,6 +443,7 @@ export function showSettingsDialog() {
   input("fontSize").value = String(s.fontSize);
   input("opacity").value = String(s.opacity);
   q<HTMLElement>(".opacity-val").textContent = `${Math.round(s.opacity * 100)}%`;
+  input("bgBlur").checked = s.bgBlur;
   input("blur").checked = s.blur;
   input("blurAmount").value = String(s.blurAmount);
   q<HTMLElement>(".blur-val").textContent = `${Math.round(s.blurAmount)}px`;
@@ -710,6 +712,7 @@ export function showSettingsDialog() {
       theme: selectedThemeId,
       titlebarColor: input("titlebarFollow").checked ? null : input("titlebarColor").value,
       opacity: parseFloat(input("opacity").value),
+      bgBlur: input("bgBlur").checked,
       blur: input("blur").checked,
       blurAmount: parseFloat(input("blurAmount").value),
       frosted: input("frosted").checked,

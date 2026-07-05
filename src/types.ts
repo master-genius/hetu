@@ -39,6 +39,9 @@ export interface Settings {
   blur: boolean;
   /** 毛玻璃模糊程度（px） */
   blurAmount: number;
+  /** 背景虚化：终端整体背景虚化/光晕/玻璃效果的总开关（默认开）。
+   *  关闭后透明度仍作用于底色，但复杂背景效果停用，弹窗模糊不受影响。 */
+  bgBlur: boolean;
   /** 磨砂质感：独立于毛玻璃的表面颗粒层（同色系噪点） */
   frosted: boolean;
   /** 磨砂程度 0–100（映射颗粒透明度） */

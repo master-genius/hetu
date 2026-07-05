@@ -280,6 +280,7 @@ export function applyThemeToUI(
   blur: boolean,
   blurAmount: number,
   titlebarColor?: string | null,
+  bgBlur: boolean = true,
 ) {
   const root = document.documentElement;
   const bg = theme.colors.background ?? "#10151c";
@@ -298,10 +299,15 @@ export function applyThemeToUI(
   const px = Math.max(0, Math.round(blurAmount));
   root.style.setProperty("--blur", blur && px > 0 ? `blur(${px}px) saturate(1.3)` : "none");
   // 磨砂质感已独立为单独设置（frosted/frostStrength），由 settings.ts 应用
-  // 终端背景真模糊（#app::after 玻璃内容层）：桌面像素拿不到，改为自己垫一层
-  // 主题派生的色斑内容并对它做真 CSS 模糊——「模糊程度」滑杆同时控制其柔度
-  root.dataset.glass = blur && px > 0 ? "1" : "0";
-  root.style.setProperty("--glass-blur", `${Math.min(80, Math.max(24, px * 1.2))}px`);
+  // 终端背景毛玻璃（光晕内容层 #app::after + 玻璃面层 #glass-veil）：
+  // 桌面像素拿不到，改为自己垫光晕内容，由玻璃面层 backdrop-filter 真模糊。
+  // 「背景虚化」(bgBlur) 为总开关：关闭后终端整体背景不做任何虚化/光晕/玻璃处理，
+  // 但透明度(--bg-rgba)仍作用于底色，弹窗模糊(各自固定值)也不受影响。
+  const bgOn = bgBlur && blur && px > 0;
+  // 终端背景虚化不做饱和度增强：saturate>1 会放大暗色主题背景本身的蓝黑底色，
+  // 使整体"发蓝"。此处保持中性，忠实呈现主题黑色（弹窗模糊另有各自的 saturate）。
+  root.style.setProperty("--bg-blur", bgOn ? `blur(${px}px)` : "none");
+  root.dataset.glass = bgOn ? "1" : "0";
 }
 
 export function hexToRgba(hex: string, alpha: number): string {

@@ -42,7 +42,7 @@ export function fontStack(): string {
 function applySettings() {
   const s = getSettings();
   const root = document.documentElement;
-  applyThemeToUI(activeTheme(), s.opacity, s.blur, s.blurAmount, s.titlebarColor);
+  applyThemeToUI(activeTheme(), s.opacity, s.blur, s.blurAmount, s.titlebarColor, s.bgBlur);
   root.style.setProperty("--ui-font", fontStack());
   // 圆角级别（CSS 按 data-radius 提供各级 --radius 变量）
   root.dataset.radius = s.cornerRadius;
