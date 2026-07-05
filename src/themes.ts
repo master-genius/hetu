@@ -242,6 +242,9 @@ export function allThemes(custom: ThemeDef[]): ThemeDef[] {
  * alpha 由「磨砂程度」设置换算而来。按 (背景色, alpha) 缓存，换主题/调程度
  * 时才重新生成。
  */
+/** 玻璃内容层随机噪声的固定颗粒透明度（很低，仅供玻璃层模糊，不喧宾夺主）。 */
+const GLASS_NOISE_ALPHA = 10;
+
 const frostCache = new Map<string, string>();
 export function frostNoiseUrl(bg: string, alpha: number): string {
   const key = `${bg}:${alpha}`;
@@ -269,7 +272,9 @@ export function frostNoiseUrl(bg: string, alpha: number): string {
   }
   ctx.putImageData(img, 0, 0);
   const url = `url(${c.toDataURL("image/png")})`;
-  frostCache.clear(); // 只保留当前一张，避免反复调滑杆时累积 data URL
+  // 上限保留少量条目：既缓存玻璃(固定 alpha)与磨砂(可变 alpha)两张，又避免反复
+  // 调滑杆时无限累积 data URL。超出时淘汰最早插入的一条。
+  if (frostCache.size >= 6) frostCache.delete(frostCache.keys().next().value as string);
   frostCache.set(key, url);
   return url;
 }
@@ -308,6 +313,9 @@ export function applyThemeToUI(
   // 使整体"发蓝"。此处保持中性，忠实呈现主题黑色（弹窗模糊另有各自的 saturate）。
   root.style.setProperty("--bg-blur", bgOn ? `blur(${px}px)` : "none");
   root.dataset.glass = bgOn ? "1" : "0";
+  // 玻璃内容层的"可模糊内容"：极淡随机噪声（跟随主题背景取色）。随机 → 无方向、
+  // 无周期，永远不成网格，亮色高透明下也只是极细颗粒而非可辨的网纹。alpha 固定很低。
+  if (bgOn) root.style.setProperty("--glass-noise", frostNoiseUrl(bg, GLASS_NOISE_ALPHA));
 }
 
 export function hexToRgba(hex: string, alpha: number): string {

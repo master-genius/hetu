@@ -1,16 +1,16 @@
 # Graph Report - hetu  (2026-07-05)
 
 ## Corpus Check
-- 37 files · ~81,694 words
+- 37 files · ~81,984 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 969 nodes · 1615 edges · 81 communities (78 shown, 3 thin omitted)
+- 969 nodes · 1615 edges · 80 communities (77 shown, 3 thin omitted)
 - Extraction: 96% EXTRACTED · 4% INFERRED · 0% AMBIGUOUS · INFERRED: 72 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `acc97de9`
+- Built from commit: `b5867aaa`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -86,7 +86,6 @@
 - [[_COMMUNITY_Community 72|Community 72]]
 - [[_COMMUNITY_Community 74|Community 74]]
 - [[_COMMUNITY_Community 75|Community 75]]
-- [[_COMMUNITY_Community 77|Community 77]]
 - [[_COMMUNITY_Community 78|Community 78]]
 - [[_COMMUNITY_Community 79|Community 79]]
 - [[_COMMUNITY_Community 81|Community 81]]
@@ -117,11 +116,11 @@
 - `expand_tilde()` --calls--> `home_dir()`  [INFERRED]
   /root/source/superssh/src-tauri/src/sshcfg.rs → src-tauri/src/local.rs
 
-## Communities (81 total, 3 thin omitted)
+## Communities (80 total, 3 thin omitted)
 
 ### Community 0 - "Community 0"
-Cohesion: 0.14
-Nodes (18): showAboutDialog(), events, Tab, SessionLayout, confirmDialog(), confirmOverwriteDialog(), CSOption, formatSize() (+10 more)
+Cohesion: 0.15
+Nodes (18): showAboutDialog(), showConnectDialog(), showSettingsDialog(), confirmDialog(), confirmOverwriteDialog(), CSOption, CustomSelect, formatSize() (+10 more)
 
 ### Community 1 - "Community 1"
 Cohesion: 0.16
@@ -168,8 +167,8 @@ Cohesion: 0.11
 Nodes (23): AppImage 无法运行 / 提示二进制不完整, code:bash (git tag v0.1.0), code:bash (# 1. Rust 工具链（一次性）), code:bash (# A. 免 FUSE 直接解压运行（最省事）), code:bash (WEBKIT_DISABLE_DMABUF_RENDERER=1 ./HetuShell        # 常见花屏修复), code:bash (PROMPT_COMMAND='printf "\e]7;file://%s%s\e\\" "$HOSTNAME" "$), code:block6 (src/            前端（TypeScript + xterm.js，无重框架）), HetuShell 河图终端 (+15 more)
 
 ### Community 12 - "Community 12"
-Cohesion: 0.15
-Nodes (13): definitions, Number, PermissionEntry, Target, Value, anyOf, description, anyOf (+5 more)
+Cohesion: 0.13
+Nodes (15): definitions, Identifier, Number, PermissionEntry, Target, Value, oneOf, anyOf (+7 more)
 
 ### Community 14 - "Community 14"
 Cohesion: 0.07
@@ -196,16 +195,16 @@ Cohesion: 0.2
 Nodes (10): type, webviews, windows, items, description, items, type, description (+2 more)
 
 ### Community 20 - "Community 20"
-Cohesion: 0.37
-Nodes (12): bootstrap(), activeTheme(), applySettings(), fontStack(), getSettings(), listeners, loadSettings(), onSettingsChange() (+4 more)
+Cohesion: 0.26
+Nodes (15): installImeGuard(), api, bootstrap(), WordRange, activeTheme(), applySettings(), fontStack(), getSettings() (+7 more)
 
 ### Community 21 - "Community 21"
 Cohesion: 0.06
 Nodes (54): encode(), ImageData, local_image(), preview_dir(), remote_image(), sweep(), too_big(), Error (+46 more)
 
 ### Community 22 - "Community 22"
-Cohesion: 0.2
-Nodes (10): description, properties, required, type, Capability, type, identifier, remote (+2 more)
+Cohesion: 0.18
+Nodes (11): properties, description, type, default, description, type, identifier, local (+3 more)
 
 ### Community 23 - "Community 23"
 Cohesion: 0.53
@@ -233,7 +232,7 @@ Nodes (4): commands, description, identifier, allow-is-checked
 
 ### Community 29 - "Community 29"
 Cohesion: 0.21
-Nodes (15): installImeGuard(), api, b64encode(), WordRange, ConnParams, ConnStateEvent, FileMeta, LocalEntry (+7 more)
+Nodes (14): b64encode(), events, Tab, ConnParams, ConnStateEvent, FileMeta, LocalEntry, PaneOutputEvent (+6 more)
 
 ### Community 30 - "Community 30"
 Cohesion: 0.07
@@ -260,8 +259,8 @@ Cohesion: 0.5
 Nodes (4): commands, description, identifier, allow-fetch-data-store-identifiers
 
 ### Community 36 - "Community 36"
-Cohesion: 0.13
-Nodes (20): CJK_FONTS, MONO_FONTS, showConnectDialog(), showSettingsDialog(), THEME_COLOR_KEYS, Action, ACTIONS, comboToLabel() (+12 more)
+Cohesion: 0.14
+Nodes (18): CJK_FONTS, MONO_FONTS, THEME_COLOR_KEYS, Action, ACTIONS, comboToLabel(), DEFAULT_KEYBINDINGS, eventToCombo() (+10 more)
 
 ### Community 37 - "Community 37"
 Cohesion: 0.5
@@ -352,8 +351,8 @@ Cohesion: 0.67
 Nodes (3): Identifier, description, oneOf
 
 ### Community 60 - "Community 60"
-Cohesion: 0.67
-Nodes (3): Identifier, description, oneOf
+Cohesion: 0.5
+Nodes (4): description, required, type, Capability
 
 ### Community 62 - "Community 62"
 Cohesion: 0.5
@@ -395,10 +394,6 @@ Nodes (4): default, description, type, local
 Cohesion: 0.5
 Nodes (4): default, description, type, description
 
-### Community 77 - "Community 77"
-Cohesion: 0.5
-Nodes (4): default, description, type, local
-
 ### Community 78 - "Community 78"
 Cohesion: 0.5
 Nodes (4): default, description, type, description
@@ -423,7 +418,7 @@ Nodes (4): commands, description, identifier, deny-set-app-theme
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Pane` connect `Community 14` to `Community 0`, `Community 4`, `Community 20`, `Community 29`?**
+- **Why does `Pane` connect `Community 14` to `Community 0`, `Community 29`, `Community 20`, `Community 4`?**
   _High betweenness centrality (0.051) - this node is a cross-community bridge._
 - **Why does `allow` connect `Community 54` to `Community 2`, `Community 7`, `Community 28`, `Community 30`, `Community 33`, `Community 34`, `Community 35`, `Community 37`, `Community 38`, `Community 42`, `Community 43`, `Community 44`, `Community 45`, `Community 46`, `Community 47`, `Community 48`, `Community 49`, `Community 50`, `Community 51`, `Community 52`, `Community 53`, `Community 55`, `Community 56`, `Community 57`, `Community 58`, `Community 62`, `Community 63`, `Community 64`, `Community 65`, `Community 67`, `Community 68`, `Community 69`, `Community 72`, `Community 79`, `Community 84`, `Community 87`?**
   _High betweenness centrality (0.041) - this node is a cross-community bridge._
@@ -431,9 +426,9 @@ _Questions this graph is uniquely positioned to answer:_
   _High betweenness centrality (0.041) - this node is a cross-community bridge._
 - **What connects `target`, `module`, `moduleResolution` to the rest of the system?**
   _340 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `Community 0` be split into smaller, more focused modules?**
-  _Cohesion score 0.14 - nodes in this community are weakly interconnected._
 - **Should `Community 2` be split into smaller, more focused modules?**
   _Cohesion score 0.06 - nodes in this community are weakly interconnected._
 - **Should `Community 3` be split into smaller, more focused modules?**
   _Cohesion score 0.14 - nodes in this community are weakly interconnected._
+- **Should `Community 4` be split into smaller, more focused modules?**
+  _Cohesion score 0.07 - nodes in this community are weakly interconnected._

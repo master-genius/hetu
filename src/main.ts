@@ -14,6 +14,7 @@ import {
   DND_MIME,
   DL_MIME,
   Explorer,
+  VIEWABLE_IMG,
   localBackend,
   type ExplorerBackend,
 } from "./explorer";
@@ -95,8 +96,8 @@ async function bootstrap() {
     user: "",
     auth: "key",
   };
-  const openLocalTab = async (order?: number): Promise<Tab> =>
-    tabs.createTab("local", LOCAL_PARAMS, order);
+  const openLocalTab = async (order?: number, cwd?: string | null): Promise<Tab> =>
+    tabs.createTab("local", LOCAL_PARAMS, order, cwd);
 
   /**
    * 在指定 pane 内打开/切换连接（右键菜单与顶部连接图标共用）：
@@ -124,11 +125,13 @@ async function bootstrap() {
     await openLocalTab();
   };
 
-  tabs.onNewTabRequest = () => {
+  tabs.onNewTabRequest = async () => {
     if (getSettings().newTabMode === "dialog") {
       showConnectDialog(connectAndOpenTabVoid, openLocalTabVoid);
     } else {
-      void openLocalTab();
+      // 直接新建本地终端：继承当前聚焦本地终端的实时 cwd（远程/取不到为 null → 后端回退 home）
+      const cwd = (await tabs.activePane()?.resolveLocalCwd()) ?? null;
+      void openLocalTab(undefined, cwd);
     }
   };
 
@@ -210,11 +213,15 @@ async function bootstrap() {
         { separator: true, label: "" },
         ...(remote
           ? [
-              {
-                label: word ? `预览 “${truncate(word)}”` : "预览",
-                disabled: !word,
-                action: () => word && void pane.onPreview?.(word),
-              },
+              // 预览仅对图片提供（识别非图片则不展示，文本等无意义预览一律省去）
+              ...(word && VIEWABLE_IMG.test(word)
+                ? [
+                    {
+                      label: `预览 “${truncate(word)}”`,
+                      action: () => void pane.onPreview?.(word),
+                    },
+                  ]
+                : []),
               {
                 label: word ? `下载 “${truncate(word)}”` : "下载",
                 disabled: !word,

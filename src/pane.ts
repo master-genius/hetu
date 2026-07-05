@@ -43,6 +43,8 @@ export class Pane {
   readonly element: HTMLElement;
   cwd: string | null = null;
   homeDir: string | null = null;
+  /** 本地终端首开的起始目录（新标签/分屏继承源终端 cwd）；一次性消费，重开不再套用 */
+  private initialCwd: string | null = null;
   /** 远端 shell 的 PID（连接时经隐形 OSC 标记捕获），用于 /proc 读实时 cwd */
   shellPid: number | null = null;
   lastOutputAt = 0;
@@ -65,9 +67,10 @@ export class Pane {
   /** Ctrl+拖拽终端中的文件/目录（拖到文件管理器下载） */
   onCtrlDragStart: ((path: string, e: DragEvent) => void) | null = null;
 
-  constructor(id: string, connId: string) {
+  constructor(id: string, connId: string, initialCwd?: string | null) {
     this.id = id;
     this.connId = connId;
+    this.initialCwd = initialCwd ?? null;
     this.element = document.createElement("div");
     this.element.className = "pane";
     this.element.dataset.paneId = id;
@@ -198,7 +201,10 @@ export class Pane {
     // 重连场景终端已保留上次尺寸，cols/rows 本就正确，延后一帧亦无副作用。
     requestAnimationFrame(() => this.refit());
     if (this.isLocal) {
-      await api.paneOpenLocal(this.id, this.term.cols, this.term.rows);
+      // 起始目录一次性消费：首开继承源终端 cwd，之后重开（切换连接等）回默认 home
+      const startCwd = this.initialCwd;
+      this.initialCwd = null;
+      await api.paneOpenLocal(this.id, this.term.cols, this.term.rows, startCwd);
       return;
     }
     // 每次（重）打开远端 shell 都是新进程：PID 变、cwd 回到 home，需重新捕获追踪

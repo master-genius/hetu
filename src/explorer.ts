@@ -49,7 +49,7 @@ type ViewMode = "list" | "tiles";
 const VIEW_KEY = "hetushell-explorer-view";
 
 /** webview 可直接解码的图片格式（可右键预览查看）；tiff 等浏览器不识别的不提供 */
-const VIEWABLE_IMG = /\.(png|jpe?g|gif|webp|bmp|svg|ico)$/i;
+export const VIEWABLE_IMG = /\.(png|jpe?g|gif|webp|bmp|svg|ico)$/i;
 
 /** 按扩展名归类：类别 → 强调色（用于文件图标的折角与迷你标记，KDE Breeze 风格） */
 const CATEGORY: Array<[RegExp, string]> = [

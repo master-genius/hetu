@@ -167,6 +167,7 @@ pub fn open(
     pane_id: String,
     cols: u32,
     rows: u32,
+    initial_cwd: Option<String>,
     mut rx: mpsc::UnboundedReceiver<PaneCmd>,
 ) -> Result<Option<u32>> {
     let pty = native_pty_system();
@@ -178,8 +179,14 @@ pub fn open(
     let mut cmd = CommandBuilder::new(&shell);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
-    if let Some(home) = dirs::home_dir() {
-        cmd.cwd(home);
+    // 起始工作目录：优先用调用方传入的目录（新标签/分屏继承源终端 cwd），
+    // 仅当它确为可用目录时采用；否则（未传或切换失败/目录不存在）回退用户主目录。
+    let start_dir = initial_cwd
+        .filter(|d| !d.is_empty() && std::path::Path::new(d).is_dir())
+        .map(std::path::PathBuf::from)
+        .or_else(dirs::home_dir);
+    if let Some(dir) = start_dir {
+        cmd.cwd(dir);
     }
     let mut child = pair
         .slave

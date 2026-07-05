@@ -155,8 +155,8 @@ body {
 
 /*
  * 玻璃内容层（终端背景真模糊）：backdrop-filter 够不到窗口外的桌面，
- * 所以自己垫「被模糊的内容」——全窗均匀的极细同色系交叉纹，再由上方玻璃面层真模糊。
- * 均匀分布 → 无局部浓淡，不会在亮色背景上留下"水渍"斑；观感即一层均匀磨砂雾面。
+ * 所以自己垫「被模糊的内容」——全窗均匀的极淡随机噪声，再由上方玻璃面层真模糊。
+ * 随机分布 → 无局部浓淡、无方向周期，不会在亮色背景上留下"水渍"斑或可辨网格。
  * 层级 -3：在玻璃面层(-2)、磨砂颗粒(-1)与所有内容之下、#app 半透明底色之上；
  * 剩余透明度仍透出桌面，与整窗透明不冲突。受「背景虚化」总开关控制。
  */
@@ -167,17 +167,13 @@ body {
   z-index: -3; /* 最后面：作为「玻璃后面的东西」，主要糊化交给上面的玻璃面层 */
   pointer-events: none;
   border-radius: inherit;
-  /* 不再用「局部光晕」——局部亮斑经玻璃层模糊后在亮色背景上会显成一块"水渍"。
-     改为「全窗均匀的极细交叉纹」：均匀分布 → 没有任何局部浓淡，模糊后只读作一层
-     均匀磨砂雾气（正是真实毛玻璃的样子）。同色系、跟随主题，对比度极低几乎不可见。 */
-  /* 预柔化半径(9px) ≥ 图案周期(4px)：细纹被必然抹成均匀雾面，任何模糊档位下都不显网格 */
-  filter: blur(9px);
+  /* 不用规则图案（交叉纹在亮色高透明下会显成可辨网格）——改为「极淡随机噪声」：
+     逐像素独立随机 → 无方向、无周期，永远不成网格；同色系、跟随主题（themes.ts
+     写入 --glass-noise）。轻预柔化把颗粒揉成均匀雾面，再由上方玻璃面层真模糊。 */
+  filter: blur(7px);
   background-color: transparent;
-  background-image:
-    repeating-linear-gradient(45deg,
-      color-mix(in srgb, var(--term-fg) 3%, var(--term-bg)) 0 1px, transparent 1px 4px),
-    repeating-linear-gradient(-45deg,
-      color-mix(in srgb, var(--term-fg) 3%, var(--term-bg)) 0 1px, transparent 1px 4px);
+  background-image: var(--glass-noise, none);
+  background-size: 128px 128px;
 }
 
 /*

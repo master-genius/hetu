@@ -176,9 +176,14 @@ export class TabManager {
   }
 
   /** 创建标签页：先建首个 pane，再渲染。order 用于会话恢复后按保存顺序归位。 */
-  async createTab(connId: string, params: ConnParams, order?: number): Promise<Tab> {
+  async createTab(
+    connId: string,
+    params: ConnParams,
+    order?: number,
+    initialCwd?: string | null,
+  ): Promise<Tab> {
     const paneId = crypto.randomUUID();
-    const pane = new Pane(paneId, connId);
+    const pane = new Pane(paneId, connId, initialCwd);
     const layout = new Layout(pane);
     // 拖动分割线改比例也要触发会话快照（结构变化由 splitPane/closePane 触发）
     layout.onChange = () => this.onLayoutChange?.();
@@ -292,8 +297,11 @@ export class TabManager {
    */
   async splitPane(tab: Tab, target: Pane, dir: "row" | "col", ratio?: number): Promise<Pane | null> {
     if (tab.layout.depthOf(target) > TabManager.MAX_SPLIT_DEPTH) return null;
+    // 分屏继承被切分终端的实时 cwd（本地终端）：resolveLocalCwd 对远程/取不到返回 null，
+    // 后端据此回退 home（见 local::open）
+    const initialCwd = await target.resolveLocalCwd();
     // 复用被切分 pane 的连接（可能已就地切换过，未必等于 tab.connId）
-    const pane = new Pane(crypto.randomUUID(), target.connId);
+    const pane = new Pane(crypto.randomUUID(), target.connId, initialCwd);
     this.onPaneCreated?.(pane, tab);
     tab.layout.split(target, dir, pane, ratio);
     tab.activePaneId = pane.id;
