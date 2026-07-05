@@ -7765,7 +7765,7 @@
       "label": "truncate()",
       "file_type": "code",
       "source_file": "src/main.ts",
-      "source_location": "L1086",
+      "source_location": "L1105",
       "id": "src_main_truncate",
       "community": 0,
       "norm_label": "truncate()"
@@ -23811,9 +23811,9 @@
       "source_file": "src/explorer.ts",
       "source_location": "L247",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_explorer_explorer",
-      "target": "src_explorer_explorer_reveal",
-      "confidence_score": 1.0
+      "target": "src_explorer_explorer_reveal"
     },
     {
       "relation": "method",
@@ -23906,9 +23906,9 @@
       "source_file": "src/explorer.ts",
       "source_location": "L248",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_explorer_explorer_reveal",
-      "target": "src_explorer_explorer_init",
-      "confidence_score": 1.0
+      "target": "src_explorer_explorer_init"
     },
     {
       "relation": "calls",
@@ -23917,9 +23917,9 @@
       "source_file": "src/explorer.ts",
       "source_location": "L250",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_explorer_explorer_reveal",
-      "target": "src_explorer_explorer_navigate",
-      "confidence_score": 1.0
+      "target": "src_explorer_explorer_navigate"
     },
     {
       "relation": "calls",
@@ -25223,5 +25223,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "da854b71de576705d6552e9303dbac89ee27a86d"
+  "built_at_commit": "260fc046e811187f9bd2ab90eee63e1b9308abda"
 }

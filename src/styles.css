@@ -11,6 +11,8 @@
   --ui-font: "JetBrains Mono NL", "Noto Sans SC", monospace;
   --tab-font: var(--ui-font);
   --tab-font-size: 12px;
+  /* 文件面板列表字号：由 settings.ts 按「终端字号 - 1」钳制 [11,19] 后写入 */
+  --ex-font-size: 13px;
   --titlebar-rgba: var(--chrome-rgba);
   /* 圆角级别（默认中等，applySettings 通过 data-radius 覆盖） */
   --radius: 10px;
@@ -662,7 +664,7 @@ body {
   align-items: center;
   padding: 5px 8px;
   border-radius: 5px;
-  font-size: 12.5px;
+  font-size: var(--ex-font-size);
   cursor: default;
 }
 
@@ -681,7 +683,8 @@ body {
 }
 
 .ex-meta {
-  font-size: 11px;
+  /* 大小/时间列比文件名再小 2px，随面板字号联动 */
+  font-size: calc(var(--ex-font-size) - 2px);
   opacity: 0.5;
   text-align: right;
   white-space: nowrap;
@@ -763,7 +766,8 @@ body {
   position: fixed;
   z-index: 200;
   min-width: 180px;
-  background: color-mix(in srgb, var(--term-bg) 62%, transparent);
+  /* 底色 62%→74%：背后终端透出过多时菜单文字发灰，与弹窗同款提对比度 */
+  background: color-mix(in srgb, var(--term-bg) 74%, transparent);
   backdrop-filter: blur(26px) saturate(1.6);
   -webkit-backdrop-filter: blur(26px) saturate(1.6);
   border: 1px solid color-mix(in srgb, var(--term-fg) 16%, transparent);
@@ -782,7 +786,7 @@ body {
   background: none;
   color: var(--term-fg);
   font-family: var(--ui-font);
-  font-size: 13px;
+  font-size: 13.5px;
   padding: 7px 12px;
   border-radius: 5px;
   cursor: pointer;
@@ -851,15 +855,15 @@ body {
 }
 
 .modal h3 {
-  font-size: 15px;
+  font-size: 16px;
   margin-bottom: 14px;
   font-weight: 400;
 }
 
 .modal h4 {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 400;
-  opacity: 0.85;
+  opacity: 0.92;
   margin: 14px 0 8px;
 }
 
@@ -1100,7 +1104,7 @@ textarea.key-area:focus {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 12.5px;
+  font-size: 13px;
   /* 主文字不降透明：半透毛玻璃底上再叠 opacity 会明显发灰 */
   opacity: 1;
 }
@@ -1601,6 +1605,19 @@ input[type="checkbox"] {
 
 .image-viewer .preview-body img.panning {
   cursor: grabbing;
+}
+
+/* 透明图底色（背景挂在 img 上，随图片一起缩放/平移，只垫在像素后面） */
+.image-viewer .preview-body img.iv-bg-checker {
+  background: repeating-conic-gradient(#9a9a9a 0% 25%, #e8e8e8 0% 50%) 0 0 / 16px 16px;
+}
+
+.image-viewer .preview-body img.iv-bg-white {
+  background: #ffffff;
+}
+
+.image-viewer .preview-body img.iv-bg-black {
+  background: #000000;
 }
 
 .iv-tools {

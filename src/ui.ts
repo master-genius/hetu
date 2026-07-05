@@ -343,6 +343,7 @@ export function showImageViewer(name: string, load: Promise<string>): void {
           <span class="iv-pct">--</span>
           <button class="btn" data-act="in" title="放大">＋</button>
           <button class="btn" data-act="fit" title="适应窗口">适应</button>
+          <button class="btn" data-act="bg" title="切换底色：主题 → 棋盘格 → 白 → 黑（查看透明图）">底色</button>
           <button class="btn" data-act="ccw" title="向左旋转 90°">↺</button>
           <button class="btn" data-act="cw" title="向右旋转 90°">↻</button>
           <button class="btn" data-act="close">关闭</button>
@@ -361,6 +362,16 @@ export function showImageViewer(name: string, load: Promise<string>): void {
   let rot = 0; // 仅 90° 步进
   let tx = 0;
   let ty = 0;
+
+  // 底色循环：透明图在主题底上可能看不清 → 棋盘格（专业软件惯例）/ 纯白 / 纯黑
+  const BG_MODES = ["", "iv-bg-checker", "iv-bg-white", "iv-bg-black"] as const;
+  let bgIdx = 0;
+  const applyBg = () => {
+    if (!img) return;
+    for (const c of BG_MODES) if (c) img.classList.remove(c);
+    const cls = BG_MODES[bgIdx];
+    if (cls) img.classList.add(cls);
+  };
 
   // translate 在最左（屏幕坐标系平移），旋转/缩放围绕图片中心，拖拽手感与方向无关
   const apply = () => {
@@ -405,6 +416,10 @@ export function showImageViewer(name: string, load: Promise<string>): void {
   on("in", () => zoom(1.25));
   on("out", () => zoom(0.8));
   on("fit", fit);
+  on("bg", () => {
+    bgIdx = (bgIdx + 1) % BG_MODES.length;
+    applyBg();
+  });
   on("ccw", () => rotate(-90));
   on("cw", () => rotate(90));
 
@@ -457,6 +472,7 @@ export function showImageViewer(name: string, load: Promise<string>): void {
       el.onload = () => {
         img = el;
         body.replaceChildren(el);
+        applyBg(); // 加载完成前用户可能已切过底色
         fit();
       };
       el.onerror = () => showHint("图片解码失败，格式可能不受支持");

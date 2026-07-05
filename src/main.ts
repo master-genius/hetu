@@ -547,6 +547,13 @@ async function bootstrap() {
       toast(`复制失败: ${err}`, true);
     }
   };
+  // 拖拽操作结束（无论落在哪、是否成功落下）统一清理两套高亮：
+  // 修复「拖回源终端/自己面板后，目标虚线残留不消失」——那些路径没有 drop 事件，
+  // 但源元素在应用内，dragend 必然触发并冒泡到 document。
+  document.addEventListener("dragend", () => {
+    clearDlHighlight();
+    clearDropIndicators();
+  });
   content.addEventListener("drop", (e) => {
     const raw = e.dataTransfer?.getData(DL_MIME);
     if (!raw) return;
@@ -677,7 +684,9 @@ async function bootstrap() {
   const updateExplorerBtn = () =>
     explorerBtn.classList.toggle("active", !!tabs.active?.explorerOpen);
   initPanelResize(explorerPanel, "right");
-  const syncExplorerPanel = () => {
+  /** revealDir=true（用户显式点击打开）时，定位到聚焦本地终端的实时 cwd；
+   *  被动同步不打断用户正在浏览的目录（与远程面板同款策略） */
+  const syncExplorerPanel = (revealDir = false) => {
     const tab = tabs.active;
     updateExplorerBtn();
     // 用 .open 类做滑入/滑出动画（面板常驻 DOM，不用 display 切换以免动画失效）
@@ -708,7 +717,17 @@ async function bootstrap() {
       explorerPanel.appendChild(tab.explorer.element);
     }
     explorerPanel.classList.add("open");
-    void tab.explorer.init();
+    // 聚焦本地终端时用其实时 cwd（/proc）定位；聚焦远程终端则回退 home
+    const inst = tab.explorer;
+    const pane = tabs.activePane();
+    if (pane?.isLocal) {
+      void pane
+        .resolveLocalCwd()
+        .catch(() => null)
+        .then((dir) =>
+          revealDir ? void inst.reveal(dir ?? undefined) : void inst.init(dir ?? undefined),
+        );
+    } else void inst.init();
   };
 
   // ---------- 远程文件管理器面板（左侧浮动 45%，每连接独立实例） ----------
@@ -870,7 +889,7 @@ async function bootstrap() {
     const tab = tabs.active;
     if (!tab) return;
     tab.explorerOpen = !tab.explorerOpen;
-    syncExplorerPanel();
+    syncExplorerPanel(tab.explorerOpen); // 打开时定位到聚焦终端当前目录
   });
 
   remoteBtn.addEventListener("click", () => {

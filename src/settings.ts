@@ -55,5 +55,8 @@ function applySettings() {
   root.style.setProperty("--tab-font-size", `${tabSize}px`);
   // 终端滚动条显隐（CSS 按 data-scrollbar 开关 .xterm-viewport 的滚动条）
   root.dataset.scrollbar = s.showScrollbar ? "1" : "0";
+  // 文件面板列表字号：跟随终端字号自动取「小一号」，钳制在 [11, 19]，不提供独立选项
+  const exSize = Math.min(19, Math.max(11, s.fontSize - 1));
+  root.style.setProperty("--ex-font-size", `${exSize}px`);
   for (const fn of listeners) fn(s);
 }
