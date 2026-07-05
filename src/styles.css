@@ -644,8 +644,12 @@ body {
   padding: 4px;
 }
 
-/* 刷新按钮：点击转一圈，作为「已处理」的反馈（动画结束由 JS 移除类） */
-.ex-refresh.spin {
+/* 刷新按钮：点击时仅内部图标转一圈（不转按钮方块），动画结束由 JS 移除类 */
+.ex-refresh-icon {
+  display: inline-block; /* 行内元素不吃 transform，需 inline-block */
+}
+
+.ex-refresh.spin .ex-refresh-icon {
   animation: ex-spin 0.55s ease;
 }
 

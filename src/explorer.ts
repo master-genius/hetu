@@ -156,7 +156,7 @@ export class Explorer {
         <button class="btn ex-up" title="上一级">↑</button>
         <input class="ex-path" spellcheck="false">
         <button class="btn ex-view" title="切换视图"></button>
-        <button class="btn ex-refresh" title="刷新">⟳</button>
+        <button class="btn ex-refresh" title="刷新"><span class="ex-refresh-icon">⟳</span></button>
       </div>
       <div class="ex-list"></div>
       <div class="ex-hint">${hint}</div>`;

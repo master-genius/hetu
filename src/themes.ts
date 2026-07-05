@@ -241,7 +241,10 @@ export function allThemes(custom: ThemeDef[]): ThemeDef[] {
 let frostNoise: string | null = null;
 function frostNoiseUrl(): string {
   if (frostNoise) return frostNoise;
-  const size = 128;
+  // 256×256 贴图以 128px 显示（styles.css background-size）：每个噪点仅占
+  // 0.5 CSS 像素，亚像素颗粒经渲染滤波互相平均 → 更细密、整体更平滑的哑光面；
+  // HiDPI（DPR 2）下恰好 1 噪点对齐 1 物理像素。
+  const size = 256;
   const c = document.createElement("canvas");
   c.width = c.height = size;
   const ctx = c.getContext("2d");
@@ -250,7 +253,7 @@ function frostNoiseUrl(): string {
   for (let i = 0; i < img.data.length; i += 4) {
     const v = (Math.random() * 255) | 0;
     img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
-    img.data[i + 3] = 13; // ≈5% 透明度：只留质感，不动对比度
+    img.data[i + 3] = 9; // ≈3.5% 透明度：配合亚像素密度，质感更接近均匀哑光
   }
   ctx.putImageData(img, 0, 0);
   frostNoise = `url(${c.toDataURL("image/png")})`;
