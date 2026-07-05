@@ -5083,7 +5083,7 @@
       "label": ".default()",
       "file_type": "code",
       "source_file": "src-tauri/src/settings.rs",
-      "source_location": "L110",
+      "source_location": "L112",
       "id": "src_settings_settings_default",
       "community": 4,
       "norm_label": ".default()"
@@ -5092,7 +5092,7 @@
       "label": "SessionTab",
       "file_type": "code",
       "source_file": "src-tauri/src/settings.rs",
-      "source_location": "L147",
+      "source_location": "L150",
       "id": "src_settings_sessiontab",
       "community": 4,
       "norm_label": "sessiontab"
@@ -5101,7 +5101,7 @@
       "label": "config_dir()",
       "file_type": "code",
       "source_file": "src-tauri/src/settings.rs",
-      "source_location": "L159",
+      "source_location": "L162",
       "id": "src_settings_config_dir",
       "community": 4,
       "norm_label": "config_dir()"
@@ -5110,7 +5110,7 @@
       "label": "settings_path()",
       "file_type": "code",
       "source_file": "src-tauri/src/settings.rs",
-      "source_location": "L167",
+      "source_location": "L170",
       "id": "src_settings_settings_path",
       "community": 4,
       "norm_label": "settings_path()"
@@ -5119,7 +5119,7 @@
       "label": "profiles_path()",
       "file_type": "code",
       "source_file": "src-tauri/src/settings.rs",
-      "source_location": "L171",
+      "source_location": "L174",
       "id": "src_settings_profiles_path",
       "community": 4,
       "norm_label": "profiles_path()"
@@ -5128,7 +5128,7 @@
       "label": "session_path()",
       "file_type": "code",
       "source_file": "src-tauri/src/settings.rs",
-      "source_location": "L175",
+      "source_location": "L178",
       "id": "src_settings_session_path",
       "community": 4,
       "norm_label": "session_path()"
@@ -5137,7 +5137,7 @@
       "label": "known_hosts_path()",
       "file_type": "code",
       "source_file": "src-tauri/src/settings.rs",
-      "source_location": "L180",
+      "source_location": "L183",
       "id": "src_settings_known_hosts_path",
       "community": 4,
       "norm_label": "known_hosts_path()"
@@ -5146,7 +5146,7 @@
       "label": "read_json_or_default()",
       "file_type": "code",
       "source_file": "src-tauri/src/settings.rs",
-      "source_location": "L185",
+      "source_location": "L188",
       "id": "src_settings_read_json_or_default",
       "community": 4,
       "norm_label": "read_json_or_default()"
@@ -5155,7 +5155,7 @@
       "label": "set_owner_only()",
       "file_type": "code",
       "source_file": "src-tauri/src/settings.rs",
-      "source_location": "L201",
+      "source_location": "L204",
       "id": "src_settings_set_owner_only",
       "community": 4,
       "norm_label": "set_owner_only()"
@@ -5164,7 +5164,7 @@
       "label": "write_json()",
       "file_type": "code",
       "source_file": "src-tauri/src/settings.rs",
-      "source_location": "L208",
+      "source_location": "L211",
       "id": "src_settings_write_json",
       "community": 4,
       "norm_label": "write_json()"
@@ -5173,7 +5173,7 @@
       "label": "load_profiles()",
       "file_type": "code",
       "source_file": "src-tauri/src/settings.rs",
-      "source_location": "L221",
+      "source_location": "L224",
       "id": "src_settings_load_profiles",
       "community": 4,
       "norm_label": "load_profiles()"
@@ -5182,7 +5182,7 @@
       "label": "save_profiles()",
       "file_type": "code",
       "source_file": "src-tauri/src/settings.rs",
-      "source_location": "L228",
+      "source_location": "L231",
       "id": "src_settings_save_profiles",
       "community": 4,
       "norm_label": "save_profiles()"
@@ -5191,7 +5191,7 @@
       "label": "load_session()",
       "file_type": "code",
       "source_file": "src-tauri/src/settings.rs",
-      "source_location": "L234",
+      "source_location": "L237",
       "id": "src_settings_load_session",
       "community": 4,
       "norm_label": "load_session()"
@@ -5200,7 +5200,7 @@
       "label": "save_session()",
       "file_type": "code",
       "source_file": "src-tauri/src/settings.rs",
-      "source_location": "L241",
+      "source_location": "L244",
       "id": "src_settings_save_session",
       "community": 4,
       "norm_label": "save_session()"
@@ -5209,7 +5209,7 @@
       "label": "load()",
       "file_type": "code",
       "source_file": "src-tauri/src/settings.rs",
-      "source_location": "L245",
+      "source_location": "L248",
       "id": "src_settings_load",
       "community": 4,
       "norm_label": "load()"
@@ -5218,7 +5218,7 @@
       "label": "migrate()",
       "file_type": "code",
       "source_file": "src-tauri/src/settings.rs",
-      "source_location": "L258",
+      "source_location": "L261",
       "id": "src_settings_migrate",
       "community": 4,
       "norm_label": "migrate()"
@@ -5227,7 +5227,7 @@
       "label": "save()",
       "file_type": "code",
       "source_file": "src-tauri/src/settings.rs",
-      "source_location": "L271",
+      "source_location": "L274",
       "id": "src_settings_save",
       "community": 4,
       "norm_label": "save()"
@@ -7260,16 +7260,16 @@
     {
       "label": "settings.ts",
       "file_type": "code",
-      "source_file": "/root/source/superssh/src/settings.ts",
+      "source_file": "src/settings.ts",
       "source_location": "L1",
-      "id": "root_source_superssh_src_settings_ts",
+      "id": "src_settings_ts",
       "community": 0,
       "norm_label": "settings.ts"
     },
     {
       "label": "listeners",
       "file_type": "code",
-      "source_file": "/root/source/superssh/src/settings.ts",
+      "source_file": "src/settings.ts",
       "source_location": "L8",
       "id": "src_settings_listeners",
       "community": 0,
@@ -7278,7 +7278,7 @@
     {
       "label": "loadSettings()",
       "file_type": "code",
-      "source_file": "/root/source/superssh/src/settings.ts",
+      "source_file": "src/settings.ts",
       "source_location": "L10",
       "id": "src_settings_loadsettings",
       "community": 0,
@@ -7287,7 +7287,7 @@
     {
       "label": "getSettings()",
       "file_type": "code",
-      "source_file": "/root/source/superssh/src/settings.ts",
+      "source_file": "src/settings.ts",
       "source_location": "L16",
       "id": "src_settings_getsettings",
       "community": 0,
@@ -7296,7 +7296,7 @@
     {
       "label": "updateSettings()",
       "file_type": "code",
-      "source_file": "/root/source/superssh/src/settings.ts",
+      "source_file": "src/settings.ts",
       "source_location": "L21",
       "id": "src_settings_updatesettings",
       "community": 0,
@@ -7305,7 +7305,7 @@
     {
       "label": "onSettingsChange()",
       "file_type": "code",
-      "source_file": "/root/source/superssh/src/settings.ts",
+      "source_file": "src/settings.ts",
       "source_location": "L27",
       "id": "src_settings_onsettingschange",
       "community": 0,
@@ -7314,7 +7314,7 @@
     {
       "label": "activeTheme()",
       "file_type": "code",
-      "source_file": "/root/source/superssh/src/settings.ts",
+      "source_file": "src/settings.ts",
       "source_location": "L31",
       "id": "src_settings_activetheme",
       "community": 0,
@@ -7323,7 +7323,7 @@
     {
       "label": "fontStack()",
       "file_type": "code",
-      "source_file": "/root/source/superssh/src/settings.ts",
+      "source_file": "src/settings.ts",
       "source_location": "L37",
       "id": "src_settings_fontstack",
       "community": 0,
@@ -7332,7 +7332,7 @@
     {
       "label": "applySettings()",
       "file_type": "code",
-      "source_file": "/root/source/superssh/src/settings.ts",
+      "source_file": "src/settings.ts",
       "source_location": "L42",
       "id": "src_settings_applysettings",
       "community": 0,
@@ -7378,7 +7378,7 @@
       "label": "SessionLayout",
       "file_type": "code",
       "source_file": "src/types.ts",
-      "source_location": "L69",
+      "source_location": "L71",
       "id": "src_types_sessionlayout",
       "community": 0,
       "norm_label": "sessionlayout"
@@ -7387,7 +7387,7 @@
       "label": "SessionTab",
       "file_type": "code",
       "source_file": "src/types.ts",
-      "source_location": "L74",
+      "source_location": "L76",
       "id": "src_types_sessiontab",
       "community": 0,
       "norm_label": "sessiontab"
@@ -7396,7 +7396,7 @@
       "label": "ConnParams",
       "file_type": "code",
       "source_file": "src/types.ts",
-      "source_location": "L83",
+      "source_location": "L85",
       "id": "src_types_connparams",
       "community": 0,
       "norm_label": "connparams"
@@ -7405,7 +7405,7 @@
       "label": "FileMeta",
       "file_type": "code",
       "source_file": "src/types.ts",
-      "source_location": "L97",
+      "source_location": "L99",
       "id": "src_types_filemeta",
       "community": 0,
       "norm_label": "filemeta"
@@ -7414,7 +7414,7 @@
       "label": "Preview",
       "file_type": "code",
       "source_file": "src/types.ts",
-      "source_location": "L110",
+      "source_location": "L112",
       "id": "src_types_preview",
       "community": 0,
       "norm_label": "preview"
@@ -7423,7 +7423,7 @@
       "label": "PaneOutputEvent",
       "file_type": "code",
       "source_file": "src/types.ts",
-      "source_location": "L117",
+      "source_location": "L119",
       "id": "src_types_paneoutputevent",
       "community": 0,
       "norm_label": "paneoutputevent"
@@ -7432,7 +7432,7 @@
       "label": "ConnStateEvent",
       "file_type": "code",
       "source_file": "src/types.ts",
-      "source_location": "L122",
+      "source_location": "L124",
       "id": "src_types_connstateevent",
       "community": 0,
       "norm_label": "connstateevent"
@@ -7441,7 +7441,7 @@
       "label": "LocalEntry",
       "file_type": "code",
       "source_file": "src/types.ts",
-      "source_location": "L129",
+      "source_location": "L131",
       "id": "src_types_localentry",
       "community": 0,
       "norm_label": "localentry"
@@ -7450,7 +7450,7 @@
       "label": "RemoteEntry",
       "file_type": "code",
       "source_file": "src/types.ts",
-      "source_location": "L137",
+      "source_location": "L139",
       "id": "src_types_remoteentry",
       "community": 0,
       "norm_label": "remoteentry"
@@ -7459,7 +7459,7 @@
       "label": "TransferProgressEvent",
       "file_type": "code",
       "source_file": "src/types.ts",
-      "source_location": "L146",
+      "source_location": "L148",
       "id": "src_types_transferprogressevent",
       "community": 0,
       "norm_label": "transferprogressevent"
@@ -7981,7 +7981,7 @@
       "label": "makeThemeCard()",
       "file_type": "code",
       "source_file": "src/dialogs.ts",
-      "source_location": "L721",
+      "source_location": "L724",
       "id": "src_dialogs_makethemecard",
       "community": 0,
       "norm_label": "makethemecard()"
@@ -7990,7 +7990,7 @@
       "label": "renderThemeEditor()",
       "file_type": "code",
       "source_file": "src/dialogs.ts",
-      "source_location": "L789",
+      "source_location": "L792",
       "id": "src_dialogs_renderthemeeditor",
       "community": 0,
       "norm_label": "renderthemeeditor()"
@@ -8210,6 +8210,15 @@
       "id": "superssh_readme_codeblock_6",
       "community": 11,
       "norm_label": "code:block6 (src/            \u524d\u7aef(typescript + xterm.js,\u65e0\u91cd\u6846\u67b6))"
+    },
+    {
+      "label": "settings.ts",
+      "file_type": "code",
+      "source_file": "/root/source/superssh/src/settings.ts",
+      "source_location": "L1",
+      "community": 0,
+      "norm_label": "settings.ts",
+      "id": "root_source_superssh_src_settings_ts"
     },
     {
       "label": "layout.ts",
@@ -8579,15 +8588,6 @@
       "community": 0,
       "norm_label": "keybindings.ts",
       "id": "src_keybindings_ts"
-    },
-    {
-      "label": "settings.ts",
-      "file_type": "code",
-      "source_file": "src/settings.ts",
-      "source_location": "L1",
-      "community": 0,
-      "norm_label": "settings.ts",
-      "id": "src_settings_ts"
     },
     {
       "label": "README.md",
@@ -16020,9 +16020,9 @@
       "source_file": "src-tauri/src/cache.rs",
       "source_location": "L29",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_tauri_src_cache_rs",
-      "target": "src_cache_imagedata",
-      "confidence_score": 1.0
+      "target": "src_cache_imagedata"
     },
     {
       "relation": "contains",
@@ -16030,9 +16030,9 @@
       "source_file": "src-tauri/src/cache.rs",
       "source_location": "L34",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_tauri_src_cache_rs",
-      "target": "src_cache_preview_dir",
-      "confidence_score": 1.0
+      "target": "src_cache_preview_dir"
     },
     {
       "relation": "contains",
@@ -16040,9 +16040,9 @@
       "source_file": "src-tauri/src/cache.rs",
       "source_location": "L43",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_tauri_src_cache_rs",
-      "target": "src_cache_too_big",
-      "confidence_score": 1.0
+      "target": "src_cache_too_big"
     },
     {
       "relation": "contains",
@@ -16050,9 +16050,9 @@
       "source_file": "src-tauri/src/cache.rs",
       "source_location": "L51",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_tauri_src_cache_rs",
-      "target": "src_cache_encode",
-      "confidence_score": 1.0
+      "target": "src_cache_encode"
     },
     {
       "relation": "contains",
@@ -16060,9 +16060,9 @@
       "source_file": "src-tauri/src/cache.rs",
       "source_location": "L59",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_tauri_src_cache_rs",
-      "target": "src_cache_local_image",
-      "confidence_score": 1.0
+      "target": "src_cache_local_image"
     },
     {
       "relation": "contains",
@@ -16070,9 +16070,9 @@
       "source_file": "src-tauri/src/cache.rs",
       "source_location": "L68",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_tauri_src_cache_rs",
-      "target": "src_cache_remote_image",
-      "confidence_score": 1.0
+      "target": "src_cache_remote_image"
     },
     {
       "relation": "contains",
@@ -16080,9 +16080,9 @@
       "source_file": "src-tauri/src/cache.rs",
       "source_location": "L109",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_tauri_src_cache_rs",
-      "target": "src_cache_sweep",
-      "confidence_score": 1.0
+      "target": "src_cache_sweep"
     },
     {
       "relation": "calls",
@@ -16091,9 +16091,9 @@
       "source_file": "src-tauri/src/cache.rs",
       "source_location": "L85",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_cache_remote_image",
-      "target": "src_cache_preview_dir",
-      "confidence_score": 1.0
+      "target": "src_cache_preview_dir"
     },
     {
       "relation": "calls",
@@ -16102,9 +16102,9 @@
       "source_file": "src-tauri/src/cache.rs",
       "source_location": "L110",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_cache_sweep",
-      "target": "src_cache_preview_dir",
-      "confidence_score": 1.0
+      "target": "src_cache_preview_dir"
     },
     {
       "relation": "calls",
@@ -16124,9 +16124,9 @@
       "source_file": "src-tauri/src/cache.rs",
       "source_location": "L62",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_cache_local_image",
-      "target": "src_cache_too_big",
-      "confidence_score": 1.0
+      "target": "src_cache_too_big"
     },
     {
       "relation": "calls",
@@ -16135,9 +16135,9 @@
       "source_file": "src-tauri/src/cache.rs",
       "source_location": "L75",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_cache_remote_image",
-      "target": "src_cache_too_big",
-      "confidence_score": 1.0
+      "target": "src_cache_too_big"
     },
     {
       "relation": "calls",
@@ -16157,9 +16157,9 @@
       "source_file": "src-tauri/src/cache.rs",
       "source_location": "L64",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_cache_local_image",
-      "target": "src_cache_encode",
-      "confidence_score": 1.0
+      "target": "src_cache_encode"
     },
     {
       "relation": "calls",
@@ -16168,9 +16168,9 @@
       "source_file": "src-tauri/src/cache.rs",
       "source_location": "L91",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_cache_remote_image",
-      "target": "src_cache_encode",
-      "confidence_score": 1.0
+      "target": "src_cache_encode"
     },
     {
       "relation": "calls",
@@ -17906,9 +17906,9 @@
       "source_file": "src-tauri/src/lib.rs",
       "source_location": "L289",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_tauri_src_lib_rs",
-      "target": "src_lib_image_preview",
-      "confidence_score": 1.0
+      "target": "src_lib_image_preview"
     },
     {
       "relation": "contains",
@@ -18130,9 +18130,9 @@
       "source_file": "src-tauri/src/lib.rs",
       "source_location": "L293",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_lib_image_preview",
-      "target": "src_lib_get_conn",
-      "confidence_score": 1.0
+      "target": "src_lib_get_conn"
     },
     {
       "relation": "calls",
@@ -18494,9 +18494,9 @@
       "source_file": "src-tauri/src/ssh/sftp.rs",
       "source_location": "L305",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_tauri_src_ssh_sftp_rs",
-      "target": "ssh_sftp_read_file_bytes",
-      "confidence_score": 1.0
+      "target": "ssh_sftp_read_file_bytes"
     },
     {
       "relation": "contains",
@@ -18974,9 +18974,9 @@
       "source_file": "src-tauri/src/ssh/sftp.rs",
       "source_location": "L306",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "ssh_sftp_read_file_bytes",
-      "target": "ssh_sftp_session",
-      "confidence_score": 1.0
+      "target": "ssh_sftp_session"
     },
     {
       "relation": "calls",
@@ -19073,9 +19073,9 @@
       "source_file": "src-tauri/src/ssh/sftp.rs",
       "source_location": "L332",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "ssh_sftp_read_file_bytes",
-      "target": "ssh_sftp_invalidate",
-      "confidence_score": 1.0
+      "target": "ssh_sftp_invalidate"
     },
     {
       "relation": "calls",
@@ -20006,9 +20006,9 @@
       "source_file": "src/ui.ts",
       "source_location": "L334",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_ui_ts",
-      "target": "src_ui_showimageviewer",
-      "confidence_score": 1.0
+      "target": "src_ui_showimageviewer"
     },
     {
       "relation": "imports_from",
@@ -20400,9 +20400,9 @@
       "source_file": "src/explorer.ts",
       "source_location": "L9",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_explorer_ts",
-      "target": "src_ui_image_mime",
-      "confidence_score": 1.0
+      "target": "src_ui_image_mime"
     },
     {
       "relation": "imports",
@@ -20433,9 +20433,9 @@
       "source_file": "src/explorer.ts",
       "source_location": "L9",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_explorer_ts",
-      "target": "src_ui_showimageviewer",
-      "confidence_score": 1.0
+      "target": "src_ui_showimageviewer"
     },
     {
       "relation": "calls",
@@ -21405,9 +21405,9 @@
       "source_file": "src/main.ts",
       "source_location": "L30",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_main_ts",
-      "target": "src_layout_ts",
-      "confidence_score": 1.0
+      "target": "src_layout_ts"
     },
     {
       "relation": "contains",
@@ -21426,9 +21426,9 @@
       "source_file": "src/main.ts",
       "source_location": "L30",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_main_ts",
-      "target": "src_layout_layoutnode",
-      "confidence_score": 1.0
+      "target": "src_layout_layoutnode"
     },
     {
       "relation": "contains",
@@ -22022,6 +22022,17 @@
       "relation": "imports_from",
       "context": "import",
       "confidence": "EXTRACTED",
+      "source_file": "src/settings.ts",
+      "source_location": "L3",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "src_settings_ts",
+      "target": "src_ipc_ts"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
       "source_file": "src/explorer.ts",
       "source_location": "L7",
       "weight": 1.0,
@@ -22060,17 +22071,6 @@
       "weight": 1.0,
       "confidence_score": 1.0,
       "source": "src_dialogs_ts",
-      "target": "src_ipc_ts"
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/settings.ts",
-      "source_location": "L3",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_settings_ts",
       "target": "src_ipc_ts"
     },
     {
@@ -22088,11 +22088,11 @@
       "relation": "imports",
       "context": "import",
       "confidence": "EXTRACTED",
-      "source_file": "/root/source/superssh/src/settings.ts",
+      "source_file": "src/settings.ts",
       "source_location": "L3",
       "weight": 1.0,
       "confidence_score": 1.0,
-      "source": "root_source_superssh_src_settings_ts",
+      "source": "src_settings_ts",
       "target": "src_ipc_api"
     },
     {
@@ -22143,11 +22143,11 @@
       "relation": "imports",
       "context": "import",
       "confidence": "EXTRACTED",
-      "source_file": "src/settings.ts",
+      "source_file": "/root/source/superssh/src/settings.ts",
       "source_location": "L3",
       "weight": 1.0,
       "confidence_score": 1.0,
-      "source": "src_settings_ts",
+      "source": "root_source_superssh_src_settings_ts",
       "target": "src_ipc_api"
     },
     {
@@ -22434,9 +22434,9 @@
       "source_file": "src/tabs.ts",
       "source_location": "L293",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_tabs_tabmanager",
-      "target": "src_tabs_tabmanager_splitpane",
-      "confidence_score": 1.0
+      "target": "src_tabs_tabmanager_splitpane"
     },
     {
       "relation": "method",
@@ -22656,9 +22656,9 @@
       "source_file": "src/tabs.ts",
       "source_location": "L310",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_tabs_tabmanager_splitactive",
-      "target": "src_tabs_tabmanager_splitpane",
-      "confidence_score": 1.0
+      "target": "src_tabs_tabmanager_splitpane"
     },
     {
       "relation": "calls",
@@ -22727,128 +22727,70 @@
       "target": "src_tabs_tabmanager_hasbusypane"
     },
     {
-      "relation": "imports",
+      "relation": "imports_from",
       "context": "import",
       "confidence": "EXTRACTED",
-      "source_file": "/root/source/superssh/src/settings.ts",
+      "source_file": "src/settings.ts",
       "source_location": "L4",
       "weight": 1.0,
       "confidence_score": 1.0,
-      "source": "root_source_superssh_src_settings_ts",
+      "source": "src_settings_ts",
+      "target": "src_themes_ts"
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/settings.ts",
+      "source_location": "L4",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "src_settings_ts",
       "target": "src_themes_applythemetoui"
     },
     {
       "relation": "imports",
       "context": "import",
       "confidence": "EXTRACTED",
-      "source_file": "/root/source/superssh/src/settings.ts",
+      "source_file": "src/settings.ts",
       "source_location": "L4",
       "weight": 1.0,
       "confidence_score": 1.0,
-      "source": "root_source_superssh_src_settings_ts",
+      "source": "src_settings_ts",
       "target": "src_themes_resolvetheme"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/settings.ts",
+      "source_location": "L5",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "src_settings_ts",
+      "target": "src_types_ts"
     },
     {
       "relation": "imports",
       "context": "import",
       "confidence": "EXTRACTED",
-      "source_file": "/root/source/superssh/src/settings.ts",
+      "source_file": "src/settings.ts",
       "source_location": "L5",
       "weight": 1.0,
       "confidence_score": 1.0,
-      "source": "root_source_superssh_src_settings_ts",
+      "source": "src_settings_ts",
       "target": "src_types_settings"
     },
     {
       "relation": "imports",
       "context": "import",
       "confidence": "EXTRACTED",
-      "source_file": "/root/source/superssh/src/settings.ts",
+      "source_file": "src/settings.ts",
       "source_location": "L5",
       "weight": 1.0,
       "confidence_score": 1.0,
-      "source": "root_source_superssh_src_settings_ts",
+      "source": "src_settings_ts",
       "target": "src_types_themedef"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "/root/source/superssh/src/settings.ts",
-      "source_location": "L8",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "root_source_superssh_src_settings_ts",
-      "target": "src_settings_listeners"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "/root/source/superssh/src/settings.ts",
-      "source_location": "L10",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "root_source_superssh_src_settings_ts",
-      "target": "src_settings_loadsettings"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "/root/source/superssh/src/settings.ts",
-      "source_location": "L16",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "root_source_superssh_src_settings_ts",
-      "target": "src_settings_getsettings"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "/root/source/superssh/src/settings.ts",
-      "source_location": "L21",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "root_source_superssh_src_settings_ts",
-      "target": "src_settings_updatesettings"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "/root/source/superssh/src/settings.ts",
-      "source_location": "L27",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "root_source_superssh_src_settings_ts",
-      "target": "src_settings_onsettingschange"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "/root/source/superssh/src/settings.ts",
-      "source_location": "L31",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "root_source_superssh_src_settings_ts",
-      "target": "src_settings_activetheme"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "/root/source/superssh/src/settings.ts",
-      "source_location": "L37",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "root_source_superssh_src_settings_ts",
-      "target": "src_settings_fontstack"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "/root/source/superssh/src/settings.ts",
-      "source_location": "L42",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "root_source_superssh_src_settings_ts",
-      "target": "src_settings_applysettings"
     },
     {
       "relation": "contains",
@@ -22858,6 +22800,108 @@
       "weight": 1.0,
       "confidence_score": 1.0,
       "source": "src_settings_ts",
+      "target": "src_settings_listeners"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/settings.ts",
+      "source_location": "L10",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "src_settings_ts",
+      "target": "src_settings_loadsettings"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/settings.ts",
+      "source_location": "L16",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "src_settings_ts",
+      "target": "src_settings_getsettings"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/settings.ts",
+      "source_location": "L21",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "src_settings_ts",
+      "target": "src_settings_updatesettings"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/settings.ts",
+      "source_location": "L27",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "src_settings_ts",
+      "target": "src_settings_onsettingschange"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/settings.ts",
+      "source_location": "L31",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "src_settings_ts",
+      "target": "src_settings_activetheme"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/settings.ts",
+      "source_location": "L37",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "src_settings_ts",
+      "target": "src_settings_fontstack"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/settings.ts",
+      "source_location": "L42",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "src_settings_ts",
+      "target": "src_settings_applysettings"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.ts",
+      "source_location": "L8",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "src_main_ts",
+      "target": "src_settings_ts"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/dialogs.ts",
+      "source_location": "L4",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "src_dialogs_ts",
+      "target": "src_settings_ts"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "/root/source/superssh/src/settings.ts",
+      "source_location": "L8",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "root_source_superssh_src_settings_ts",
       "target": "src_settings_listeners"
     },
     {
@@ -22896,11 +22940,11 @@
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
-      "source_file": "src/settings.ts",
+      "source_file": "/root/source/superssh/src/settings.ts",
       "source_location": "L10",
       "weight": 1.0,
       "confidence_score": 1.0,
-      "source": "src_settings_ts",
+      "source": "root_source_superssh_src_settings_ts",
       "target": "src_settings_loadsettings"
     },
     {
@@ -22994,11 +23038,11 @@
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
-      "source_file": "src/settings.ts",
+      "source_file": "/root/source/superssh/src/settings.ts",
       "source_location": "L16",
       "weight": 1.0,
       "confidence_score": 1.0,
-      "source": "src_settings_ts",
+      "source": "root_source_superssh_src_settings_ts",
       "target": "src_settings_getsettings"
     },
     {
@@ -23026,11 +23070,11 @@
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
-      "source_file": "src/settings.ts",
+      "source_file": "/root/source/superssh/src/settings.ts",
       "source_location": "L21",
       "weight": 1.0,
       "confidence_score": 1.0,
-      "source": "src_settings_ts",
+      "source": "root_source_superssh_src_settings_ts",
       "target": "src_settings_updatesettings"
     },
     {
@@ -23058,11 +23102,11 @@
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
-      "source_file": "src/settings.ts",
+      "source_file": "/root/source/superssh/src/settings.ts",
       "source_location": "L27",
       "weight": 1.0,
       "confidence_score": 1.0,
-      "source": "src_settings_ts",
+      "source": "root_source_superssh_src_settings_ts",
       "target": "src_settings_onsettingschange"
     },
     {
@@ -23101,11 +23145,11 @@
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
-      "source_file": "src/settings.ts",
+      "source_file": "/root/source/superssh/src/settings.ts",
       "source_location": "L31",
       "weight": 1.0,
       "confidence_score": 1.0,
-      "source": "src_settings_ts",
+      "source": "root_source_superssh_src_settings_ts",
       "target": "src_settings_activetheme"
     },
     {
@@ -23133,11 +23177,11 @@
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
-      "source_file": "src/settings.ts",
+      "source_file": "/root/source/superssh/src/settings.ts",
       "source_location": "L37",
       "weight": 1.0,
       "confidence_score": 1.0,
-      "source": "src_settings_ts",
+      "source": "root_source_superssh_src_settings_ts",
       "target": "src_settings_fontstack"
     },
     {
@@ -23154,11 +23198,11 @@
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
-      "source_file": "src/settings.ts",
+      "source_file": "/root/source/superssh/src/settings.ts",
       "source_location": "L42",
       "weight": 1.0,
       "confidence_score": 1.0,
-      "source": "src_settings_ts",
+      "source": "root_source_superssh_src_settings_ts",
       "target": "src_settings_applysettings"
     },
     {
@@ -23197,9 +23241,9 @@
       "source_file": "src/types.ts",
       "source_location": "L69",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_types_ts",
-      "target": "src_types_sessionlayout",
-      "confidence_score": 1.0
+      "target": "src_types_sessionlayout"
     },
     {
       "relation": "contains",
@@ -23347,17 +23391,6 @@
       "target": "src_types_ts"
     },
     {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/settings.ts",
-      "source_location": "L5",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_settings_ts",
-      "target": "src_types_ts"
-    },
-    {
       "relation": "imports",
       "context": "import",
       "confidence": "EXTRACTED",
@@ -23394,11 +23427,11 @@
       "relation": "imports",
       "context": "import",
       "confidence": "EXTRACTED",
-      "source_file": "src/settings.ts",
+      "source_file": "/root/source/superssh/src/settings.ts",
       "source_location": "L5",
       "weight": 1.0,
       "confidence_score": 1.0,
-      "source": "src_settings_ts",
+      "source": "root_source_superssh_src_settings_ts",
       "target": "src_types_themedef"
     },
     {
@@ -23416,11 +23449,11 @@
       "relation": "imports",
       "context": "import",
       "confidence": "EXTRACTED",
-      "source_file": "src/settings.ts",
+      "source_file": "/root/source/superssh/src/settings.ts",
       "source_location": "L5",
       "weight": 1.0,
       "confidence_score": 1.0,
-      "source": "src_settings_ts",
+      "source": "root_source_superssh_src_settings_ts",
       "target": "src_types_settings"
     },
     {
@@ -23430,9 +23463,9 @@
       "source_file": "src/main.ts",
       "source_location": "L31",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_main_ts",
-      "target": "src_types_sessionlayout",
-      "confidence_score": 1.0
+      "target": "src_types_sessionlayout"
     },
     {
       "relation": "imports",
@@ -23730,9 +23763,9 @@
       "source_file": "src/explorer.ts",
       "source_location": "L340",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_explorer_explorer",
-      "target": "src_explorer_explorer_previewimage",
-      "confidence_score": 1.0
+      "target": "src_explorer_explorer_previewimage"
     },
     {
       "relation": "imports",
@@ -23892,17 +23925,6 @@
       "target": "src_themes_ts"
     },
     {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/settings.ts",
-      "source_location": "L4",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_settings_ts",
-      "target": "src_themes_ts"
-    },
-    {
       "relation": "imports",
       "context": "import",
       "confidence": "EXTRACTED",
@@ -23928,11 +23950,11 @@
       "relation": "imports",
       "context": "import",
       "confidence": "EXTRACTED",
-      "source_file": "src/settings.ts",
+      "source_file": "/root/source/superssh/src/settings.ts",
       "source_location": "L4",
       "weight": 1.0,
       "confidence_score": 1.0,
-      "source": "src_settings_ts",
+      "source": "root_source_superssh_src_settings_ts",
       "target": "src_themes_resolvetheme"
     },
     {
@@ -23961,23 +23983,12 @@
       "relation": "imports",
       "context": "import",
       "confidence": "EXTRACTED",
-      "source_file": "src/settings.ts",
+      "source_file": "/root/source/superssh/src/settings.ts",
       "source_location": "L4",
       "weight": 1.0,
       "confidence_score": 1.0,
-      "source": "src_settings_ts",
+      "source": "root_source_superssh_src_settings_ts",
       "target": "src_themes_applythemetoui"
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.ts",
-      "source_location": "L8",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_main_ts",
-      "target": "src_settings_ts"
     },
     {
       "relation": "imports_from",
@@ -24507,17 +24518,6 @@
       "confidence_score": 1.0,
       "source": "src_transfers_setstate",
       "target": "src_transfers_render"
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/dialogs.ts",
-      "source_location": "L4",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_dialogs_ts",
-      "target": "src_settings_ts"
     },
     {
       "relation": "imports_from",
@@ -25092,5 +25092,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "47f538cb55af89c401323708275cf1955b82ee73"
+  "built_at_commit": "8a5abb44f0bc38820d462b00c0ffda0ec27d7b75"
 }

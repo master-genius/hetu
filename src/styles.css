@@ -354,6 +354,16 @@ body {
   background: color-mix(in srgb, var(--accent) 75%, transparent);
 }
 
+/* 设置「显示终端滚动条」关闭时隐藏（内容仍可滚轮/键盘滚动） */
+:root[data-scrollbar="0"] .xterm-viewport {
+  scrollbar-width: none;
+}
+
+:root[data-scrollbar="0"] .xterm-viewport::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 .pane {
   height: 100%;
   width: 100%;

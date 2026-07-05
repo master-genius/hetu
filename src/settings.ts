@@ -48,10 +48,12 @@ function applySettings() {
   root.dataset.radius = s.cornerRadius;
   // 标签栏平分宽度
   root.dataset.tabFill = s.tabBarFill ? "1" : "0";
-  // 标签页字体/字号：字体空则同主字体；字号 0 则自动取终端字号 - 2（下限 9）
+  // 标签页字体/字号：字体空则同主字体；字号不填（0）固定默认 12，不跟随终端字号
   const tabFont = s.tabFontFamily.trim() ? `${s.tabFontFamily}, ${fontStack()}` : fontStack();
-  const tabSize = s.tabFontSize > 0 ? s.tabFontSize : Math.max(9, s.fontSize - 2);
+  const tabSize = s.tabFontSize > 0 ? s.tabFontSize : 12;
   root.style.setProperty("--tab-font", tabFont);
   root.style.setProperty("--tab-font-size", `${tabSize}px`);
+  // 终端滚动条显隐（CSS 按 data-scrollbar 开关 .xterm-viewport 的滚动条）
+  root.dataset.scrollbar = s.showScrollbar ? "1" : "0";
   for (const fn of listeners) fn(s);
 }

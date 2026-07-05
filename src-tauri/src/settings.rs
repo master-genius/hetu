@@ -84,8 +84,10 @@ pub struct Settings {
     pub tab_bar_fill: bool,
     /// 标签页字体（空 = 同主字体）
     pub tab_font_family: String,
-    /// 标签页字号（0 = 自动，终端字号 - 2）
+    /// 标签页字号（0/不填 = 默认 12，不跟随终端字号）
     pub tab_font_size: u16,
+    /// 显示终端滚动条（默认显示）
+    pub show_scrollbar: bool,
     /// 新建标签页行为："local"（直接本地终端）| "dialog"（弹出连接选择）
     pub new_tab_mode: String,
     /// 断线自动重连（默认开启）
@@ -125,7 +127,8 @@ impl Default for Settings {
             corner_radius: "md".into(),
             tab_bar_fill: true,
             tab_font_family: String::new(),
-            tab_font_size: 0,
+            tab_font_size: 12,
+            show_scrollbar: true,
             new_tab_mode: "local".into(),
             auto_reconnect: true,
             copy_on_select: true,

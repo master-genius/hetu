@@ -314,7 +314,7 @@ export function showSettingsDialog() {
           </div>
           <div class="row">
             <label class="grow">标签页字体（空=同主字体）<input name="tabFontFamily" spellcheck="false" placeholder="同主字体"></label>
-            <label class="narrow">标签字号 <input name="tabFontSize" type="number" min="0" max="24" placeholder="自动"></label>
+            <label class="narrow">标签字号 <input name="tabFontSize" type="number" min="0" max="24" placeholder="12"></label>
           </div>
         </section>
         <section>
@@ -354,6 +354,7 @@ export function showSettingsDialog() {
           <label>点击“+”新建标签页时 <span class="cs-mount" data-cs="newTabMode"></span></label>
           <label class="check"><input name="autoReconnect" type="checkbox"> 连接断开后自动重连</label>
           <label class="check"><input name="copyOnSelect" type="checkbox"> 选中文本即复制到剪贴板</label>
+          <label class="check"><input name="showScrollbar" type="checkbox"> 显示终端滚动条</label>
           <label class="check"><input name="confirmOverwrite" type="checkbox"> 上传遇同名文件时提示确认（默认直接覆盖）</label>
           <label class="check"><input name="restoreSession" type="checkbox"> 记住最后的会话（下次启动自动重开并连接）</label>
           <label class="check"><input name="trackRemoteCwd" type="checkbox"> 追踪远程工作目录（连接时注入隐形标记，经 /proc 读实时目录）</label>
@@ -395,6 +396,7 @@ export function showSettingsDialog() {
   q<HTMLElement>(".blur-val").textContent = `${Math.round(s.blurAmount)}px`;
   input("autoReconnect").checked = s.autoReconnect;
   input("copyOnSelect").checked = s.copyOnSelect;
+  input("showScrollbar").checked = s.showScrollbar;
   input("confirmOverwrite").checked = s.confirmOverwrite;
   input("restoreSession").checked = s.restoreSession;
   input("tabFontFamily").value = s.tabFontFamily;
@@ -659,6 +661,7 @@ export function showSettingsDialog() {
       newTabMode: newTabModeSel.getValue() as "local" | "dialog",
       autoReconnect: input("autoReconnect").checked,
       copyOnSelect: input("copyOnSelect").checked,
+      showScrollbar: input("showScrollbar").checked,
       confirmOverwrite: input("confirmOverwrite").checked,
       restoreSession: input("restoreSession").checked,
       cornerRadius,

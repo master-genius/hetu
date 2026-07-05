@@ -45,8 +45,10 @@ export interface Settings {
   tabBarFill: boolean;
   /** 标签页字体（空 = 同主字体） */
   tabFontFamily: string;
-  /** 标签页字号（0 = 自动：终端字号 - 2） */
+  /** 标签页字号（0/不填 = 默认 12，不跟随终端字号） */
   tabFontSize: number;
+  /** 显示终端滚动条 */
+  showScrollbar: boolean;
   /** 新建标签页行为："local" 直接本地终端 | "dialog" 弹出连接选择 */
   newTabMode: "local" | "dialog";
   autoReconnect: boolean;
