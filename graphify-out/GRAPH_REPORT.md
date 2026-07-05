@@ -1,16 +1,16 @@
 # Graph Report - hetu  (2026-07-05)
 
 ## Corpus Check
-- 37 files · ~80,903 words
+- 37 files · ~80,996 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 964 nodes · 1605 edges · 74 communities (72 shown, 2 thin omitted)
+- 965 nodes · 1608 edges · 74 communities (72 shown, 2 thin omitted)
 - Extraction: 96% EXTRACTED · 4% INFERRED · 0% AMBIGUOUS · INFERRED: 72 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `958d9edd`
+- Built from commit: `da854b71`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
