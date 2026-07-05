@@ -342,9 +342,10 @@ async function bootstrap() {
           }
         }
       }
-      // 传输的成败/进度均由右下角传输面板呈现，不再用 toast，避免刷屏
+      // 传输的成败/进度均由右下角传输面板呈现，不再用 toast，避免刷屏；
+      // dir 作为行名悬停提示，让用户知道传到了哪里
       const tid = crypto.randomUUID();
-      beginTransfer(tid, name, "upload");
+      beginTransfer(tid, name, "upload", dir);
       try {
         await api.sftpUpload(target.connId, p, dir, tid);
         completeTransfer(tid);
@@ -502,9 +503,11 @@ async function bootstrap() {
         local = meta.isDir ? dir : `${dir.replace(/\/+$/, "")}/${name}`;
       }
       if (!local) return;
-      // 传输进度与成败由右下角面板呈现（可暂停/取消/删除），不再用 toast
+      // 传输进度与成败由右下角面板呈现（可暂停/取消/删除），不再用 toast；
+      // 落地完整路径作为行名悬停提示，替代原「已下载到 …」，让用户能找到文件
+      const dest = meta.isDir ? `${local.replace(/\/+$/, "")}/${name}` : local;
       const tid = crypto.randomUUID();
-      beginTransfer(tid, name, "download");
+      beginTransfer(tid, name, "download", dest);
       try {
         await api.sftpDownload(pane.connId, remotePath, local, tid);
         completeTransfer(tid);

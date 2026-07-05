@@ -1592,9 +1592,24 @@ input[type="checkbox"] {
   opacity: 0.6;
 }
 
+.t-prog {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .t-speed {
   flex-shrink: 0;
   text-align: right;
+}
+
+/* 失败：错误原因（置于较宽的 prog 行）醒目可读 */
+.transfer-row[data-state="failed"] .t-meta {
+  opacity: 0.9;
+}
+.transfer-row[data-state="failed"] .t-prog {
+  color: #e5484d;
 }
 
 /* 亮色主题下的阴影与遮罩微调 */

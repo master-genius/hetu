@@ -282,29 +282,29 @@ async fn sftp_upload(
     r
 }
 
+/// 对指定传输的控制句柄执行一个操作；句柄已移除（传输结束）时静默忽略，前端幂等。
+async fn with_transfer(state: &AppState, id: &str, f: impl FnOnce(&ssh::sftp::TransferCtl)) {
+    if let Some(ctl) = state.transfers.lock().await.get(id) {
+        f(ctl);
+    }
+}
+
 /// 暂停 / 继续 / 取消一个进行中的传输（按 transfer_id 定位控制句柄）。
-/// 传输已结束（句柄已移除）时静默忽略，前端幂等。
 #[tauri::command]
 async fn transfer_pause(state: State<'_>, transfer_id: String) -> Result<()> {
-    if let Some(ctl) = state.transfers.lock().await.get(&transfer_id) {
-        ctl.pause();
-    }
+    with_transfer(&state, &transfer_id, |c| c.pause()).await;
     Ok(())
 }
 
 #[tauri::command]
 async fn transfer_resume(state: State<'_>, transfer_id: String) -> Result<()> {
-    if let Some(ctl) = state.transfers.lock().await.get(&transfer_id) {
-        ctl.resume();
-    }
+    with_transfer(&state, &transfer_id, |c| c.resume()).await;
     Ok(())
 }
 
 #[tauri::command]
 async fn transfer_cancel(state: State<'_>, transfer_id: String) -> Result<()> {
-    if let Some(ctl) = state.transfers.lock().await.get(&transfer_id) {
-        ctl.cancel();
-    }
+    with_transfer(&state, &transfer_id, |c| c.cancel()).await;
     Ok(())
 }
 

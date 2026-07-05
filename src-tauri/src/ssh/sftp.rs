@@ -33,47 +33,37 @@ impl TransferCtl {
         }
     }
 
-    /// 暂停（仅当前处于运行态时生效，不覆盖已取消）
+    /// 状态跃迁：allow_from 指定的当前态才可切到 to（None 表示除 to 外的任意态皆可）。
+    fn transition(&self, allow_from: Option<u8>, to: u8) {
+        self.tx.send_if_modified(|s| {
+            let ok = allow_from.map_or(*s != to, |f| *s == f);
+            if ok {
+                *s = to;
+            }
+            ok
+        });
+    }
+
+    /// 暂停（仅运行态生效，不覆盖已取消）
     pub fn pause(&self) {
-        self.tx.send_if_modified(|s| {
-            if *s == T_RUNNING {
-                *s = T_PAUSED;
-                true
-            } else {
-                false
-            }
-        });
+        self.transition(Some(T_RUNNING), T_PAUSED);
     }
 
-    /// 继续（仅当前处于暂停态时生效）
+    /// 继续（仅暂停态生效）
     pub fn resume(&self) {
-        self.tx.send_if_modified(|s| {
-            if *s == T_PAUSED {
-                *s = T_RUNNING;
-                true
-            } else {
-                false
-            }
-        });
+        self.transition(Some(T_PAUSED), T_RUNNING);
     }
 
-    /// 取消（终态，不可逆）
+    /// 取消（终态，不可逆；任意非取消态皆可切入）
     pub fn cancel(&self) {
-        self.tx.send_if_modified(|s| {
-            if *s != T_CANCELLED {
-                *s = T_CANCELLED;
-                true
-            } else {
-                false
-            }
-        });
+        self.transition(None, T_CANCELLED);
     }
 
     /// 传输循环闸门：运行→立即放行；暂停→挂起等待；取消→返回错误中止本次传输。
     async fn gate(&self) -> Result<()> {
         // 快路径：运行态零开销放行（绝大多数块走这里）
         match *self.tx.borrow() {
-            T_CANCELLED => return Err(Error::msg("传输已取消")),
+            T_CANCELLED => return Err(Error::Cancelled),
             T_RUNNING => return Ok(()),
             _ => {}
         }
@@ -81,12 +71,12 @@ impl TransferCtl {
         let mut rx = self.tx.subscribe();
         loop {
             match *rx.borrow_and_update() {
-                T_CANCELLED => return Err(Error::msg("传输已取消")),
+                T_CANCELLED => return Err(Error::Cancelled),
                 T_RUNNING => return Ok(()),
                 _ => {}
             }
             if rx.changed().await.is_err() {
-                return Err(Error::msg("传输已取消")); // 发送端被丢弃，视同取消
+                return Err(Error::Cancelled); // 发送端被丢弃，视同取消
             }
         }
     }
@@ -489,13 +479,22 @@ pub async fn download(
         let count = files.len();
         for (i, (rpath, rel, _)) in files.iter().enumerate() {
             let label = format!("{name}/{rel} ({}/{count})", i + 1);
-            download_file(app, &sftp, ctl, rpath, &format!("{root}/{rel}"), transfer_id, &label, &mut done, total).await?;
+            match download_file(app, &sftp, ctl, rpath, &format!("{root}/{rel}"), transfer_id, &label, &mut done, total).await {
+                Ok(()) => {}
+                // 取消：回滚整棵已下载的目录树，不留半成品
+                Err(Error::Cancelled) => {
+                    let _ = tokio::fs::remove_dir_all(&root).await;
+                    return Err(Error::Cancelled);
+                }
+                Err(e) => return Err(e),
+            }
         }
         emit_progress(app, transfer_id, &name, done, done.max(total), "download");
         Ok(())
     }
     .await;
-    if result.is_err() {
+    // 取消是用户主动行为，会话仍健康——只在真实故障时才失效缓存重建
+    if matches!(&result, Err(e) if !matches!(e, Error::Cancelled)) {
         invalidate(conn).await;
     }
     result
@@ -539,7 +538,21 @@ pub async fn upload(
         let count = files.len();
         for (i, (lpath, rel)) in files.iter().enumerate() {
             let label = format!("{name}/{rel} ({}/{count})", i + 1);
-            upload_file(app, &sftp, ctl, lpath, &format!("{remote_root}/{rel}"), transfer_id, &label, &mut done, total).await?;
+            match upload_file(app, &sftp, ctl, lpath, &format!("{remote_root}/{rel}"), transfer_id, &label, &mut done, total).await {
+                Ok(()) => {}
+                // 取消：best-effort 回滚远端已建的树——先删文件，再逆序删目录，最后删根
+                Err(Error::Cancelled) => {
+                    for (_, r) in &files {
+                        let _ = sftp.remove_file(format!("{remote_root}/{r}")).await;
+                    }
+                    for d in dirs.iter().rev() {
+                        let _ = sftp.remove_dir(format!("{remote_root}/{d}")).await;
+                    }
+                    let _ = sftp.remove_dir(remote_root.clone()).await;
+                    return Err(Error::Cancelled);
+                }
+                Err(e) => return Err(e),
+            }
         }
         emit_progress(app, transfer_id, &name, done, total, "upload");
         Ok(())
@@ -548,7 +561,10 @@ pub async fn upload(
     match result {
         Ok(()) => Ok(remote_root),
         Err(e) => {
-            invalidate(conn).await;
+            // 取消不使会话失效（会话仍健康），仅真实故障才失效重建
+            if !matches!(e, Error::Cancelled) {
+                invalidate(conn).await;
+            }
             Err(e)
         }
     }
