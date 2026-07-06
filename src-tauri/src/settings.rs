@@ -196,10 +196,15 @@ pub fn known_hosts_path() -> Result<PathBuf> {
 }
 
 /// 随应用注入本地 shell 的辅助命令目录（config/hetushell/bin），如 hssh。
-/// 仅本地终端会把它前置到 PATH；远程连接不注入。
+/// 仅本地终端会把它追加到 PATH 末尾；远程连接不注入。目录置 0700，避免他人写入植入可执行。
 pub fn bin_dir() -> Result<PathBuf> {
     let dir = config_dir()?.join("bin");
     std::fs::create_dir_all(&dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    }
     Ok(dir)
 }
 

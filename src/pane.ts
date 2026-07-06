@@ -14,17 +14,16 @@ import type { FileMeta } from "./types";
 /** hssh 内建命令通过此 OSC 标识符通知前端（见 local.rs 注入的 hssh 脚本）。 */
 const HSSH_OSC = 1729;
 
-/** hssh 解析出的连接意图：直连已保存连接项，或临时连接。 */
+/** hssh 解析出的连接意图（tok 为来源校验令牌）：直连已保存连接项，或临时连接。 */
 export type HsshSpec =
-  | { mode: "profile"; name: string }
-  | { mode: "adhoc"; host: string; user: string; port: string; password: string; identity: string };
+  | { tok: string; mode: "profile"; name: string }
+  | { tok: string; mode: "adhoc"; host: string; user: string; port: string; password: string; identity: string };
 
 /** base64 → UTF-8 字符串（hssh 各字段单独 base64，避免分隔符冲突）。失败返回空串。 */
 function b64utf8(s: string): string {
   if (!s) return "";
   try {
-    const bin = atob(s);
-    return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+    return new TextDecoder().decode(b64decode(s));
   } catch {
     return "";
   }
@@ -33,18 +32,20 @@ function b64utf8(s: string): string {
 /** 解析 hssh OSC 载荷（`k=v;k=v`，值经 base64）。非法/未知一律返回 null。 */
 export function parseHssh(data: string): HsshSpec | null {
   const f: Record<string, string> = {};
-  for (const tok of data.split(";")) {
-    const i = tok.indexOf("=");
-    if (i > 0) f[tok.slice(0, i)] = tok.slice(i + 1);
+  for (const kv of data.split(";")) {
+    const i = kv.indexOf("=");
+    if (i > 0) f[kv.slice(0, i)] = kv.slice(i + 1);
   }
+  const tok = b64utf8(f.tok);
   if (f.mode === "profile") {
     const name = b64utf8(f.name);
-    return name ? { mode: "profile", name } : null;
+    return name ? { tok, mode: "profile", name } : null;
   }
   if (f.mode === "adhoc") {
     const host = b64utf8(f.host);
     if (!host) return null;
     return {
+      tok,
       mode: "adhoc",
       host,
       user: b64utf8(f.user),
@@ -113,6 +114,9 @@ export class Pane {
   onCtrlDragStart: ((path: string, e: DragEvent) => void) | null = null;
   /** 内建 hssh 命令：仅本地终端触发，宿主据此按「点面板」路径打开连接 */
   onHssh: ((spec: HsshSpec) => void) | null = null;
+  /** hssh 来源校验令牌：随本地 shell 注入 $HSSH_TOKEN，OSC 载荷须回带一致值才受理，
+   *  杜绝终端里被渲染的不可信内容伪造 hssh 序列诱导建连。每 pane 一枚随机值。 */
+  private readonly hsshToken = crypto.randomUUID();
 
   constructor(id: string, connId: string, initialCwd?: string | null) {
     this.id = id;
@@ -157,9 +161,11 @@ export class Pane {
     // 稳定优先：任何解析/回调异常都吞掉，且始终返回 true 避免原始转义序列回显污染终端。
     this.term.parser.registerOscHandler(HSSH_OSC, (data) => {
       try {
+        // 双重门控：① 仅本地终端；② 载荷令牌须与本 pane 注入的 $HSSH_TOKEN 一致。
+        // 不可信内容不知道该随机令牌 → 伪造序列一律被丢弃（失败关闭）。
         if (this.isLocal) {
           const spec = parseHssh(data);
-          if (spec) this.onHssh?.(spec);
+          if (spec && spec.tok && spec.tok === this.hsshToken) this.onHssh?.(spec);
         }
       } catch {
         /* 忽略：绝不因辅助命令影响终端本身 */
@@ -276,7 +282,7 @@ export class Pane {
       // 起始目录一次性消费：首开继承源终端 cwd，之后重开（切换连接等）回默认 home
       const startCwd = this.initialCwd;
       this.initialCwd = null;
-      await api.paneOpenLocal(this.id, this.term.cols, this.term.rows, startCwd);
+      await api.paneOpenLocal(this.id, this.term.cols, this.term.rows, startCwd, this.hsshToken);
       return;
     }
     // 每次（重）打开远端 shell 都是新进程：PID 变、cwd 回到 home，需重新捕获追踪

@@ -32,8 +32,8 @@ export const api = {
 
   paneOpen: (connId: string, paneId: string, cols: number, rows: number) =>
     invoke<void>("pane_open", { connId, paneId, cols, rows }),
-  paneOpenLocal: (paneId: string, cols: number, rows: number, cwd?: string | null) =>
-    invoke<void>("pane_open_local", { paneId, cols, rows, cwd: cwd ?? null }),
+  paneOpenLocal: (paneId: string, cols: number, rows: number, cwd: string | null, hsshToken: string) =>
+    invoke<void>("pane_open_local", { paneId, cols, rows, cwd: cwd ?? null, hsshToken }),
   paneInput: (paneId: string, data: string) => invoke<void>("pane_input", { paneId, data }),
   paneResize: (paneId: string, cols: number, rows: number) =>
     invoke<void>("pane_resize", { paneId, cols, rows }),

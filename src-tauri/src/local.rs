@@ -176,7 +176,8 @@ usage() {
   cat <<'EOF'
 用法:
   hssh <连接项名称>            直接打开已保存的连接项（密钥认证直连；密码认证会弹窗要密码）
-  hssh [用户@]主机 [选项]      临时连接（缺密码且无密钥时弹窗询问）
+  hssh 用户@主机 [选项]        临时连接（缺密码且无密钥时弹窗询问）
+  hssh 主机 -w 密码 [选项]     临时连接裸主机（裸名不带选项时按连接项名解析）
 选项:
   -p, --port <端口>           端口（默认 22）
   -u, --user <用户名>         用户名（也可写成 用户@主机）
@@ -196,30 +197,41 @@ first="$1"
 case "$first" in -*) usage; exit 1;; esac
 shift
 
-host=""; user=""; port=""; pass=""; ident=""; name=""
+host=""; user=""; port=""; pass=""; ident=""; name=""; adhoc=0
 case "$first" in
-  *@*) user="${first%@*}"; host="${first#*@}";;
+  *@*) user="${first%@*}"; host="${first#*@}"; adhoc=1;;
   *)   name="$first";;
 esac
 
+# 选项取值前先确认还有参数，避免「选项作为末位参数缺值」时 shift 2 触发死循环/报错。
+need() { [ "$1" -ge 2 ] || { echo "hssh: 选项 $2 缺少参数" >&2; exit 1; }; }
 while [ $# -gt 0 ]; do
   case "$1" in
-    -p|--port)     port="$2"; shift 2;;
-    -u|--user)     user="$2"; shift 2;;
-    -w|--password) pass="$2"; shift 2;;
-    -i|--identity) ident="$2"; shift 2;;
+    -p|--port)     need $# "$1"; port="$2"; adhoc=1; shift 2;;
+    -u|--user)     need $# "$1"; user="$2"; adhoc=1; shift 2;;
+    -w|--password) need $# "$1"; pass="$2"; adhoc=1; shift 2;;
+    -i|--identity) need $# "$1"; ident="$2"; adhoc=1; shift 2;;
     -h|--help)     usage; exit 0;;
-    *)             host="$1"; shift;;
+    -*)            echo "hssh: 未知选项 $1" >&2; exit 1;;
+    *)             host="$1"; adhoc=1; shift;;
   esac
 done
 
+# 裸名 + 任一连接选项 → 视为临时连接到该主机（而非连接项名），兑现 `hssh 主机 -p/-w …`。
+if [ "$adhoc" = 1 ] && [ -n "$name" ] && [ -z "$host" ]; then
+  host="$name"; name=""
+fi
+
+# 能力令牌：仅由本地 shell 环境中的 $HSSH_TOKEN 提供，供前端校验来源，
+# 防止终端里被渲染的不可信内容（cat 恶意文件、ls 恶意文件名等）伪造本序列诱导建连。
+tok=$(b64 "${HSSH_TOKEN:-}")
 if [ -n "$name" ]; then
-  emit "v=1;mode=profile;name=$(b64 "$name")"
+  emit "v=1;tok=$tok;mode=profile;name=$(b64 "$name")"
   printf '→ 正在打开连接项「%s」…\n' "$name"
 else
   [ -z "$host" ] && { echo 'hssh: 缺少主机' >&2; exit 1; }
   user="${user:-$(id -un)}"
-  emit "v=1;mode=adhoc;host=$(b64 "$host");user=$(b64 "$user");port=$(b64 "$port");pass=$(b64 "$pass");ident=$(b64 "$ident")"
+  emit "v=1;tok=$tok;mode=adhoc;host=$(b64 "$host");user=$(b64 "$user");port=$(b64 "$port");pass=$(b64 "$pass");ident=$(b64 "$ident")"
   printf '→ 正在连接 %s@%s …\n' "$user" "$host"
 fi
 "#;
@@ -252,6 +264,7 @@ pub fn open(
     cols: u32,
     rows: u32,
     initial_cwd: Option<String>,
+    hssh_token: String,
     mut rx: mpsc::UnboundedReceiver<PaneCmd>,
 ) -> Result<Option<u32>> {
     let pty = native_pty_system();
@@ -263,8 +276,12 @@ pub fn open(
     let mut cmd = CommandBuilder::new(&shell);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
-    // 注入内建 hssh 命令：把脚本所在 bin 目录前置到本地 shell 的 PATH（仅 POSIX；
-    // 远程连接不注入）。安装失败则跳过——用户至多得到 command not found，绝不影响终端启动。
+    // 能力令牌注入本地 shell：hssh 读取 $HSSH_TOKEN 并回填到 OSC，前端据此校验来源，
+    // 防止终端里被渲染的不可信内容（cat 恶意文件、ls 恶意文件名等）伪造序列诱导建连。
+    cmd.env("HSSH_TOKEN", &hssh_token);
+    // 注入内建 hssh 命令：把脚本所在 bin 目录「追加」到本地 shell PATH 末尾（仅 POSIX；
+    // 远程连接不注入）。追加而非前置：系统同名可执行优先，杜绝 bin 被写入后劫持 sudo/ssh 等。
+    // 安装失败则跳过——用户至多得到 command not found，绝不影响终端启动。
     #[cfg(not(windows))]
     if let Some(bin) = install_hssh() {
         let existing = std::env::var("PATH").unwrap_or_default();
@@ -274,7 +291,7 @@ pub fn open(
             if existing.is_empty() {
                 bin
             } else {
-                format!("{bin}:{existing}")
+                format!("{existing}:{bin}")
             },
         );
     }
