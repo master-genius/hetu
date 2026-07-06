@@ -9,7 +9,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, events } from "./ipc";
 import { loadSettings, getSettings, onSettingsChange, activeTheme, fontStack } from "./settings";
 import { TabManager, type Tab } from "./tabs";
-import { Pane } from "./pane";
+import { Pane, type HsshSpec } from "./pane";
 import {
   DND_MIME,
   DL_MIME,
@@ -29,7 +29,7 @@ import {
   beginTransfer, completeTransfer, failTransfer, initTransfers, updateTransfer,
 } from "./transfers";
 import type { LayoutNode } from "./layout";
-import type { ConnParams, SessionLayout } from "./types";
+import type { ConnParams, Profile, SessionLayout } from "./types";
 
 const PREVIEW_MAX_BYTES = 512 * 1024;
 
@@ -124,6 +124,67 @@ async function bootstrap() {
     await openLocalTab();
   };
 
+  /** 已保存连接项 → 连接参数（与手动连接的 paramsFromForm 等价；密码/口令从不入库，故不含）。 */
+  const profileToParams = (p: Profile): ConnParams => ({
+    name: p.name,
+    host: p.host,
+    port: p.port,
+    user: p.user,
+    auth: p.auth,
+    keyPath: p.keyPath ?? undefined,
+    keyData: p.keyData ?? undefined,
+    keepalive: p.keepalive ?? undefined,
+    timeout: p.timeout ?? undefined,
+  });
+
+  /**
+   * 内建 hssh 命令入口（仅本地终端经 OSC 触发）。与「点连接面板」走同一条建连路径：
+   * - profile：密钥认证直连；密码认证不存密码 → 弹预填窗要密码。
+   * - adhoc：给了密码/密钥则直连；都没给 → 弹预填窗询问。
+   * 稳定优先：任何异常仅 toast，不影响既有终端。
+   */
+  const handleHssh = async (spec: HsshSpec) => {
+    try {
+      if (spec.mode === "profile") {
+        const profiles = await api.profilesList().catch(() => [] as Profile[]);
+        const p = profiles.find((x) => x.name === spec.name);
+        if (!p) {
+          toast(`hssh：未找到连接项「${spec.name}」`, true);
+          return;
+        }
+        if (p.auth === "password") {
+          showConnectDialog(connectAndOpenTabVoid, openLocalTabVoid, { kind: "profile", profile: p });
+        } else {
+          await connectAndOpenTab(profileToParams(p), p.id);
+        }
+        return;
+      }
+      // adhoc（临时连接）
+      const port = parseInt(spec.port, 10) || 22;
+      const user = spec.user || "root";
+      if (spec.password) {
+        await connectAndOpenTab(
+          { name: spec.host, host: spec.host, port, user, auth: "password", password: spec.password },
+          null,
+        );
+      } else if (spec.identity) {
+        await connectAndOpenTab(
+          { name: spec.host, host: spec.host, port, user, auth: "key", keyPath: spec.identity },
+          null,
+        );
+      } else {
+        showConnectDialog(connectAndOpenTabVoid, openLocalTabVoid, {
+          kind: "adhoc",
+          host: spec.host,
+          user,
+          port,
+        });
+      }
+    } catch (err) {
+      toast(String(err), true);
+    }
+  };
+
   tabs.onNewTabRequest = async () => {
     if (getSettings().newTabMode === "dialog") {
       showConnectDialog(connectAndOpenTabVoid, openLocalTabVoid);
@@ -166,6 +227,8 @@ async function bootstrap() {
     };
     // 终端聚焦时的按键先经全局快捷键分发（命中则不透传给 shell）
     pane.onAppKey = (e) => dispatchShortcut(e, pane);
+    // 内建 hssh 命令（仅本地终端，Pane 内已按 isLocal 门控）
+    pane.onHssh = (spec) => void handleHssh(spec);
     pane.onTooltip = showFileTooltip;
     // Ctrl+单击文件/目录 → 下载（默认 Downloads / 每次询问，按设置）
     pane.onCtrlClick = (path) => void downloadFile(pane, path);

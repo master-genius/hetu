@@ -1034,6 +1034,9 @@ body {
 }
 
 .profile-list {
+  /* 不随右侧表单在 grid 中拉伸到等高：连接项少时贴合内容高度，避免底部大片带边框空白；
+     连接项多时仍在 max-height 处滚动。 */
+  align-self: start;
   border-right: 1px solid color-mix(in srgb, var(--term-fg) 10%, transparent);
   padding-right: 16px;
   max-height: 480px;

@@ -83,9 +83,15 @@ export function showAboutDialog(): void {
 
 // ---------- 连接对话框 ----------
 
+/** 打开连接窗时的预填意图（供 hssh 等场景复用）：选中已保存连接项，或临时主机。 */
+export type ConnPrefill =
+  | { kind: "profile"; profile: Profile }
+  | { kind: "adhoc"; host: string; user?: string; port?: number };
+
 export function showConnectDialog(
   onConnect: (params: ConnParams, profileId?: string) => Promise<void>,
   onLocal?: () => Promise<void>,
+  prefill?: ConnPrefill,
 ) {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
@@ -225,6 +231,23 @@ export function showConnectDialog(
     }
   };
   void api.profilesList().then(renderProfiles).catch(() => renderProfiles([]));
+
+  // 预填（hssh 无密码时复用）：填好字段并聚焦密码/口令框，让用户直接输入后回车连接。
+  if (prefill?.kind === "profile") {
+    fillForm(prefill.profile);
+    requestAnimationFrame(() =>
+      (prefill.profile.auth === "password" ? field("password") : field("passphrase"))?.focus(),
+    );
+  } else if (prefill?.kind === "adhoc") {
+    field("name").value = prefill.host;
+    field("host").value = prefill.host;
+    if (prefill.user) field("user").value = prefill.user;
+    if (prefill.port) field("port").value = String(prefill.port);
+    authSel.setValue("password");
+    syncAuthUI();
+    connectProfileId = null;
+    requestAnimationFrame(() => field("password").focus());
+  }
 
   // 从文件导入：读取私钥内容填入文本框（随后随连接项自存，不再依赖该文件路径）
   overlay.querySelector(".browse-key")!.addEventListener("click", async () => {

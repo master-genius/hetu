@@ -11,6 +11,51 @@ import { installImeGuard } from "./imeGuard";
 import { getSettings, activeTheme, fontStack } from "./settings";
 import type { FileMeta } from "./types";
 
+/** hssh 内建命令通过此 OSC 标识符通知前端（见 local.rs 注入的 hssh 脚本）。 */
+const HSSH_OSC = 1729;
+
+/** hssh 解析出的连接意图：直连已保存连接项，或临时连接。 */
+export type HsshSpec =
+  | { mode: "profile"; name: string }
+  | { mode: "adhoc"; host: string; user: string; port: string; password: string; identity: string };
+
+/** base64 → UTF-8 字符串（hssh 各字段单独 base64，避免分隔符冲突）。失败返回空串。 */
+function b64utf8(s: string): string {
+  if (!s) return "";
+  try {
+    const bin = atob(s);
+    return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+  } catch {
+    return "";
+  }
+}
+
+/** 解析 hssh OSC 载荷（`k=v;k=v`，值经 base64）。非法/未知一律返回 null。 */
+export function parseHssh(data: string): HsshSpec | null {
+  const f: Record<string, string> = {};
+  for (const tok of data.split(";")) {
+    const i = tok.indexOf("=");
+    if (i > 0) f[tok.slice(0, i)] = tok.slice(i + 1);
+  }
+  if (f.mode === "profile") {
+    const name = b64utf8(f.name);
+    return name ? { mode: "profile", name } : null;
+  }
+  if (f.mode === "adhoc") {
+    const host = b64utf8(f.host);
+    if (!host) return null;
+    return {
+      mode: "adhoc",
+      host,
+      user: b64utf8(f.user),
+      port: b64utf8(f.port),
+      password: b64utf8(f.pass),
+      identity: b64utf8(f.ident),
+    };
+  }
+  return null;
+}
+
 export interface WordRange {
   word: string;
   row: number; // 视口内行号
@@ -66,6 +111,8 @@ export class Pane {
   onCtrlClick: ((path: string) => void) | null = null;
   /** Ctrl+拖拽终端中的文件/目录（拖到文件管理器下载） */
   onCtrlDragStart: ((path: string, e: DragEvent) => void) | null = null;
+  /** 内建 hssh 命令：仅本地终端触发，宿主据此按「点面板」路径打开连接 */
+  onHssh: ((spec: HsshSpec) => void) | null = null;
 
   constructor(id: string, connId: string, initialCwd?: string | null) {
     this.id = id;
@@ -105,6 +152,20 @@ export class Pane {
     // WebKitGTK 下 CJK 输入法重复/残留修复（详见 imeGuard.ts 根因注释）
     installImeGuard(this.element);
     void this.tryWebgl();
+
+    // hssh 内建命令（OSC 1729）：仅本地终端接受——安全上防止远程主机发同序列诱导客户端乱开连接。
+    // 稳定优先：任何解析/回调异常都吞掉，且始终返回 true 避免原始转义序列回显污染终端。
+    this.term.parser.registerOscHandler(HSSH_OSC, (data) => {
+      try {
+        if (this.isLocal) {
+          const spec = parseHssh(data);
+          if (spec) this.onHssh?.(spec);
+        }
+      } catch {
+        /* 忽略：绝不因辅助命令影响终端本身 */
+      }
+      return true;
+    });
 
     // 输入 → 后端 PTY
     this.term.onData((data) => {

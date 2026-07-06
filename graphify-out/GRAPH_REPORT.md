@@ -1,16 +1,16 @@
 # Graph Report - hetu  (2026-07-06)
 
 ## Corpus Check
-- 37 files · ~82,554 words
+- 37 files · ~83,333 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 974 nodes · 1632 edges · 87 communities (84 shown, 3 thin omitted)
-- Extraction: 95% EXTRACTED · 5% INFERRED · 0% AMBIGUOUS · INFERRED: 74 edges (avg confidence: 0.8)
+- 980 nodes · 1645 edges · 78 communities (76 shown, 2 thin omitted)
+- Extraction: 95% EXTRACTED · 5% INFERRED · 0% AMBIGUOUS · INFERRED: 76 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `af68960b`
+- Built from commit: `068e1a83`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -80,23 +80,14 @@
 - [[_COMMUNITY_Community 63|Community 63]]
 - [[_COMMUNITY_Community 64|Community 64]]
 - [[_COMMUNITY_Community 65|Community 65]]
-- [[_COMMUNITY_Community 67|Community 67]]
-- [[_COMMUNITY_Community 68|Community 68]]
 - [[_COMMUNITY_Community 69|Community 69]]
 - [[_COMMUNITY_Community 70|Community 70]]
-- [[_COMMUNITY_Community 71|Community 71]]
-- [[_COMMUNITY_Community 72|Community 72]]
 - [[_COMMUNITY_Community 73|Community 73]]
 - [[_COMMUNITY_Community 74|Community 74]]
 - [[_COMMUNITY_Community 75|Community 75]]
-- [[_COMMUNITY_Community 76|Community 76]]
-- [[_COMMUNITY_Community 77|Community 77]]
 - [[_COMMUNITY_Community 78|Community 78]]
-- [[_COMMUNITY_Community 79|Community 79]]
-- [[_COMMUNITY_Community 80|Community 80]]
 - [[_COMMUNITY_Community 81|Community 81]]
 - [[_COMMUNITY_Community 84|Community 84]]
-- [[_COMMUNITY_Community 85|Community 85]]
 - [[_COMMUNITY_Community 87|Community 87]]
 
 ## God Nodes (most connected - your core abstractions)
@@ -123,27 +114,27 @@
 - `expand_tilde()` --calls--> `home_dir()`  [INFERRED]
   /root/source/superssh/src-tauri/src/sshcfg.rs → src-tauri/src/local.rs
 
-## Communities (87 total, 3 thin omitted)
+## Communities (78 total, 2 thin omitted)
 
 ### Community 0 - "Community 0"
-Cohesion: 0.09
-Nodes (24): CATEGORY, ExplorerBackend, fileSvg(), folderSvg(), FsEntry, ICON_MAP, iconFor(), localBackend() (+16 more)
+Cohesion: 0.12
+Nodes (13): CATEGORY, Explorer, ExplorerBackend, fileSvg(), folderSvg(), FsEntry, ICON_MAP, iconFor() (+5 more)
 
 ### Community 1 - "Community 1"
 Cohesion: 0.5
 Nodes (4): default, description, type, local
 
 ### Community 2 - "Community 2"
-Cohesion: 0.07
-Nodes (29): commands, description, identifier, commands, description, identifier, commands, description (+21 more)
+Cohesion: 0.05
+Nodes (44): commands, description, identifier, commands, description, identifier, commands, description (+36 more)
 
 ### Community 3 - "Community 3"
-Cohesion: 0.18
-Nodes (12): clipboard-manager, global_scope_schema, permission_sets, core, core:event, global_scope_schema, permission_sets, global_scope_schema (+4 more)
+Cohesion: 0.05
+Nodes (53): commands, description, identifier, commands, description, identifier, commands, description (+45 more)
 
 ### Community 4 - "Community 4"
-Cohesion: 0.07
-Nodes (35): b64decode(), profile_delete(), profile_save(), run(), session_get(), session_set(), settings_set(), ssh_connect() (+27 more)
+Cohesion: 0.08
+Nodes (33): profile_delete(), profile_save(), run(), settings_set(), ssh_connect(), main(), bin_dir(), config_dir() (+25 more)
 
 ### Community 5 - "Community 5"
 Cohesion: 0.04
@@ -154,8 +145,8 @@ Cohesion: 0.1
 Nodes (19): app, macOSPrivateApi, security, windows, build, beforeBuildCommand, beforeDevCommand, devUrl (+11 more)
 
 ### Community 7 - "Community 7"
-Cohesion: 0.04
-Nodes (49): commands, description, identifier, commands, description, identifier, commands, description (+41 more)
+Cohesion: 0.06
+Nodes (33): commands, description, identifier, commands, description, identifier, commands, description (+25 more)
 
 ### Community 8 - "Community 8"
 Cohesion: 0.12
@@ -167,7 +158,7 @@ Nodes (13): definitions, Number, PermissionEntry, Target, Value, anyOf, descript
 
 ### Community 10 - "Community 10"
 Cohesion: 0.14
-Nodes (22): default_download_dir(), local_cwd(), local_home(), local_list(), local_tab_info(), profiles_list(), cwd(), default_shell() (+14 more)
+Nodes (23): default_download_dir(), local_cwd(), local_home(), local_list(), local_tab_info(), profiles_list(), cwd(), default_shell() (+15 more)
 
 ### Community 11 - "Community 11"
 Cohesion: 0.11
@@ -179,7 +170,7 @@ Nodes (13): definitions, Number, PermissionEntry, Target, Value, anyOf, descript
 
 ### Community 14 - "Community 14"
 Cohesion: 0.07
-Nodes (7): Layout, LayoutNode, SplitDir, Pane, wordAt(), wordRangeAt(), showPreview()
+Nodes (6): Layout, LayoutNode, SplitDir, Pane, wordAt(), wordRangeAt()
 
 ### Community 15 - "Community 15"
 Cohesion: 0.2
@@ -202,12 +193,12 @@ Cohesion: 0.2
 Nodes (10): type, webviews, windows, items, description, items, type, description (+2 more)
 
 ### Community 20 - "Community 20"
-Cohesion: 0.2
-Nodes (20): activeTheme(), applySettings(), fontStack(), getSettings(), glassOn(), listeners, loadSettings(), terminalBg() (+12 more)
+Cohesion: 0.21
+Nodes (19): activeTheme(), applySettings(), fontStack(), getSettings(), glassOn(), listeners, loadSettings(), terminalBg() (+11 more)
 
 ### Community 21 - "Community 21"
 Cohesion: 0.06
-Nodes (56): encode(), ImageData, local_image(), preview_dir(), remote_image(), sweep(), too_big(), Error (+48 more)
+Nodes (58): encode(), ImageData, local_image(), preview_dir(), remote_image(), sweep(), too_big(), Error (+50 more)
 
 ### Community 22 - "Community 22"
 Cohesion: 0.2
@@ -234,16 +225,16 @@ Cohesion: 0.48
 Nodes (5): description, identifier, permissions, $schema, windows
 
 ### Community 28 - "Community 28"
-Cohesion: 0.23
-Nodes (14): default_permission, core:app, default_permission, global_scope_schema, permission_sets, default_permission, default_permission, core:image (+6 more)
+Cohesion: 0.5
+Nodes (4): commands, description, identifier, allow-app-show
 
 ### Community 29 - "Community 29"
-Cohesion: 0.17
-Nodes (17): installImeGuard(), api, b64encode(), events, WordRange, Tab, ConnParams, ConnStateEvent (+9 more)
+Cohesion: 0.15
+Nodes (20): installImeGuard(), api, b64decode(), b64encode(), b64utf8(), HsshSpec, parseHssh(), WordRange (+12 more)
 
 ### Community 30 - "Community 30"
-Cohesion: 0.07
-Nodes (29): commands, description, identifier, commands, description, identifier, commands, description (+21 more)
+Cohesion: 0.06
+Nodes (33): commands, description, identifier, commands, description, identifier, commands, description (+25 more)
 
 ### Community 31 - "Community 31"
 Cohesion: 0.53
@@ -255,39 +246,43 @@ Nodes (4): anyOf, description, $schema, title
 
 ### Community 33 - "Community 33"
 Cohesion: 0.5
-Nodes (4): commands, description, identifier, allow-create-default
+Nodes (4): commands, description, identifier, allow-clear
 
 ### Community 34 - "Community 34"
-Cohesion: 0.15
-Nodes (13): commands, description, identifier, commands, description, identifier, allow, commands (+5 more)
+Cohesion: 0.5
+Nodes (4): commands, description, identifier, allow-remove-listener
 
 ### Community 35 - "Community 35"
 Cohesion: 0.5
 Nodes (4): commands, description, identifier, allow-fetch-data-store-identifiers
 
 ### Community 36 - "Community 36"
-Cohesion: 0.23
-Nodes (11): CJK_FONTS, MONO_FONTS, showAboutDialog(), THEME_COLOR_KEYS, Action, ACTIONS, comboToLabel(), DEFAULT_KEYBINDINGS (+3 more)
+Cohesion: 0.21
+Nodes (12): CJK_FONTS, ConnPrefill, MONO_FONTS, showAboutDialog(), THEME_COLOR_KEYS, Action, ACTIONS, comboToLabel() (+4 more)
 
 ### Community 37 - "Community 37"
-Cohesion: 0.5
-Nodes (4): commands, description, identifier, allow-set-dock-visibility
+Cohesion: 0.15
+Nodes (13): commands, description, identifier, commands, description, identifier, allow, commands (+5 more)
 
 ### Community 38 - "Community 38"
-Cohesion: 0.1
-Nodes (21): commands, description, identifier, permissions, commands, description, identifier, commands (+13 more)
+Cohesion: 0.08
+Nodes (24): commands, description, identifier, commands, description, identifier, commands, description (+16 more)
 
 ### Community 39 - "Community 39"
-Cohesion: 0.19
-Nodes (18): beginTransfer(), completeTransfer(), ensurePanel(), failTransfer(), hidePanel(), ICON, isTerminal(), refreshVisibility() (+10 more)
+Cohesion: 0.18
+Nodes (19): beginTransfer(), completeTransfer(), ensurePanel(), failTransfer(), hidePanel(), ICON, initTransfers(), isTerminal() (+11 more)
+
+### Community 40 - "Community 40"
+Cohesion: 0.5
+Nodes (4): commands, description, identifier, allow-get
 
 ### Community 41 - "Community 41"
-Cohesion: 0.24
-Nodes (10): showConnectDialog(), showSettingsDialog(), bootstrap(), initPanelResize(), load(), Ratios, Side, onSettingsChange() (+2 more)
+Cohesion: 0.11
+Nodes (25): showConnectDialog(), showSettingsDialog(), events, bootstrap(), initPanelResize(), load(), Ratios, Side (+17 more)
 
 ### Community 42 - "Community 42"
-Cohesion: 0.22
-Nodes (9): commands, description, identifier, permissions, commands, description, identifier, allow-emit-to (+1 more)
+Cohesion: 0.5
+Nodes (4): commands, description, identifier, allow-insert
 
 ### Community 43 - "Community 43"
 Cohesion: 0.5
@@ -303,11 +298,11 @@ Nodes (4): commands, description, identifier, allow-is-enabled
 
 ### Community 46 - "Community 46"
 Cohesion: 0.5
-Nodes (4): commands, description, identifier, allow-emit
+Nodes (4): commands, description, identifier, allow-items
 
 ### Community 47 - "Community 47"
 Cohesion: 0.5
-Nodes (4): commands, description, identifier, allow-from-bytes
+Nodes (4): commands, description, identifier, deny-fetch-data-store-identifiers
 
 ### Community 48 - "Community 48"
 Cohesion: 0.15
@@ -323,11 +318,11 @@ Nodes (4): commands, description, identifier, allow-is-checked
 
 ### Community 51 - "Community 51"
 Cohesion: 0.5
-Nodes (4): commands, description, identifier, allow-prepend
+Nodes (4): commands, description, identifier, deny-read-image
 
 ### Community 52 - "Community 52"
 Cohesion: 0.5
-Nodes (4): commands, description, identifier, allow-listen
+Nodes (4): commands, description, identifier, deny-read-text
 
 ### Community 53 - "Community 53"
 Cohesion: 0.5
@@ -335,7 +330,7 @@ Nodes (4): commands, description, identifier, allow-remove
 
 ### Community 54 - "Community 54"
 Cohesion: 0.5
-Nodes (4): commands, description, identifier, deny-identifier
+Nodes (4): commands, description, identifier, deny-remove-data-store
 
 ### Community 55 - "Community 55"
 Cohesion: 0.5
@@ -363,7 +358,7 @@ Nodes (3): Identifier, description, oneOf
 
 ### Community 62 - "Community 62"
 Cohesion: 0.5
-Nodes (4): commands, description, identifier, allow-version
+Nodes (4): commands, description, identifier, deny-set-dock-visibility
 
 ### Community 63 - "Community 63"
 Cohesion: 0.5
@@ -371,19 +366,11 @@ Nodes (4): commands, description, identifier, deny-default-window-icon
 
 ### Community 64 - "Community 64"
 Cohesion: 0.5
-Nodes (4): commands, description, identifier, allow-popup
+Nodes (4): commands, description, identifier, deny-version
 
 ### Community 65 - "Community 65"
 Cohesion: 0.5
-Nodes (4): commands, description, identifier, allow-remove-at
-
-### Community 67 - "Community 67"
-Cohesion: 0.5
-Nodes (4): commands, description, identifier, allow-remove-data-store
-
-### Community 68 - "Community 68"
-Cohesion: 0.5
-Nodes (4): commands, description, identifier, allow-default-window-icon
+Nodes (4): commands, description, identifier, deny-write-html
 
 ### Community 69 - "Community 69"
 Cohesion: 0.5
@@ -392,14 +379,6 @@ Nodes (4): commands, description, identifier, allow-supports-multiple-windows
 ### Community 70 - "Community 70"
 Cohesion: 0.5
 Nodes (4): commands, description, identifier, allow-tauri-version
-
-### Community 71 - "Community 71"
-Cohesion: 0.5
-Nodes (4): commands, description, identifier, allow-unlisten
-
-### Community 72 - "Community 72"
-Cohesion: 0.5
-Nodes (4): commands, description, identifier, deny-remove-data-store
 
 ### Community 73 - "Community 73"
 Cohesion: 0.5
@@ -413,57 +392,37 @@ Nodes (4): default, description, type, local
 Cohesion: 0.5
 Nodes (4): default, description, type, description
 
-### Community 76 - "Community 76"
-Cohesion: 0.5
-Nodes (4): commands, description, identifier, deny-emit
-
-### Community 77 - "Community 77"
-Cohesion: 0.5
-Nodes (4): commands, description, identifier, deny-emit-to
-
 ### Community 78 - "Community 78"
 Cohesion: 0.5
 Nodes (4): default, description, type, description
 
-### Community 79 - "Community 79"
-Cohesion: 0.5
-Nodes (4): commands, description, identifier, deny-from-bytes
-
-### Community 80 - "Community 80"
-Cohesion: 0.5
-Nodes (4): commands, description, identifier, deny-from-path
-
 ### Community 84 - "Community 84"
 Cohesion: 0.5
 Nodes (4): commands, description, identifier, deny-app-hide
-
-### Community 85 - "Community 85"
-Cohesion: 0.5
-Nodes (4): commands, description, identifier, deny-listen
 
 ### Community 87 - "Community 87"
 Cohesion: 0.5
 Nodes (4): commands, description, identifier, deny-set-app-theme
 
 ## Knowledge Gaps
-- **340 isolated node(s):** `target`, `module`, `moduleResolution`, `lib`, `strict` (+335 more)
+- **341 isolated node(s):** `target`, `module`, `moduleResolution`, `lib`, `strict` (+336 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **3 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **2 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `Pane` connect `Community 14` to `Community 41`, `Community 4`, `Community 20`, `Community 29`?**
-  _High betweenness centrality (0.052) - this node is a cross-community bridge._
-- **Why does `allow` connect `Community 34` to `Community 2`, `Community 7`, `Community 30`, `Community 33`, `Community 35`, `Community 37`, `Community 38`, `Community 42`, `Community 43`, `Community 44`, `Community 45`, `Community 46`, `Community 47`, `Community 48`, `Community 49`, `Community 50`, `Community 51`, `Community 52`, `Community 53`, `Community 54`, `Community 55`, `Community 56`, `Community 57`, `Community 58`, `Community 62`, `Community 63`, `Community 64`, `Community 65`, `Community 67`, `Community 68`, `Community 69`, `Community 70`, `Community 71`, `Community 72`, `Community 73`, `Community 76`, `Community 77`, `Community 79`, `Community 80`, `Community 84`, `Community 85`, `Community 87`?**
+  _High betweenness centrality (0.054) - this node is a cross-community bridge._
+- **Why does `allow` connect `Community 37` to `Community 2`, `Community 3`, `Community 7`, `Community 28`, `Community 30`, `Community 33`, `Community 34`, `Community 35`, `Community 38`, `Community 40`, `Community 42`, `Community 43`, `Community 44`, `Community 45`, `Community 46`, `Community 47`, `Community 48`, `Community 49`, `Community 50`, `Community 51`, `Community 52`, `Community 53`, `Community 54`, `Community 55`, `Community 56`, `Community 57`, `Community 58`, `Community 62`, `Community 63`, `Community 64`, `Community 65`, `Community 69`, `Community 70`, `Community 73`, `Community 84`, `Community 87`?**
   _High betweenness centrality (0.040) - this node is a cross-community bridge._
-- **Why does `deny` connect `Community 48` to `Community 2`, `Community 7`, `Community 30`, `Community 33`, `Community 34`, `Community 35`, `Community 37`, `Community 38`, `Community 42`, `Community 43`, `Community 44`, `Community 45`, `Community 46`, `Community 47`, `Community 49`, `Community 50`, `Community 51`, `Community 52`, `Community 53`, `Community 54`, `Community 55`, `Community 56`, `Community 57`, `Community 58`, `Community 62`, `Community 63`, `Community 64`, `Community 65`, `Community 67`, `Community 68`, `Community 69`, `Community 70`, `Community 71`, `Community 72`, `Community 73`, `Community 76`, `Community 77`, `Community 79`, `Community 80`, `Community 84`, `Community 85`, `Community 87`?**
+- **Why does `deny` connect `Community 48` to `Community 2`, `Community 3`, `Community 7`, `Community 28`, `Community 30`, `Community 33`, `Community 34`, `Community 35`, `Community 37`, `Community 38`, `Community 40`, `Community 42`, `Community 43`, `Community 44`, `Community 45`, `Community 46`, `Community 47`, `Community 49`, `Community 50`, `Community 51`, `Community 52`, `Community 53`, `Community 54`, `Community 55`, `Community 56`, `Community 57`, `Community 58`, `Community 62`, `Community 63`, `Community 64`, `Community 65`, `Community 69`, `Community 70`, `Community 73`, `Community 84`, `Community 87`?**
   _High betweenness centrality (0.040) - this node is a cross-community bridge._
 - **What connects `target`, `module`, `moduleResolution` to the rest of the system?**
-  _340 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _341 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Community 0` be split into smaller, more focused modules?**
-  _Cohesion score 0.09 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.12 - nodes in this community are weakly interconnected._
 - **Should `Community 2` be split into smaller, more focused modules?**
-  _Cohesion score 0.07 - nodes in this community are weakly interconnected._
-- **Should `Community 4` be split into smaller, more focused modules?**
-  _Cohesion score 0.07 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.05 - nodes in this community are weakly interconnected._
+- **Should `Community 3` be split into smaller, more focused modules?**
+  _Cohesion score 0.05 - nodes in this community are weakly interconnected._

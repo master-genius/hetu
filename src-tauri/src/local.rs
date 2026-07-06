@@ -160,6 +160,90 @@ fn default_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into())
 }
 
+/// hssh 辅助命令脚本（POSIX sh）。运行时写入 config/hetushell/bin 并前置到本地 shell 的 PATH，
+/// 让用户在 HetuShell 本地终端里用 `hssh <名称>` / `hssh 用户@主机` 快速打开自实现 SSH 连接
+/// （只有自实现 SSH 才有远程文件面板/右键下载）。脚本仅发出 OSC 1729 转义序列通知前端，
+/// 由前端按「点连接面板」的同一路径建连；脚本本身不接触任何机密逻辑。仅本地终端注入。
+#[cfg(not(windows))]
+const HSSH_SCRIPT: &str = r#"#!/bin/sh
+# HetuShell 内建命令：在应用内打开一个自实现 SSH 连接（带远程文件面板）。
+# 通过 OSC 1729 通知宿主前端，等价于在连接面板点击。仅在 HetuShell 本地终端内有效。
+OSC=1729
+emit() { printf '\033]%s;%s\007' "$OSC" "$1"; }
+b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
+
+usage() {
+  cat <<'EOF'
+用法:
+  hssh <连接项名称>            直接打开已保存的连接项（密钥认证直连；密码认证会弹窗要密码）
+  hssh [用户@]主机 [选项]      临时连接（缺密码且无密钥时弹窗询问）
+选项:
+  -p, --port <端口>           端口（默认 22）
+  -u, --user <用户名>         用户名（也可写成 用户@主机）
+  -w, --password <密码>       密码（明文，注意会进 shell 历史）
+  -i, --identity <私钥文件>   私钥文件路径
+  -h, --help                  显示此帮助
+示例:
+  hssh prod
+  hssh root@10.0.0.9 -p 2222 -w 'secret'
+EOF
+}
+
+[ $# -eq 0 ] && { usage; exit 1; }
+case "$1" in -h|--help) usage; exit 0;; esac
+
+first="$1"
+case "$first" in -*) usage; exit 1;; esac
+shift
+
+host=""; user=""; port=""; pass=""; ident=""; name=""
+case "$first" in
+  *@*) user="${first%@*}"; host="${first#*@}";;
+  *)   name="$first";;
+esac
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -p|--port)     port="$2"; shift 2;;
+    -u|--user)     user="$2"; shift 2;;
+    -w|--password) pass="$2"; shift 2;;
+    -i|--identity) ident="$2"; shift 2;;
+    -h|--help)     usage; exit 0;;
+    *)             host="$1"; shift;;
+  esac
+done
+
+if [ -n "$name" ]; then
+  emit "v=1;mode=profile;name=$(b64 "$name")"
+  printf '→ 正在打开连接项「%s」…\n' "$name"
+else
+  [ -z "$host" ] && { echo 'hssh: 缺少主机' >&2; exit 1; }
+  user="${user:-$(id -un)}"
+  emit "v=1;mode=adhoc;host=$(b64 "$host");user=$(b64 "$user");port=$(b64 "$port");pass=$(b64 "$pass");ident=$(b64 "$ident")"
+  printf '→ 正在连接 %s@%s …\n' "$user" "$host"
+fi
+"#;
+
+/// 把 hssh 脚本落地到 bin 目录并置可执行位，返回该目录用于前置 PATH。
+/// 内容一致则不重写（避免每次 spawn 写盘）；任何失败都返回 None（不影响终端启动）。
+#[cfg(not(windows))]
+fn install_hssh() -> Option<std::path::PathBuf> {
+    let dir = crate::settings::bin_dir().ok()?;
+    let path = dir.join("hssh");
+    let need = std::fs::read_to_string(&path)
+        .map(|c| c != HSSH_SCRIPT)
+        .unwrap_or(true);
+    if need {
+        std::fs::write(&path, HSSH_SCRIPT).ok()?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755));
+    }
+    Some(dir)
+}
+
 /// 打开本地 PTY pane。控制线程处理输入/resize/关闭，读线程转发输出。
 /// 返回本地 shell 的进程号（用于 /proc/<pid>/cwd 读实时工作目录）；取不到则 None。
 pub fn open(
@@ -179,6 +263,21 @@ pub fn open(
     let mut cmd = CommandBuilder::new(&shell);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
+    // 注入内建 hssh 命令：把脚本所在 bin 目录前置到本地 shell 的 PATH（仅 POSIX；
+    // 远程连接不注入）。安装失败则跳过——用户至多得到 command not found，绝不影响终端启动。
+    #[cfg(not(windows))]
+    if let Some(bin) = install_hssh() {
+        let existing = std::env::var("PATH").unwrap_or_default();
+        let bin = bin.to_string_lossy().into_owned();
+        cmd.env(
+            "PATH",
+            if existing.is_empty() {
+                bin
+            } else {
+                format!("{bin}:{existing}")
+            },
+        );
+    }
     // 起始工作目录：优先用调用方传入的目录（新标签/分屏继承源终端 cwd），
     // 仅当它确为可用目录时采用；否则（未传或切换失败/目录不存在）回退用户主目录。
     let start_dir = initial_cwd

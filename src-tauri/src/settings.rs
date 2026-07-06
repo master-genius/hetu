@@ -195,6 +195,14 @@ pub fn known_hosts_path() -> Result<PathBuf> {
     Ok(config_dir()?.join("known_hosts.json"))
 }
 
+/// 随应用注入本地 shell 的辅助命令目录（config/hetushell/bin），如 hssh。
+/// 仅本地终端会把它前置到 PATH；远程连接不注入。
+pub fn bin_dir() -> Result<PathBuf> {
+    let dir = config_dir()?.join("bin");
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
 /// 读取 JSON 文件为某类型；文件缺失或损坏返回默认值（损坏时备份原文件）。
 fn read_json_or_default<T: serde::de::DeserializeOwned + Default>(path: &PathBuf) -> T {
     let content = match std::fs::read_to_string(path) {
