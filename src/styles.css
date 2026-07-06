@@ -914,6 +914,16 @@ body {
      入场淡入交给遮罩层 overlay-in（不带模糊、开销极低），毛玻璃观感不变。 */
 }
 
+/* 设置 / 连接弹窗：字体固定为默认 Regular，不随用户所选终端字体/字重变化。
+   这两个弹窗信息密度高，用户把终端字体设成 Light 等细字重时会发虚难看，故在此
+   局部覆盖 --ui-font（整棵子树含自定义下拉/输入都经 var(--ui-font) 取值，自动回落），
+   并固定 font-weight:400 抵消 body 的 300（否则 Regular 家族仍会命中其 300 字形）。 */
+.modal.settings,
+.modal.connect {
+  --ui-font: "JetBrains Mono NL", "Noto Sans CJK SC", monospace;
+  font-weight: 400;
+}
+
 .modal h3 {
   font-size: 16px;
   margin-bottom: 14px;
