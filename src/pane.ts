@@ -101,6 +101,12 @@ export class Pane {
   private disposed = false;
   /** 当前 Ctrl 悬停命中的词（原始相对/绝对词，下载时再异步解析为绝对路径） */
   private ctrlHoverWord: string | null = null;
+  /** 备用屏幕滚轮节流：rAF 合并帧内多次 wheel，避免触摸板高频 IPC 拥塞 PTY 输入队列 */
+  private wheelRafId: number | null = null;
+  /** 帧内待发送的累积行数（正=向下滚，负=向上滚），rAF 触发时一次性发出 */
+  private wheelPending = 0;
+  /** 像素余数累积：缓慢双指滚的亚行级 deltaY 累到下一帧，避免「吞距离」 */
+  private wheelPixelCarry = 0;
 
   onFocus: (() => void) | null = null;
   /** 全局快捷键分发：返回 true 表示已处理（不透传给 shell） */
@@ -138,7 +144,7 @@ export class Pane {
       theme: { ...activeTheme().colors, background: "#00000000" } as never,
       allowTransparency: true,
       // 深色背景下按前景/背景对比自动微提亮细字，让 canvas 灰度 AA 的文字更"实"
-      minimumContrastRatio: 1.1,
+      minimumContrastRatio: 1.5,
     });
     this.fit = new FitAddon();
     this.term.loadAddon(this.fit);
@@ -253,6 +259,65 @@ export class Pane {
       const word = this.term.getSelection().trim() || this.wordUnderMouse(e);
       this.onContextMenu?.(e, word || null);
     });
+
+    // 备用屏幕（vim/less/man）下的滚轮 → 滚动键转换：
+    // xterm.js 在 alternate screen 无 scrollback 可滚时不会 preventDefault，
+    // 据此在冒泡阶段捕获，转为 vim/less 的视口滚动键发给应用程序。
+    // 若应用已开启鼠标模式（set mouse=a），xterm.js 先行 preventDefault → 此处不触发，
+    // 滚轮走原生鼠标转义序列，光标位置与可视区由应用自管。
+    //
+    // 按键选择：发 <C-E>/<C-Y> 而非 ↑/↓。
+    //  - vim 默认滚轮即绑定 <C-E>/<C-Y>（视口滚动，光标不动）；↑/↓ 在 normal 模式
+    //    会让光标在文件里逐行移动、插入模式下更会跳行，与原生滚轮语义不符。
+    //  - less/man 现代版本同样识别 <C-E>/<C-Y> 作为行级滚动，兼容不破坏。
+    //
+    // 触摸板（DOM_DELTA_PIXEL）高频事件用 rAF 合并到下一帧、并累积亚行级像素余数，
+    // 避免一轮惯性滚动触发数十次 IPC 把 PTY 输入队列打满、并防止缓慢滚动吞距离。
+    this.element.addEventListener(
+      "wheel",
+      (e) => {
+        if (e.defaultPrevented) return;
+        if (this.term.buffer.active.type !== "alternate") return;
+        e.preventDefault();
+
+        let lines: number;
+        switch (e.deltaMode) {
+          case WheelEvent.DOM_DELTA_LINE:
+            lines = Math.abs(e.deltaY);
+            this.wheelPixelCarry = 0;
+            break;
+          case WheelEvent.DOM_DELTA_PAGE:
+            lines = Math.abs(e.deltaY) * this.term.rows;
+            this.wheelPixelCarry = 0;
+            break;
+          default: {
+            // DOM_DELTA_PIXEL（触摸板双指滚动）：按单元格高度折算为行数，余数累积
+            const ch = this.cellDims()?.height ?? 18;
+            const px = Math.abs(e.deltaY) + this.wheelPixelCarry;
+            lines = Math.floor(px / ch);
+            this.wheelPixelCarry = px - lines * ch;
+            break;
+          }
+        }
+        if (lines <= 0) return;
+        // 方向归一：向下滚（deltaY>0，文本上移、看到下方）→ +lines；向上滚 → -lines
+        this.wheelPending += e.deltaY > 0 ? lines : -lines;
+
+        if (this.wheelRafId !== null) return;
+        this.wheelRafId = requestAnimationFrame(() => {
+          this.wheelRafId = null;
+          const total = this.wheelPending;
+          this.wheelPending = 0;
+          if (total === 0) return;
+          // 单帧上限：超过一屏视为大 flicker，截到一屏避免 PTY 输入暴冲
+          const clamped = Math.max(-this.term.rows, Math.min(total, this.term.rows));
+          if (clamped === 0) return; // 终端未渲染/最小化时 rows=0，避免发空
+          const key = clamped > 0 ? "\x05" : "\x19"; // <C-E> 下滚 / <C-Y> 上滚
+          void api.paneInput(this.id, b64encode(key.repeat(Math.abs(clamped)))).catch(() => {});
+        });
+      },
+      { passive: false },
+    );
 
     this.resizeObserver = new ResizeObserver(() => this.refit());
     this.resizeObserver.observe(this.element);
@@ -602,6 +667,11 @@ export class Pane {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    if (this.wheelRafId !== null) {
+      cancelAnimationFrame(this.wheelRafId);
+      this.wheelRafId = null;
+      this.wheelPending = 0;
+    }
     this.resizeObserver.disconnect();
     void api.paneClose(this.id).catch(() => {});
     this.term.dispose();
