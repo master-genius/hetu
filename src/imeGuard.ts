@@ -103,4 +103,20 @@ export function installImeGuard(host: HTMLElement): void {
     },
     true,
   );
+
+  // 直接输入（英文/无合成）路径的残留补清空。bubble 阶段：在 xterm 的 input 目标监听
+  // 读完 textarea 之后运行，延后一拍清空——等价补上被输入法吞掉的 keyup 清理。
+  // 根因：活动的 Linux 输入法（fcitx/ibus）即使英文模式也可能吞掉 keyup，使 xterm 的
+  // _keyUp 清空 textarea 失效 → 隐藏 textarea 持续累积历史提交 → 被整段切出重发（英文亦重复）。
+  // 仅处理非合成的字符插入；合成路径已由上面的 compositionend 清空覆盖，此处跳过避免起点簿记错位。
+  host.addEventListener("input", (e) => {
+    if (composing) return;
+    const ie = e as InputEvent;
+    if (ie.inputType !== "insertText") return;
+    const ta = e.target as HTMLTextAreaElement | null;
+    if (!ta || ta.tagName !== "TEXTAREA") return;
+    window.setTimeout(() => {
+      if (!composing) ta.value = "";
+    }, 0);
+  });
 }

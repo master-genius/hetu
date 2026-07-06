@@ -118,10 +118,11 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            // 字重并入字体名（如 "…Light"），不再全局强制字重；内置等宽/CJK 默认均用 Light。
-            font_family: "JetBrains Mono NL Light".into(),
-            cjk_font_family: "Noto Sans CJK SC Light".into(),
-            font_size: 14,
+            // 字重并入字体名，不再全局强制字重；内置等宽/CJK 默认均用 Regular（常规），
+            // 配合各自内置的真 Bold 字形，避免 xterm(canvas) 渲染下 Light 过细、CJK 伪粗。
+            font_family: "JetBrains Mono NL".into(),
+            cjk_font_family: "Noto Sans CJK SC".into(),
+            font_size: 16,
             // 保留字段仅为兼容；终端一律用 normal，字重由所选字体名承载
             font_weight: "normal".into(),
             // 默认：暗色主题 + 半透明毛玻璃背景

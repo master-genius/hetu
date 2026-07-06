@@ -489,6 +489,48 @@ fn read_key_file(path: String) -> Result<String> {
     Ok(std::fs::read_to_string(&path)?)
 }
 
+/// 用系统默认浏览器打开外部链接（终端里 Ctrl+单击 URL 触发）。
+/// 仅放行 http/https，杜绝把任意字符串当命令参数注入到系统 opener。
+#[tauri::command]
+fn open_external(url: String) -> Result<()> {
+    let lower = url.to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return Err(Error::msg("仅支持打开 http/https 链接"));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // xdg-open 是 freedesktop 标准分发器（GNOME/KDE/XFCE 等各桌面均会路由到默认浏览器），
+        // 再以 gio open 兜底，覆盖个别缺 xdg-utils 但装了 glib 的环境。
+        let attempts: [(&str, &[&str]); 2] = [("xdg-open", &[]), ("gio", &["open"])];
+        let mut last = String::from("无可用打开器");
+        for (bin, pre) in attempts {
+            match std::process::Command::new(bin).args(pre).arg(&url).spawn() {
+                Ok(_) => return Ok(()),
+                Err(e) => last = format!("{bin}: {e}"),
+            }
+        }
+        return Err(Error::msg(format!("打开链接失败（xdg-open/gio 均不可用）: {last}")));
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        #[cfg(target_os = "macos")]
+        let mut cmd = {
+            let mut c = std::process::Command::new("open");
+            c.arg(&url);
+            c
+        };
+        #[cfg(target_os = "windows")]
+        let mut cmd = {
+            // start 是 cmd 内建命令；空标题占位 "" 避免带引号的 URL 被当成窗口标题
+            let mut c = std::process::Command::new("cmd");
+            c.args(["/C", "start", "", &url]);
+            c
+        };
+        cmd.spawn().map_err(|e| Error::msg(format!("打开链接失败: {e}")))?;
+        Ok(())
+    }
+}
+
 // ---------- 应用入口 ----------
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -564,6 +606,7 @@ pub fn run() {
             local_cwd,
             local_tab_info,
             read_key_file,
+            open_external,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

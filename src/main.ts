@@ -39,11 +39,10 @@ async function bootstrap() {
   // 等内置字体就绪再创建终端，避免 xterm 用回退字体测量出错误的单元格宽度。
   // 覆盖默认字体名（含「字重并入名字」别名），确保首帧用正确字体测量单元格。
   await Promise.allSettled([
-    document.fonts.load('normal 14px "JetBrains Mono NL Light"'),
-    document.fonts.load('bold 14px "JetBrains Mono NL Light"'),
-    document.fonts.load('400 14px "JetBrains Mono NL"'),
+    document.fonts.load('normal 14px "JetBrains Mono NL"'),
+    document.fonts.load('bold 14px "JetBrains Mono NL"'),
     document.fonts.load('normal 14px "Noto Sans CJK SC"'),
-    document.fonts.load('300 14px "Noto Sans SC"'),
+    document.fonts.load('bold 14px "Noto Sans CJK SC"'),
   ]);
 
   const tabBar = document.getElementById("tab-bar")!;
@@ -922,15 +921,30 @@ async function bootstrap() {
   onSettingsChange(() => {
     const s = getSettings();
     const colors = { ...activeTheme().colors, background: "#00000000" };
+    // 主题/字号/透明度立即生效（这些不依赖字体加载）
     for (const tab of tabs.tabs) {
       for (const pane of tab.layout.panes()) {
-        pane.term.options.fontFamily = fontStack();
         pane.term.options.fontSize = s.fontSize;
         pane.term.options.fontWeight = "normal" as never;
         pane.term.options.theme = colors as never;
-        pane.refit();
       }
     }
+    // 字体单独处理：先确保所选字重（含各自 bold）就绪，再设 fontFamily 触发 xterm
+    // 以正确字体重测单元格。否则切到未加载的字体（如 Light）时会用回退字体测量，首帧偏细/错位。
+    const px = s.fontSize;
+    void Promise.allSettled([
+      document.fonts.load(`normal ${px}px "${s.fontFamily}"`),
+      document.fonts.load(`bold ${px}px "${s.fontFamily}"`),
+      document.fonts.load(`normal ${px}px "${s.cjkFontFamily}"`),
+      document.fonts.load(`bold ${px}px "${s.cjkFontFamily}"`),
+    ]).then(() => {
+      for (const tab of tabs.tabs) {
+        for (const pane of tab.layout.panes()) {
+          pane.term.options.fontFamily = fontStack();
+          pane.refit();
+        }
+      }
+    });
   });
 
   // ---------- 分屏焦点导航（Alt+方向键）----------

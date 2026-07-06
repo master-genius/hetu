@@ -86,10 +86,21 @@ export class Pane {
       scrollback: 10000,
       theme: { ...activeTheme().colors, background: "#00000000" } as never,
       allowTransparency: true,
+      // 深色背景下按前景/背景对比自动微提亮细字，让 canvas 灰度 AA 的文字更"实"
+      minimumContrastRatio: 1.1,
     });
     this.fit = new FitAddon();
     this.term.loadAddon(this.fit);
-    this.term.loadAddon(new WebLinksAddon());
+    // Web 链接：仅在按住 Ctrl 时用系统默认浏览器打开（普通单击不打开，避免误触）。
+    // stopPropagation 掐断冒泡，防止远程 pane 的「Ctrl+单击下载文件」把 URL 当路径处理。
+    this.term.loadAddon(
+      new WebLinksAddon((e, uri) => {
+        if (!e.ctrlKey) return;
+        e.preventDefault();
+        e.stopPropagation();
+        void api.openExternal(uri).catch(() => {});
+      }),
+    );
     this.term.open(this.element);
     // WebKitGTK 下 CJK 输入法重复/残留修复（详见 imeGuard.ts 根因注释）
     installImeGuard(this.element);
@@ -339,11 +350,54 @@ export class Pane {
   }
 
   async copyText(text: string) {
+    if (!text) return;
+    // 走 WebView 自身剪贴板：WebKitGTK 已通过 GTK 对接当前桌面剪贴板并常驻持有选区，
+    // 天然跨桌面（GNOME/KDE、X11/Wayland 皆同），无需任何外部工具。
+    // 注意：不用 tauri 插件（底层 arboard 在 WebKitGTK 下写入后不持有选区 → 静默失效）。
+    // ① 首选异步 Clipboard API；② 老 WebKitGTK 无该 API 或无权限时退到同步 execCommand。
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+    } catch (err) {
+      console.warn("[copy] navigator.clipboard 不可用，回退 execCommand:", err);
+    }
+    if (this.execCopy(text)) return;
+    // 末档：tauri 插件（主要覆盖 macOS/Windows；Linux 上可能不持有选区）
     try {
       const { writeText } = await import("@tauri-apps/plugin-clipboard-manager");
       await writeText(text);
+    } catch (err) {
+      console.error("[copy] 写入剪贴板失败（所有通道均失败）:", err);
+    }
+  }
+
+  /**
+   * 同步兜底复制：隐藏 textarea + document.execCommand('copy')。
+   * 经 WebView 的 GTK 剪贴板，跨桌面通用、无需权限；须在用户手势内（快捷键/选中均满足）。
+   * 复制后恢复原 DOM 选区并把焦点还给终端，避免打断输入。
+   */
+  private execCopy(text: string): boolean {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;top:-9999px;left:-9999px;opacity:0";
+      document.body.appendChild(ta);
+      const sel = document.getSelection();
+      const prev = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      if (prev && sel) {
+        sel.removeAllRanges();
+        sel.addRange(prev);
+      }
+      this.term.focus(); // execCommand 会夺走焦点，还给终端
+      return ok;
     } catch {
-      await navigator.clipboard.writeText(text).catch(() => {});
+      return false;
     }
   }
 
@@ -411,6 +465,11 @@ export class Pane {
       return;
     }
     const word = this.wordUnderMouse(e);
+    // URL 交给 WebLinksAddon（Ctrl 打开浏览器），不当作可下载文件，避免光标/拖拽/点击冲突
+    if (word && /^https?:\/\//i.test(word)) {
+      this.clearCtrlHover();
+      return;
+    }
     // 样式判定用同步 resolvePath 尽力而为；实际下载路径在点击/拖放时再异步解析。
     const w = word ? word.replace(/\/$/, "") : null;
     const linkable = !!(w && this.resolvePath(w));

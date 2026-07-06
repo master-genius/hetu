@@ -11,8 +11,8 @@ import type { ConnParams, Profile, Settings, ThemeDef } from "./types";
 
 // 推荐字体（字重并入名字）；用户可在此基础上从系统字体中另选。
 const MONO_FONTS = [
+  "JetBrains Mono NL", // 内置（Regular，默认）
   "JetBrains Mono NL Light", // 内置（Light）
-  "JetBrains Mono NL", // 内置（Regular）
   "Cascadia Code",
   "Fira Code",
   "Source Code Pro",
@@ -707,7 +707,7 @@ export function showSettingsDialog() {
     void updateSettings({
       fontFamily: monoFontSel.getValue(),
       cjkFontFamily: cjkFontSel.getValue(),
-      fontSize: parseInt(input("fontSize").value, 10) || 14,
+      fontSize: parseInt(input("fontSize").value, 10) || 16,
       fontWeight: "normal",
       theme: selectedThemeId,
       titlebarColor: input("titlebarFollow").checked ? null : input("titlebarColor").value,

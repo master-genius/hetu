@@ -69,11 +69,20 @@
   font-display: swap;
 }
 
-/* CJK：Noto Sans CJK SC 家族别名（常规 / Light / Medium 分别指向可变字体的对应字重） */
+/* CJK：Noto Sans CJK SC 家族别名（常规 / Light / Medium 指向可变字体对应字重）。
+   常规项内置真 Bold：normal→400、bold→700，均取自可变字体的真实字重实例（非算法伪粗），
+   供 ANSI 加粗使用；与主字体 JetBrains Mono NL 的 Regular+Bold 对称。 */
 @font-face {
   font-family: "Noto Sans CJK SC";
   src: url("./assets/fonts/NotoSansSC.woff2") format("woff2");
-  font-weight: 100 900;
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Noto Sans CJK SC";
+  src: url("./assets/fonts/NotoSansSC.woff2") format("woff2");
+  font-weight: bold;
   font-style: normal;
   font-display: swap;
 }

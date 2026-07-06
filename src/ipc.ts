@@ -70,6 +70,8 @@ export const api = {
   localTabInfo: (paneId: string) =>
     invoke<{ cwd: string; process: string }>("local_tab_info", { paneId }),
   readKeyFile: (path: string) => invoke<string>("read_key_file", { path }),
+  /** 用系统默认浏览器打开外部 http/https 链接 */
+  openExternal: (url: string) => invoke<void>("open_external", { url }),
 };
 
 export const events = {
