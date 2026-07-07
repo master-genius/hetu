@@ -66,8 +66,8 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  /* 底部留 3px 内填充：终端内容不贴死窗口下缘，避免显得紧蹙 */
-  padding-bottom: 3px;
+  /* 底部留 5px 内填充：终端内容不贴死窗口下缘，避免显得紧蹙 */
+  padding-bottom: 5px;
   /* 磨砂质感层（::before, z-index:-1）的定位与层叠基准 */
   position: relative;
   isolation: isolate;
@@ -609,8 +609,8 @@ body {
   z-index: 60;
   /* 毛玻璃但偏实：文件操作需要专注，透明度比主窗口高 2%，背后仍强模糊 */
   background: var(--panel-rgba);
-  backdrop-filter: blur(30px) saturate(1.4);
-  -webkit-backdrop-filter: blur(30px) saturate(1.4);
+  backdrop-filter: blur(35px) saturate(1.4);
+  -webkit-backdrop-filter: blur(35px) saturate(1.4);
   border: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
   border-radius: var(--radius);
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.25);
@@ -638,8 +638,8 @@ body {
   z-index: 60;
   /* 毛玻璃但偏实：文件操作需要专注，透明度比主窗口高 2%，背后仍强模糊 */
   background: var(--panel-rgba);
-  backdrop-filter: blur(30px) saturate(1.4);
-  -webkit-backdrop-filter: blur(30px) saturate(1.4);
+  backdrop-filter: blur(35px) saturate(1.4);
+  -webkit-backdrop-filter: blur(35px) saturate(1.4);
   border: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
   border-radius: var(--radius);
   box-shadow: 8px 0 24px rgba(0, 0, 0, 0.25);
@@ -907,8 +907,8 @@ body {
   min-width: 180px;
   /* 底色 62%→74%：背后终端透出过多时菜单文字发灰，与弹窗同款提对比度 */
   background: color-mix(in srgb, var(--term-bg) 74%, transparent);
-  backdrop-filter: blur(26px) saturate(1.6);
-  -webkit-backdrop-filter: blur(26px) saturate(1.6);
+  backdrop-filter: blur(33px) saturate(1.6);
+  -webkit-backdrop-filter: blur(33px) saturate(1.6);
   border: 1px solid color-mix(in srgb, var(--term-fg) 16%, transparent);
   border-radius: var(--radius);
   padding: 4px;
@@ -978,8 +978,8 @@ body {
   /* 底色不透明度是文字对比度的地板：58% 时背后终端透出太多、字发灰，
      提到 72% 后各主题下文字都清晰，毛玻璃质感仍在 */
   background: color-mix(in srgb, var(--term-bg) 72%, transparent);
-  backdrop-filter: blur(28px) saturate(1.7);
-  -webkit-backdrop-filter: blur(28px) saturate(1.7);
+  backdrop-filter: blur(33px) saturate(1.7);
+  -webkit-backdrop-filter: blur(33px) saturate(1.7);
   border: 1px solid color-mix(in srgb, var(--term-fg) 18%, transparent);
   border-radius: var(--radius-modal);
   padding: 20px;

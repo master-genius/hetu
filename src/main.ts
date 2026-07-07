@@ -771,9 +771,9 @@ async function bootstrap() {
     if (wasMaximized) {
       // 从最大化还原：按设置项的屏幕占比设置窗口尺寸（保持屏幕宽高比）
       const pct = Math.min(90, Math.max(35, getSettings().restoreSize)) / 100;
-      const factor = await win.scaleFactor().catch(() => 1);
-      const sw = Math.round(window.screen.availWidth * factor * pct);
-      const sh = Math.round(window.screen.availHeight * factor * pct);
+      // window.screen.width/height 已是 CSS 逻辑像素 = LogicalSize 单位，无需再乘 factor
+      const sw = Math.round(window.screen.width * pct);
+      const sh = Math.round(window.screen.height * pct);
       await win.setSize(new LogicalSize(sw, sh)).catch(() => {});
     }
   });
@@ -1072,10 +1072,10 @@ async function bootstrap() {
     const theme = activeTheme();
     const themeChanged = theme.id !== lastThemeId;
     const baseChanged = theme.base !== lastThemeBase;
-    // MCR 随主题和透明度变化：暗色高透明度(opacity<0.4)时降至 1.1 避免白边
+    // MCR：暗色 1.6（高透明度时 1.1 避免白边），亮色 1.1（微提亮避免发虚）
     const mcr = theme.base === "dark"
       ? (s.opacity < 0.4 ? 1.1 : 1.6)
-      : 1.0;
+      : 1.1;
     const mcrChanged = mcr !== lastMcr;
     // 主题/字号/透明度立即生效（这些不依赖字体加载）
     for (const tab of tabs.tabs) {

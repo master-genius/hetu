@@ -144,14 +144,11 @@ export class Pane {
       theme: { ...activeTheme().colors, background: "#00000000" } as never,
       allowTransparency: true,
       // 深色背景下按前景/背景对比自动微提亮细字，让 canvas 灰度 AA 的文字更"实"
-      // 1.6：在 1.58 基础上微提一档改善 Light 字细字发虚，又不至于像 2.0 那样洗白暗色 ANSI
-      // 高透明度（opacity<0.4）时降至 1.1：透明背景下 xterm 以黑色为基准算对比度，
-      // 过高的 MCR 会在高透场景产生白边
-      // 浅色主题禁用：终端 background 设为透明(#00000000)，xterm 以黑色为基准算对比度，
-      // 浅色主题下会误判（浅色 ANSI 色在"黑色"上对比度高、不调暗，实际白底上却看不清）
+      // 暗色 1.6（高透明度时 1.1 避免白边）；亮色 1.1（极温和微提亮，避免细字发虚，
+      // 1.1 只对最暗的颜色做微调，不会误调浅色 ANSI）
       minimumContrastRatio: activeTheme().base === "dark"
         ? (s.opacity < 0.4 ? 1.1 : 1.6)
-        : 1.0,
+        : 1.1,
     });
     this.fit = new FitAddon();
     this.term.loadAddon(this.fit);
