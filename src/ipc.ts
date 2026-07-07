@@ -31,6 +31,8 @@ export const api = {
 
   sshConnect: (params: ConnParams) => invoke<string>("ssh_connect", { params }),
   sshDisconnect: (connId: string) => invoke<void>("ssh_disconnect", { connId }),
+  /** 查询连接是否有进行中的传输（gcConnections 判断是否可安全断开） */
+  connHasTransfers: (connId: string) => invoke<boolean>("conn_has_transfers", { connId }),
 
   paneOpen: (connId: string, paneId: string, cols: number, rows: number) =>
     invoke<void>("pane_open", { connId, paneId, cols, rows }),

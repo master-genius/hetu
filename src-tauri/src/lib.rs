@@ -167,6 +167,16 @@ async fn ssh_connect(state: State<'_>, params: ConnParams) -> Result<String> {
 
 #[tauri::command]
 async fn ssh_disconnect(state: State<'_>, conn_id: String) -> Result<()> {
+    // 有活跃传输时拒绝断开，避免中断下载/上传
+    let has_transfers = state
+        .transfers
+        .lock()
+        .await
+        .values()
+        .any(|t| t.conn_id() == conn_id);
+    if has_transfers {
+        return Err(Error::msg("该连接有进行中的传输，请等待完成或取消后再断开"));
+    }
     if let Some(conn) = state.conns.lock().await.remove(&conn_id) {
         // 主动断开：关闭自动重连，优雅发送 disconnect
         conn.auto_reconnect.store(false, Ordering::SeqCst);
@@ -183,6 +193,17 @@ async fn ssh_disconnect(state: State<'_>, conn_id: String) -> Result<()> {
         .await
         .retain(|_, ctl| ctl.conn_id != conn_id);
     Ok(())
+}
+
+/// 查询某连接是否有进行中的传输（供前端 gcConnections 判断是否可安全断开）
+#[tauri::command]
+async fn conn_has_transfers(state: State<'_>, conn_id: String) -> Result<bool> {
+    Ok(state
+        .transfers
+        .lock()
+        .await
+        .values()
+        .any(|t| t.conn_id() == conn_id))
 }
 
 // ---------- Pane（PTY channel）----------
@@ -353,8 +374,8 @@ async fn image_preview(state: State<'_>, conn_id: String, path: String) -> Resul
 }
 
 /// 注册一次传输的控制句柄，返回它；传输结束务必调用 unregister_transfer 清理。
-async fn register_transfer(state: &AppState, id: &str) -> Arc<ssh::sftp::TransferCtl> {
-    let ctl = Arc::new(ssh::sftp::TransferCtl::new());
+async fn register_transfer(state: &AppState, id: &str, conn_id: &str) -> Arc<ssh::sftp::TransferCtl> {
+    let ctl = Arc::new(ssh::sftp::TransferCtl::new(conn_id.to_string()));
     state.transfers.lock().await.insert(id.to_string(), ctl.clone());
     ctl
 }
@@ -373,7 +394,7 @@ async fn sftp_download(
     transfer_id: String,
 ) -> Result<()> {
     let conn = get_conn(&state, &conn_id).await?;
-    let ctl = register_transfer(&state, &transfer_id).await;
+    let ctl = register_transfer(&state, &transfer_id, &conn_id).await;
     let r = ssh::sftp::download(&app, &conn, &ctl, &remote_path, &local_path, &transfer_id).await;
     unregister_transfer(&state, &transfer_id).await;
     r
@@ -389,7 +410,7 @@ async fn sftp_upload(
     transfer_id: String,
 ) -> Result<String> {
     let conn = get_conn(&state, &conn_id).await?;
-    let ctl = register_transfer(&state, &transfer_id).await;
+    let ctl = register_transfer(&state, &transfer_id, &conn_id).await;
     let r = ssh::sftp::upload(&app, &conn, &ctl, &local_path, &remote_dir, &transfer_id).await;
     unregister_transfer(&state, &transfer_id).await;
     r
@@ -409,7 +430,7 @@ async fn sftp_copy_remote(
 ) -> Result<String> {
     let src = get_conn(&state, &src_conn_id).await?;
     let dst = get_conn(&state, &dst_conn_id).await?;
-    let ctl = register_transfer(&state, &transfer_id).await;
+    let ctl = register_transfer(&state, &transfer_id, &src_conn_id).await;
     let r = ssh::sftp::copy_remote(&app, &src, &dst, &ctl, &src_path, &dst_dir, &transfer_id).await;
     unregister_transfer(&state, &transfer_id).await;
     r
@@ -638,6 +659,7 @@ pub fn run() {
             session_set,
             ssh_connect,
             ssh_disconnect,
+            conn_has_transfers,
             pane_open,
             pane_open_local,
             pane_input,

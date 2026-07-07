@@ -956,17 +956,20 @@ async function bootstrap() {
     scheduleSaveSession();
   };
 
-  // 窗口关闭：统一走 onCloseRequested——busy pane 弹确认防误关，关闭前 flush session
-  // 并释放 slot。preventDefault 后手动 destroy，否则窗口关不掉。
-  await win.onCloseRequested(async (event) => {
-    event.preventDefault();
-    if (tabs.tabs.some((t) => tabs.hasBusyPane(t))) {
-      const ok = await confirmDialog(
-        "退出 HetuShell",
-        "有标签页中可能有程序正在运行，确定退出吗？",
-      );
-      if (!ok) return; // 用户取消，窗口保持
-    }
+  // 关闭流程：确认 → flush session → destroy。btn-close（win.close）与系统关闭
+  // （Alt+F4 / 任务栏右键）都走 onCloseRequested，统一由 performClose 处理。
+  // closing flag 防重入：快速重复触发或 confirm 期间再次关闭时只执行一次，
+  // 用户取消时重置以便下次再触发。
+  let closing = false;
+  const performClose = async (): Promise<void> => {
+    if (closing) return;
+    closing = true;
+    const busy = tabs.tabs.some((t) => tabs.hasBusyPane(t));
+    const ok = await confirmDialog(
+      "退出 HetuShell",
+      busy ? "有标签页中可能有程序正在运行，确定退出吗？" : "确定要退出 HetuShell 吗？",
+    );
+    if (!ok) { closing = false; return; } // 用户取消，窗口保持
     // flush 待保存的 session：取消 debounce 定时器，立即写一次并等其落盘
     if (saveTimer !== undefined) {
       window.clearTimeout(saveTimer);
@@ -975,6 +978,15 @@ async function bootstrap() {
     await snapshotSession();
     await api.sessionRelease().catch(() => {});
     await win.destroy();
+  };
+
+  // 窗口关闭：onCloseRequested 拦截系统关闭与 btn-close 的 win.close()。
+  // preventDefault 后用 setTimeout(0) 把 performClose 移出 listen 回调上下文——
+  // snapshotSession/sessionRelease/destroy 均为 IPC invoke，在 listen 回调的
+  // await 链内串行调用会阻塞，导致 destroy 永不执行，窗口关不掉。
+  await win.onCloseRequested((event) => {
+    event.preventDefault();
+    setTimeout(() => void performClose(), 0);
   });
 
   // 标识连接：当前标签页每个终端中央浮层显示 连接名 + 地址，5 秒后淡出

@@ -429,9 +429,19 @@ export class TabManager {
   gcConnections(candidates: string[]): void {
     for (const cid of new Set(candidates)) {
       if (cid !== "local" && !this.connInUse(cid)) {
-        void api.sshDisconnect(cid).catch(() => {});
-        this.onConnClosed?.(cid);
+        // 异步断开：有活跃传输时后端 sshDisconnect 会拒绝，此时不调 onConnClosed
+        // （保留 connMeta，传输完成后再由后续 gcConnections 回收）
+        void this.tryDisconnect(cid);
       }
+    }
+  }
+
+  private async tryDisconnect(cid: string): Promise<void> {
+    try {
+      await api.sshDisconnect(cid);
+      this.onConnClosed?.(cid);
+    } catch {
+      // 有活跃传输或已断开：保留 connMeta，传输完成后由下次 gcConnections 回收
     }
   }
 

@@ -66,8 +66,8 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  /* 底部留 2px 内填充：终端内容不贴死窗口下缘，避免显得紧蹙 */
-  padding-bottom: 2px;
+  /* 底部留 3px 内填充：终端内容不贴死窗口下缘，避免显得紧蹙 */
+  padding-bottom: 3px;
   /* 磨砂质感层（::before, z-index:-1）的定位与层叠基准 */
   position: relative;
   isolation: isolate;
@@ -220,7 +220,7 @@ body {
   /* 未选中标签不降字体亮度（保持清晰可读）；选中态靠背景与顶部强调条区分 */
   opacity: 1;
   white-space: nowrap;
-  transition: opacity 0.15s, background 0.15s;
+  transition: opacity 0.15s, background 0.15s, margin 0.18s ease, transform 0.15s ease;
   /* 顶部圆角、底部与终端对接不做圆角 */
   border-radius: var(--radius-tab) var(--radius-tab) 0 0;
   position: relative;
@@ -248,20 +248,34 @@ body {
   background: var(--accent);
 }
 
-/* 拖拽换位指示：dragging 半透明；drop-left/right 在对应侧显示强调线 */
-.tab.dragging { opacity: 0.4; }
+/* 拖拽换位指示：
+ * dragging 半透明 + 微缩；drop-left/right 目标 tab 通过 margin 让位腾出空隙，
+ * 空隙中显示带阴影的脉动强调条（3px 宽 + 呼吸动画），反馈比静态细线更明显。 */
+.tab.dragging {
+  opacity: 0.35;
+  transform: scale(0.96);
+}
+.tab.drop-left { margin-left: 6px; }
+.tab.drop-right { margin-right: 6px; }
 .tab.drop-left::before,
 .tab.drop-right::before {
   content: "";
   position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 2px;
+  top: 2px;
+  bottom: 2px;
+  width: 3px;
   background: var(--accent);
-  z-index: 1;
+  border-radius: 2px;
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 70%, transparent);
+  z-index: 2;
+  animation: drop-pulse 0.9s ease-in-out infinite alternate;
 }
-.tab.drop-left::before { left: -1px; }
-.tab.drop-right::before { right: -1px; }
+.tab.drop-left::before { left: -4px; }
+.tab.drop-right::before { right: -4px; }
+@keyframes drop-pulse {
+  from { opacity: 0.55; transform: scaleY(0.92); }
+  to   { opacity: 1;    transform: scaleY(1); }
+}
 
 /* 直角样式：标签也是直角，指示条回到底部 */
 :root[data-radius="square"] .tab {

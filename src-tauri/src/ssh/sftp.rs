@@ -2,6 +2,7 @@
 //! SFTP 会话在连接上懒创建并缓存，连接重建后自动失效重建。
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use base64::Engine;
 use russh::ChannelMsg;
@@ -14,6 +15,31 @@ use tokio::sync::watch;
 use crate::error::{Error, Result};
 use crate::ssh::conn::Connection;
 
+/// SFTP 单次操作超时：防止连接半断开（TCP 未检测到）时操作永久挂起
+const SFTP_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// SFTP 操作包装宏：带超时 + 失败重试一次。
+/// 首次失败（错误或超时）→ invalidate session → 重建 → 重试一次。
+/// $body 须返回 Result<T, E>（E: Into<Error>）。
+macro_rules! sftp_with_retry {
+    ($conn:expr, $sftp:ident, $body:expr) => {{
+        let $sftp = session($conn).await?;
+        match tokio::time::timeout(SFTP_TIMEOUT, async { $body }).await {
+            Ok(Ok(v)) => v,
+            _ => {
+                // 失败或超时：invalidate + 重建 session + 重试一次
+                invalidate($conn).await;
+                let $sftp = session($conn).await?;
+                match tokio::time::timeout(SFTP_TIMEOUT, async { $body }).await {
+                    Ok(Ok(v)) => v,
+                    Ok(Err(e)) => return Err(e.into()),
+                    Err(_) => return Err(Error::msg("SFTP 操作超时（超过 10 秒）")),
+                }
+            }
+        }
+    }};
+}
+
 // ---------- 传输控制（暂停/继续/取消）----------
 
 pub const T_RUNNING: u8 = 0;
@@ -24,14 +50,21 @@ pub const T_CANCELLED: u8 = 2;
 /// 由 transfer_pause/resume/cancel 命令改写状态，传输循环在每块前过 `gate` 响应。
 /// 用 watch 通道而非 Notify，天然避免「检查—唤醒」之间的丢失唤醒。
 pub struct TransferCtl {
+    /// 关联的连接 id：用于查询连接是否有活跃传输，ssh_disconnect 时保护
+    conn_id: String,
     tx: watch::Sender<u8>,
 }
 
 impl TransferCtl {
-    pub fn new() -> Self {
+    pub fn new(conn_id: String) -> Self {
         Self {
+            conn_id,
             tx: watch::channel(T_RUNNING).0,
         }
+    }
+
+    pub fn conn_id(&self) -> &str {
+        &self.conn_id
     }
 
     /// 状态跃迁：allow_from 指定的当前态才可切到 to（None 表示除 to 外的任意态皆可）。
@@ -107,17 +140,16 @@ impl TransferCtl {
     }
 }
 
-impl Default for TransferCtl {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 /// 获取（或懒创建）该连接的 SFTP 会话
 pub async fn session(conn: &Arc<Connection>) -> Result<Arc<SftpSession>> {
     let mut guard = conn.sftp.lock().await;
     if let Some(s) = guard.as_ref() {
-        return Ok(s.clone());
+        // 连接已断时主动失效缓存 session，避免用失效 session 操作后才失败
+        if !conn.is_alive().await {
+            *guard = None;
+        } else {
+            return Ok(s.clone());
+        }
     }
     let channel = {
         let hguard = conn.handle.lock().await;
@@ -163,15 +195,9 @@ fn perms_string(mode: u32) -> String {
 }
 
 pub async fn stat(conn: &Arc<Connection>, path: &str) -> Result<FileMeta> {
-    let sftp = session(conn).await?;
-    let attrs = match sftp.metadata(path).await {
-        Ok(a) => a,
-        Err(e) => {
-            // 会话可能已随断线失效；失效缓存后原样报错，前端静默处理
-            invalidate(conn).await;
-            return Err(e.into());
-        }
-    };
+    let attrs = sftp_with_retry!(conn, sftp, {
+        sftp.metadata(path).await
+    });
     let mode = attrs.permissions.unwrap_or(0);
     Ok(FileMeta {
         path: path.to_string(),
@@ -201,14 +227,9 @@ pub struct RemoteEntry {
 /// 列出远端目录条目（read_dir 迭代器已自动跳过 . 与 ..）。
 /// 排序：目录在前，随后按名称不区分大小写升序，观感与本地面板一致。
 pub async fn list(conn: &Arc<Connection>, path: &str) -> Result<Vec<RemoteEntry>> {
-    let sftp = session(conn).await?;
-    let rd = match sftp.read_dir(path).await {
-        Ok(rd) => rd,
-        Err(e) => {
-            invalidate(conn).await;
-            return Err(e.into());
-        }
-    };
+    let rd = sftp_with_retry!(conn, sftp, {
+        sftp.read_dir(path).await
+    });
     let mut out: Vec<RemoteEntry> = rd
         .map(|entry| {
             let attrs = entry.metadata();
@@ -358,7 +379,11 @@ async fn download_file(
 ) -> Result<()> {
     let mut src = sftp.open(remote).await?;
     let mut dst = tokio::fs::File::create(local).await?;
-    let mut buf = vec![0u8; 64 * 1024];
+    // 256KB 块：减少 SFTP read 请求往返次数（64KB→256KB 约减 4 倍往返）
+    let mut buf = vec![0u8; 256 * 1024];
+    // 进度节流：每 1MB 发一次，避免高频 IPC 拖慢传输（100MB 文件 1600 次→100 次）
+    let mut last_emit = 0u64;
+    const PROGRESS_INTERVAL: u64 = 1024 * 1024;
     loop {
         // 每块前过闸门：暂停则挂起，取消则中止并清理半成品文件
         if let Err(e) = ctl.gate().await {
@@ -381,7 +406,10 @@ async fn download_file(
         }
         dst.write_all(&buf[..n]).await?;
         *done += n as u64;
-        emit_progress(app, transfer_id, label, *done, total, "download");
+        if *done >= last_emit + PROGRESS_INTERVAL {
+            emit_progress(app, transfer_id, label, *done, total, "download");
+            last_emit = *done;
+        }
     }
     dst.flush().await?;
     Ok(())
@@ -401,7 +429,10 @@ async fn upload_file(
 ) -> Result<()> {
     let mut src = tokio::fs::File::open(local).await?;
     let mut dst = sftp.create(remote).await?;
-    let mut buf = vec![0u8; 64 * 1024];
+    // 256KB 块 + 进度节流（与 download_file 一致）
+    let mut buf = vec![0u8; 256 * 1024];
+    let mut last_emit = 0u64;
+    const PROGRESS_INTERVAL: u64 = 1024 * 1024;
     loop {
         // 每块前过闸门：暂停则挂起，取消则中止并清理半成品远端文件
         if let Err(e) = ctl.gate().await {
@@ -433,7 +464,10 @@ async fn upload_file(
             r = dst.write_all(&buf[..n]) => r?,
         }
         *done += n as u64;
-        emit_progress(app, transfer_id, label, *done, total, "upload");
+        if *done >= last_emit + PROGRESS_INTERVAL {
+            emit_progress(app, transfer_id, label, *done, total, "upload");
+            last_emit = *done;
+        }
     }
     dst.flush().await?;
     dst.shutdown().await?;
@@ -673,26 +707,16 @@ pub async fn upload(
 /// 通过 /proc/<pid>/cwd 解析远端 shell 的实时工作目录（Linux）。
 /// realpath 解析该符号链接即得 shell 当前 cwd，无需 OSC7 或持续上报。
 pub async fn proc_cwd(conn: &Arc<Connection>, pid: u32) -> Result<String> {
-    let sftp = session(conn).await?;
-    match sftp.canonicalize(format!("/proc/{pid}/cwd")).await {
-        Ok(p) => Ok(p),
-        Err(e) => {
-            invalidate(conn).await;
-            Err(e.into())
-        }
-    }
+    Ok(sftp_with_retry!(conn, sftp, {
+        sftp.canonicalize(format!("/proc/{pid}/cwd")).await
+    }))
 }
 
 /// 远端 home 目录（用于 cwd 兜底）
 pub async fn home(conn: &Arc<Connection>) -> Result<String> {
-    let sftp = session(conn).await?;
-    match sftp.canonicalize(".").await {
-        Ok(p) => Ok(p),
-        Err(e) => {
-            invalidate(conn).await;
-            Err(e.into())
-        }
-    }
+    Ok(sftp_with_retry!(conn, sftp, {
+        sftp.canonicalize(".").await
+    }))
 }
 
 // ---------- 远程 → 远程复制（面板条目拖到远程终端）----------
