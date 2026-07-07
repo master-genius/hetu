@@ -425,6 +425,8 @@ export function showSettingsDialog() {
           <label class="check"><input name="frosted" type="checkbox"> 磨砂质感（同色系细颗粒，独立于毛玻璃）</label>
           <label>磨砂程度 <span class="frost-val"></span>
             <input name="frostStrength" type="range" min="0" max="100" step="1"></label>
+          <label>还原尺寸 <span class="restore-size-val"></span>
+            <input name="restoreSize" type="range" min="35" max="90" step="1"></label>
           <div class="settings-field">
             <span>界面圆角</span>
             <div class="radius-picker"></div>
@@ -483,6 +485,8 @@ export function showSettingsDialog() {
   input("frosted").checked = s.frosted;
   input("frostStrength").value = String(s.frostStrength);
   q<HTMLElement>(".frost-val").textContent = `${s.frostStrength}%`;
+  input("restoreSize").value = String(s.restoreSize);
+  q<HTMLElement>(".restore-size-val").textContent = `${s.restoreSize}%`;
   input("autoReconnect").checked = s.autoReconnect;
   input("copyOnSelect").checked = s.copyOnSelect;
   input("showScrollbar").checked = s.showScrollbar;
@@ -750,6 +754,7 @@ export function showSettingsDialog() {
       blurAmount: parseFloat(input("blurAmount").value),
       frosted: input("frosted").checked,
       frostStrength: parseInt(input("frostStrength").value, 10) || 0,
+      restoreSize: parseInt(input("restoreSize").value, 10) || 78,
       newTabMode: newTabModeSel.getValue() as "local" | "dialog",
       autoReconnect: input("autoReconnect").checked,
       copyOnSelect: input("copyOnSelect").checked,
@@ -787,6 +792,10 @@ export function showSettingsDialog() {
   });
   input("frostStrength").addEventListener("input", () => {
     q<HTMLElement>(".frost-val").textContent = `${input("frostStrength").value}%`;
+    debouncedCommit();
+  });
+  input("restoreSize").addEventListener("input", () => {
+    q<HTMLElement>(".restore-size-val").textContent = `${input("restoreSize").value}%`;
     debouncedCommit();
   });
 

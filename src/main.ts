@@ -5,7 +5,7 @@ import "./fonts.css";
 import "./styles.css";
 
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { api, events } from "./ipc";
 import { loadSettings, getSettings, onSettingsChange, activeTheme, fontStack } from "./settings";
 import { TabManager, type Tab } from "./tabs";
@@ -354,8 +354,16 @@ async function bootstrap() {
   void events.onPaneClosed((e) => {
     const found = tabs.findPane(e.paneId);
     if (!found) return;
-    // 正常退出（用户 exit）→ 收起该分屏；连接断开则保留等待重连
-    if (e.exited) void tabs.closePane(found.tab, found.pane);
+    if (e.exited) {
+      // 远程 shell 正常退出（用户 exit）→ 退回本地终端，不关闭 pane
+      if (!found.pane.isLocal) {
+        found.pane.switchConnection("local").catch(() => {});
+      } else {
+        // 本地终端退出 → 收起该分屏
+        void tabs.closePane(found.tab, found.pane);
+      }
+    }
+    // 连接断开（exited=false）→ 保留等待重连
   });
 
   void events.onConnState((e) => {
@@ -749,7 +757,7 @@ async function bootstrap() {
 
   const win = getCurrentWindow();
   // 最大化状态同步到 html data 属性，CSS 据此切换圆角（最大化时圆角变直角填满窗口，
-  // 避免透明窗口四角露出桌面小孔）
+  // 避免透明窗口四角露出桌面小孔）。
   const syncMaximized = async () => {
     document.documentElement.dataset.maximized = (await win.isMaximized()) ? "1" : "0";
   };
@@ -757,7 +765,18 @@ async function bootstrap() {
   void win.onResized(() => void syncMaximized());
   document.getElementById("btn-about")!.addEventListener("click", showAboutDialog);
   document.getElementById("btn-min")!.addEventListener("click", () => void win.minimize());
-  document.getElementById("btn-max")!.addEventListener("click", () => void win.toggleMaximize());
+  document.getElementById("btn-max")!.addEventListener("click", async () => {
+    const wasMaximized = await win.isMaximized();
+    await win.toggleMaximize();
+    if (wasMaximized) {
+      // 从最大化还原：按设置项的屏幕占比设置窗口尺寸（保持屏幕宽高比）
+      const pct = Math.min(90, Math.max(35, getSettings().restoreSize)) / 100;
+      const factor = await win.scaleFactor().catch(() => 1);
+      const sw = Math.round(window.screen.availWidth * factor * pct);
+      const sh = Math.round(window.screen.availHeight * factor * pct);
+      await win.setSize(new LogicalSize(sw, sh)).catch(() => {});
+    }
+  });
   // 关闭按钮触发 onCloseRequested，确认对话框与 session flush 统一在那里处理
   document.getElementById("btn-close")!.addEventListener("click", () => void win.close());
 

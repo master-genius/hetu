@@ -70,6 +70,8 @@ export interface Settings {
   trackRemoteCwd: boolean;
   /** 记住最后的会话：下次启动自动重开并连接 */
   restoreSession: boolean;
+  /** 窗口还原尺寸（屏幕占比百分比 35-90，默认 78） */
+  restoreSize: number;
   /** 自定义快捷键：动作 → 组合键（仅存覆盖项） */
   keybindings: Record<string, string>;
 }
