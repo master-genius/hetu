@@ -291,7 +291,16 @@ export function applyThemeToUI(
   const bg = theme.colors.background ?? "#10151c";
   const fg = theme.colors.foreground ?? "#d8dee9";
   const chromeAlpha = Math.min(1, opacity + 0.05);
-  const panelAlpha = Math.min(1, opacity + 0.02);
+  // 文件面板透明度自适应：低透明度时略高（+2%）保持可用性，
+  // 高透明度时略低（-2%）保持通透美感，中间范围与主窗口一致
+  let panelAlpha: number;
+  if (opacity <= 0.42) {
+    panelAlpha = Math.min(1, opacity + 0.02);
+  } else if (opacity > 0.82) {
+    panelAlpha = Math.max(0, opacity - 0.02);
+  } else {
+    panelAlpha = opacity;
+  }
   root.dataset.base = theme.base;
   // 让原生控件（下拉列表、复选框、滚动条）跟随明暗，修正 select/option 白底看不清
   root.style.colorScheme = theme.base;
