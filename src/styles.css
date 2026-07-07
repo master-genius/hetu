@@ -81,6 +81,11 @@ body {
   overflow: hidden;
 }
 
+/* 最大化时圆角变直角，填满整个窗口区域（避免四角露出桌面小孔） */
+:root[data-maximized="1"] #app {
+  border-radius: 0;
+}
+
 /* ---------- 标题栏：左侧操作图标 + 拖拽区 + 右侧窗口控制 ---------- */
 
 #titlebar {
@@ -242,6 +247,21 @@ body {
   height: 2px;
   background: var(--accent);
 }
+
+/* 拖拽换位指示：dragging 半透明；drop-left/right 在对应侧显示强调线 */
+.tab.dragging { opacity: 0.4; }
+.tab.drop-left::before,
+.tab.drop-right::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  z-index: 1;
+}
+.tab.drop-left::before { left: -1px; }
+.tab.drop-right::before { right: -1px; }
 
 /* 直角样式：标签也是直角，指示条回到底部 */
 :root[data-radius="square"] .tab {

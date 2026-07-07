@@ -22,7 +22,7 @@ tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
-russh = "0.52"
+russh = "0.62"
 russh-sftp = "2"
 portable-pty = "0.9"
 base64 = "0.22"
@@ -31,6 +31,7 @@ thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
 glob = "0.3"
 window-vibrancy = "0.6"
+fs2 = "0.4"
 
 [profile.release]
 lto = true

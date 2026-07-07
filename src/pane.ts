@@ -107,6 +107,11 @@ export class Pane {
   private wheelPending = 0;
   /** 像素余数累积：缓慢双指滚的亚行级 deltaY 累到下一帧，避免「吞距离」 */
   private wheelPixelCarry = 0;
+  /** 远程应用是否启用了鼠标模式（DECSET 1000/1002/1003）。
+   *  wheel 处理据此判断：鼠标模式开时让 xterm.js 处理滚轮（发转义序列），不干预；
+   *  关时由我们转 <C-E>/<C-Y>。避免依赖 e.defaultPrevented——xterm 在 alternate screen
+   *  可能即使无 scrollback 也 preventDefault wheel，导致我们的处理被误跳过。 */
+  private mouseMode = false;
 
   onFocus: (() => void) | null = null;
   /** 全局快捷键分发：返回 true 表示已处理（不透传给 shell） */
@@ -119,7 +124,7 @@ export class Pane {
   /** Ctrl+拖拽终端中的文件/目录（拖到文件管理器下载） */
   onCtrlDragStart: ((path: string, e: DragEvent) => void) | null = null;
   /** 内建 hssh 命令：仅本地终端触发，宿主据此按「点面板」路径打开连接 */
-  onHssh: ((spec: HsshSpec) => void) | null = null;
+  onHssh: ((spec: HsshSpec, pane: Pane) => void) | null = null;
   /** hssh 来源校验令牌：随本地 shell 注入 $HSSH_TOKEN，OSC 载荷须回带一致值才受理，
    *  杜绝终端里被渲染的不可信内容伪造 hssh 序列诱导建连。每 pane 一枚随机值。 */
   private readonly hsshToken = crypto.randomUUID();
@@ -144,7 +149,8 @@ export class Pane {
       theme: { ...activeTheme().colors, background: "#00000000" } as never,
       allowTransparency: true,
       // 深色背景下按前景/背景对比自动微提亮细字，让 canvas 灰度 AA 的文字更"实"
-      minimumContrastRatio: 1.5,
+      // 1.58：在 1.5 基础上再提一档改善 Light 字细字发虚，又不至于像 2.0 那样洗白暗色 ANSI
+      minimumContrastRatio: 1.58,
     });
     this.fit = new FitAddon();
     this.term.loadAddon(this.fit);
@@ -171,7 +177,7 @@ export class Pane {
         // 不可信内容不知道该随机令牌 → 伪造序列一律被丢弃（失败关闭）。
         if (this.isLocal) {
           const spec = parseHssh(data);
-          if (spec && spec.tok && spec.tok === this.hsshToken) this.onHssh?.(spec);
+          if (spec && spec.tok && spec.tok === this.hsshToken) this.onHssh?.(spec, this);
         }
       } catch {
         /* 忽略：绝不因辅助命令影响终端本身 */
@@ -200,6 +206,21 @@ export class Pane {
       const pid = parseInt(data, 10);
       if (Number.isFinite(pid) && pid > 0) this.shellPid = pid;
       return true;
+    });
+
+    // 跟踪鼠标模式（DECSET ?1000/1002/1003 = 启用，DECRST = 禁用）：
+    // wheel 处理据此判断是否干预。返回 false 不阻止 xterm 默认处理（xterm 仍启用内部编码）。
+    this.term.parser.registerCsiHandler({ prefix: "?", final: "h" }, (params) => {
+      if (params[0] === 1000 || params[0] === 1002 || params[0] === 1003) {
+        this.mouseMode = true;
+      }
+      return false;
+    });
+    this.term.parser.registerCsiHandler({ prefix: "?", final: "l" }, (params) => {
+      if (params[0] === 1000 || params[0] === 1002 || params[0] === 1003) {
+        this.mouseMode = false;
+      }
+      return false;
     });
 
     // 复制即选中（可配置）
@@ -246,11 +267,11 @@ export class Pane {
       }
     });
     // Ctrl+拖拽文件/目录 → 拖到文件管理器下载到对应目录
+    // 无 ctrlHoverWord 时不 preventDefault：WebKitGTK 下 preventDefault(dragstart) 可能
+    // 停止后续 mousemove 派发，导致 xterm.js 文本选择无法扩展（只能选中首字符）
     this.element.addEventListener("dragstart", (e) => {
       if (this.ctrlHoverWord && this.onCtrlDragStart) {
         this.onCtrlDragStart(this.ctrlHoverWord, e);
-      } else {
-        e.preventDefault();
       }
     });
 
@@ -261,10 +282,11 @@ export class Pane {
     });
 
     // 备用屏幕（vim/less/man）下的滚轮 → 滚动键转换：
-    // xterm.js 在 alternate screen 无 scrollback 可滚时不会 preventDefault，
-    // 据此在冒泡阶段捕获，转为 vim/less 的视口滚动键发给应用程序。
-    // 若应用已开启鼠标模式（set mouse=a），xterm.js 先行 preventDefault → 此处不触发，
-    // 滚轮走原生鼠标转义序列，光标位置与可视区由应用自管。
+    // 通过 DECSET/DECRST 跟踪鼠标模式状态——
+    // - 鼠标模式开 + xterm.js 已处理（preventDefault）→ 让 xterm 发原生鼠标转义序列
+    // - 鼠标模式开但 xterm.js 未处理 → fallback 发 <C-E>/<C-Y>（vim 默认滚轮绑定即此）
+    // - 鼠标模式关 → 由我们转 <C-E>/<C-Y>
+    // 这样即使 xterm.js 在鼠标模式下未正确编码 wheel，vim 仍能滚动。
     //
     // 按键选择：发 <C-E>/<C-Y> 而非 ↑/↓。
     //  - vim 默认滚轮即绑定 <C-E>/<C-Y>（视口滚动，光标不动）；↑/↓ 在 normal 模式
@@ -276,7 +298,9 @@ export class Pane {
     this.element.addEventListener(
       "wheel",
       (e) => {
-        if (e.defaultPrevented) return;
+        // 鼠标模式开（vim set mouse=a 等）且 xterm.js 已处理（preventDefault）→ 让 xterm 发原生鼠标转义序列
+        // 鼠标模式开但 xterm.js 未处理（某些版本/场景下 wheel 不被编码）→ fallback 发 <C-E>/<C-Y>
+        if (this.mouseMode && e.defaultPrevented) return;
         if (this.term.buffer.active.type !== "alternate") return;
         e.preventDefault();
 

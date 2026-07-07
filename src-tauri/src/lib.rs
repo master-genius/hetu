@@ -4,6 +4,7 @@ mod cache;
 mod error;
 mod local;
 mod settings;
+mod slot;
 mod ssh;
 mod sshcfg;
 
@@ -29,6 +30,10 @@ pub struct AppState {
     profiles: Mutex<Vec<Profile>>,
     /// 进行中的传输：transfer_id → 控制句柄（暂停/继续/取消），传输结束即移除
     transfers: Mutex<HashMap<String, Arc<ssh::sftp::TransferCtl>>>,
+    /// 多实例 slot：持有对应 slots/<N>.lock 的 flock 到进程退出。
+    /// None = 未分配（session_acquire 前）；Some((slot, file)) = 已分配。
+    /// file drop 即释放锁，进程退出/崩溃内核自动回收。
+    slot: Mutex<Option<(usize, std::fs::File)>>,
 }
 
 type State<'a> = tauri::State<'a, AppState>;
@@ -54,7 +59,12 @@ async fn settings_get(state: State<'_>) -> Result<Settings> {
 async fn settings_set(state: State<'_>, settings: Settings) -> Result<()> {
     // 连接项已独立到 profiles.json，settings 不再包含它们，无需特殊保护
     let auto = settings.auto_reconnect;
-    settings::save(&settings)?;
+    // 跨进程文件锁保护写入，防多进程同时改设置互相覆盖
+    let s = settings.clone();
+    settings::update_locked::<Settings, _>(&settings::settings_path()?, |v| {
+        *v = s;
+        Ok(())
+    })?;
     *state.settings.lock().await = settings;
     // 自动重连开关改动后同步到所有存活连接（否则仅对新建连接生效）
     for conn in state.conns.lock().await.values() {
@@ -75,29 +85,71 @@ async fn profiles_list(state: State<'_>) -> Result<Vec<Profile>> {
 
 #[tauri::command]
 async fn profile_save(state: State<'_>, profile: Profile) -> Result<()> {
-    let mut profiles = state.profiles.lock().await;
-    profiles.retain(|p| p.id != profile.id);
-    profiles.push(profile);
-    settings::save_profiles(&profiles)
+    // 跨进程文件锁保护的读-改-写：从磁盘读最新值再改再写，防多进程并发增删互覆盖
+    let updated = settings::update_locked_return::<Vec<Profile>, _>(
+        &settings::profiles_path()?,
+        |profiles| {
+            profiles.retain(|p| p.id != profile.id);
+            profiles.push(profile);
+            Ok(())
+        },
+    )?;
+    *state.profiles.lock().await = updated;
+    Ok(())
 }
 
 #[tauri::command]
 async fn profile_delete(state: State<'_>, id: String) -> Result<()> {
-    let mut profiles = state.profiles.lock().await;
-    profiles.retain(|p| p.id != id);
-    settings::save_profiles(&profiles)
+    let updated = settings::update_locked_return::<Vec<Profile>, _>(
+        &settings::profiles_path()?,
+        |profiles| {
+            profiles.retain(|p| p.id != id);
+            Ok(())
+        },
+    )?;
+    *state.profiles.lock().await = updated;
+    Ok(())
 }
 
-// ---------- 会话（独立文件 session.json）----------
+// ---------- 会话（按 slot 分片：session-<slot>.json）----------
 
 #[tauri::command]
-fn session_get() -> Vec<SessionTab> {
-    settings::load_session()
+async fn session_acquire(state: State<'_>) -> Result<usize> {
+    let mut guard = state.slot.lock().await;
+    if let Some((slot, _)) = *guard {
+        // 已分配：返回现有 slot，防前端 bug 重复调用导致旧锁 fd 被覆盖释放
+        return Ok(slot);
+    }
+    let (slot, file) = slot::acquire_slot()?;
+    *guard = Some((slot, file));
+    Ok(slot)
 }
 
 #[tauri::command]
-fn session_set(tabs: Vec<SessionTab>) -> Result<()> {
-    settings::save_session(&tabs)
+async fn session_release(state: State<'_>) -> Result<()> {
+    // 显式释放（进程退出时内核也会自动释放 flock，此处供前端关闭流程调用）
+    *state.slot.lock().await = None;
+    Ok(())
+}
+
+#[tauri::command]
+async fn session_get(state: State<'_>) -> Result<Vec<SessionTab>> {
+    let guard = state.slot.lock().await;
+    let slot = guard
+        .as_ref()
+        .ok_or_else(|| Error::msg("slot 未分配"))?
+        .0;
+    Ok(settings::load_session(slot))
+}
+
+#[tauri::command]
+async fn session_set(tabs: Vec<SessionTab>, state: State<'_>) -> Result<()> {
+    let guard = state.slot.lock().await;
+    let slot = guard
+        .as_ref()
+        .ok_or_else(|| Error::msg("slot 未分配"))?
+        .0;
+    settings::save_session(slot, &tabs)
 }
 
 // ---------- 连接生命周期 ----------
@@ -547,6 +599,7 @@ pub fn run() {
             settings: Mutex::new(settings::load()),
             profiles: Mutex::new(settings::load_profiles()),
             transfers: Mutex::new(HashMap::new()),
+            slot: Mutex::new(None),
         })
         .setup(|app| {
             let window = app.get_webview_window("main").expect("main window");
@@ -579,6 +632,8 @@ pub fn run() {
             profiles_list,
             profile_save,
             profile_delete,
+            session_acquire,
+            session_release,
             session_get,
             session_set,
             ssh_connect,

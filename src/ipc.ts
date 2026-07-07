@@ -24,6 +24,8 @@ export const api = {
   profileSave: (profile: Profile) => invoke<void>("profile_save", { profile }),
   profileDelete: (id: string) => invoke<void>("profile_delete", { id }),
 
+  sessionAcquire: () => invoke<number>("session_acquire"),
+  sessionRelease: () => invoke<void>("session_release"),
   sessionGet: () => invoke<SessionTab[]>("session_get"),
   sessionSet: (tabs: SessionTab[]) => invoke<void>("session_set", { tabs }),
 

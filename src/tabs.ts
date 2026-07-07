@@ -64,6 +64,8 @@ export class TabManager {
   private tabBar: HTMLElement;
   private content: HTMLElement;
   private relabelScheduled = false;
+  /** 拖拽换位：当前被拖动的 tab id（dragstart 置位，dragend 清除） */
+  private draggedTabId: string | null = null;
 
   onTabContextMenu: ((e: MouseEvent, tab: Tab) => void) | null = null;
   onNewTabRequest: (() => void) | null = null;
@@ -212,10 +214,45 @@ export class TabManager {
       order,
     };
 
+    el.draggable = true;
     el.addEventListener("click", () => this.activate(tab.id));
     el.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       this.onTabContextMenu?.(e, tab);
+    });
+    // 拖拽换位：dragstart 记 id；dragover 按光标 X 判定插左/插右并显指示线；
+    // drop 完成数组与 DOM 重排；dragend/dragleave 清理指示类。
+    el.addEventListener("dragstart", (e) => {
+      this.draggedTabId = tab.id;
+      el.classList.add("dragging");
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", tab.id);
+      }
+    });
+    el.addEventListener("dragover", (e) => {
+      if (!this.draggedTabId || this.draggedTabId === tab.id) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+      const r = el.getBoundingClientRect();
+      const isLeft = e.clientX < r.left + r.width / 2;
+      el.classList.toggle("drop-left", isLeft);
+      el.classList.toggle("drop-right", !isLeft);
+    });
+    el.addEventListener("dragleave", () => {
+      el.classList.remove("drop-left", "drop-right");
+    });
+    el.addEventListener("drop", (e) => {
+      e.preventDefault();
+      el.classList.remove("drop-left", "drop-right");
+      if (!this.draggedTabId || this.draggedTabId === tab.id) return;
+      const r = el.getBoundingClientRect();
+      const isLeft = e.clientX < r.left + r.width / 2;
+      this.reorderTab(this.draggedTabId, tab.id, isLeft);
+    });
+    el.addEventListener("dragend", () => {
+      this.draggedTabId = null;
+      for (const t of this.tabs) t.el.classList.remove("dragging", "drop-left", "drop-right");
     });
 
     this.tabBar.insertBefore(el, this.tabBar.querySelector(".tab-add"));
@@ -277,6 +314,26 @@ export class TabManager {
     const addBtn = this.tabBar.querySelector(".tab-add");
     for (const t of this.tabs) this.tabBar.insertBefore(t.el, addBtn);
     for (const t of this.tabs) t.order = undefined; // 归位后清除，避免影响后续
+  }
+
+  /** 拖拽换位：把 srcId 标签移到 targetId 左侧或右侧，DOM 与数组同步，并触发会话快照 */
+  private reorderTab(srcId: string, targetId: string, beforeTarget: boolean): void {
+    if (srcId === targetId) return;
+    const srcIdx = this.tabs.findIndex((t) => t.id === srcId);
+    if (srcIdx < 0) return;
+    const [moved] = this.tabs.splice(srcIdx, 1);
+    const tgtIdx = this.tabs.findIndex((t) => t.id === targetId);
+    if (tgtIdx < 0) {
+      // 目标已不在：放回原位，保守不破坏现有顺序
+      this.tabs.splice(srcIdx, 0, moved);
+      return;
+    }
+    const insertAt = beforeTarget ? tgtIdx : tgtIdx + 1;
+    this.tabs.splice(insertAt, 0, moved);
+    // DOM 顺序对齐数组（标签数量小，全量重排最稳，与 reorderRestored 一致）
+    const addBtn = this.tabBar.querySelector(".tab-add");
+    for (const t of this.tabs) this.tabBar.insertBefore(t.el, addBtn);
+    this.onLayoutChange?.(); // 触发会话快照
   }
 
   /** 相对当前标签页切换（delta=+1 下一个 / -1 上一个，循环） */

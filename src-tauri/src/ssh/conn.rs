@@ -94,7 +94,8 @@ impl ClientHandler {
     }
 }
 
-/// 串行化 known_hosts 的整个「读-判-写」，避免并发连接互相覆盖已固定指纹。
+/// 线程级串行化 known_hosts 的「读-判-写」，避免同进程并发连接互相覆盖已固定指纹。
+/// （flock 是进程级锁，同进程内多线程不互斥，故仍需此 Mutex；跨进程互斥由文件锁提供）
 static HOSTS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 impl client::Handler for ClientHandler {
@@ -106,22 +107,43 @@ impl client::Handler for ClientHandler {
     ) -> std::result::Result<bool, Self::Error> {
         let key = format!("{}:{}", self.host, self.port);
         let fp = server_public_key.fingerprint(HashAlg::Sha256).to_string();
-        // 持锁期间全为同步文件 IO，无 .await，不会阻塞异步执行器
+        // 线程级锁：防同进程多 SSH 并发（flock 进程级，同进程内不互斥）
         let _guard = HOSTS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let mut db = match Self::load_hosts_db() {
-            Ok(db) => db,
-            // 指纹库损坏：安全起见拒绝连接，而非清空后重新信任（否则等于放行 MITM）
-            Err(()) => return Ok(false),
+        let path = match known_hosts_path() {
+            Ok(p) => p,
+            Err(_) => return Ok(false),
         };
-        match db.get(&key) {
-            Some(known) if *known == fp => Ok(true),
-            Some(_) => Ok(false), // 指纹变化，拒绝连接（防中间人）
-            None => {
-                db.insert(key, fp);
-                Self::save_hosts_db(&db);
-                Ok(true)
-            }
+        // 跨进程文件锁：防多进程并发连接新主机时互相覆盖已固定指纹
+        let lock_path = path.with_extension("json.lock");
+        let lock_file = match std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(&lock_path)
+        {
+            Ok(f) => f,
+            Err(_) => return Ok(false),
+        };
+        if fs2::FileExt::lock_exclusive(&lock_file).is_err() {
+            return Ok(false);
         }
+        let result = (|| {
+            let mut db = match Self::load_hosts_db() {
+                Ok(db) => db,
+                // 指纹库损坏：安全起见拒绝连接，而非清空后重新信任（否则等于放行 MITM）
+                Err(()) => return Ok(false),
+            };
+            match db.get(&key) {
+                Some(known) if *known == fp => Ok(true),
+                Some(_) => Ok(false), // 指纹变化，拒绝连接（防中间人）
+                None => {
+                    db.insert(key, fp);
+                    Self::save_hosts_db(&db);
+                    Ok(true) // 首次信任
+                }
+            }
+        })();
+        let _ = fs2::FileExt::unlock(&lock_file);
+        result
     }
 }
 

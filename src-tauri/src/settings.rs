@@ -1,6 +1,6 @@
 //! 应用设置与连接配置的持久化（JSON 文件，位于系统配置目录）。
 
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::path::PathBuf;
 
 use crate::error::{Error, Result};
@@ -108,7 +108,7 @@ pub struct Settings {
     pub ask_download_location: bool,
     /// 追踪远程工作目录（连接时注入隐形 PID 标记，用 /proc 读实时 cwd）
     pub track_remote_cwd: bool,
-    /// 记住最后的会话：下次启动自动重开并连接（默认关闭）
+    /// 记住最后的会话：下次启动自动重开并连接（默认开启，多实例下按 slot 分片恢复）
     pub restore_session: bool,
     /// 自定义快捷键：动作 → 组合键（仅存与默认不同的覆盖项）
     #[serde(default)]
@@ -147,7 +147,7 @@ impl Default for Settings {
             download_dir: String::new(),
             ask_download_location: false,
             track_remote_cwd: true,
-            restore_session: false,
+            restore_session: true,
             keybindings: std::collections::HashMap::new(),
         }
     }
@@ -170,7 +170,7 @@ pub struct SessionTab {
     pub layout: Option<serde_json::Value>,
 }
 
-fn config_dir() -> Result<PathBuf> {
+pub(crate) fn config_dir() -> Result<PathBuf> {
     let dir = dirs::config_dir()
         .ok_or_else(|| Error::msg("无法定位系统配置目录"))?
         .join("hetushell");
@@ -178,15 +178,21 @@ fn config_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
-fn settings_path() -> Result<PathBuf> {
+pub(crate) fn settings_path() -> Result<PathBuf> {
     Ok(config_dir()?.join("settings.json"))
 }
 
-fn profiles_path() -> Result<PathBuf> {
+pub(crate) fn profiles_path() -> Result<PathBuf> {
     Ok(config_dir()?.join("profiles.json"))
 }
 
-fn session_path() -> Result<PathBuf> {
+/// 多实例分片：每个进程的 session 存于 session-<slot>.json，互不覆盖
+pub(crate) fn session_path(slot: usize) -> Result<PathBuf> {
+    Ok(config_dir()?.join(format!("session-{}.json", slot)))
+}
+
+/// 旧版扁平 session.json 路径（仅迁移到分片格式时使用）
+fn legacy_session_path() -> Result<PathBuf> {
     Ok(config_dir()?.join("session.json"))
 }
 
@@ -243,6 +249,51 @@ fn write_json<T: Serialize>(path: &PathBuf, value: &T) -> Result<()> {
     Ok(())
 }
 
+/// 跨进程文件锁保护的读-改-写事务：flock 独占锁 → 读 → 改 → 写 → 释放。
+/// 防多进程并发修改共享配置（settings/profiles/known_hosts）导致 lost update。
+/// 原子写入已防"半写"，但 read-modify-write 仍需文件锁串行化，否则后写覆盖先写。
+pub(crate) fn update_locked<T, F>(path: &PathBuf, f: F) -> Result<()>
+where
+    T: DeserializeOwned + Default + Serialize,
+    F: FnOnce(&mut T) -> Result<()>,
+{
+    let lock_path = path.with_extension("json.lock");
+    let lock_file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(&lock_path)?;
+    fs2::FileExt::lock_exclusive(&lock_file)?;
+    let result = (|| {
+        let mut v: T = read_json_or_default(path);
+        f(&mut v)?;
+        write_json(path, &v)
+    })();
+    fs2::FileExt::unlock(&lock_file)?;
+    result
+}
+
+/// 同 update_locked，但返回修改后的值，供调用方同步内存缓存。
+pub(crate) fn update_locked_return<T, F>(path: &PathBuf, f: F) -> Result<T>
+where
+    T: DeserializeOwned + Default + Serialize,
+    F: FnOnce(&mut T) -> Result<()>,
+{
+    let lock_path = path.with_extension("json.lock");
+    let lock_file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(&lock_path)?;
+    fs2::FileExt::lock_exclusive(&lock_file)?;
+    let result = (|| {
+        let mut v: T = read_json_or_default(path);
+        f(&mut v)?;
+        write_json(path, &v)?;
+        Ok(v)
+    })();
+    fs2::FileExt::unlock(&lock_file)?;
+    result
+}
+
 // ---------- 连接项（独立文件 profiles.json）----------
 
 pub fn load_profiles() -> Vec<Profile> {
@@ -252,21 +303,34 @@ pub fn load_profiles() -> Vec<Profile> {
     }
 }
 
-pub fn save_profiles(profiles: &[Profile]) -> Result<()> {
-    write_json(&profiles_path()?, &profiles.to_vec())
-}
+// ---------- 会话（按 slot 分片：session-<slot>.json）----------
 
-// ---------- 会话（独立文件 session.json）----------
-
-pub fn load_session() -> Vec<SessionTab> {
-    match session_path() {
-        Ok(p) => read_json_or_default(&p),
+pub fn load_session(slot: usize) -> Vec<SessionTab> {
+    match session_path(slot) {
+        Ok(p) => {
+            // 首次升级到多实例分片：slot 0 且 session-0.json 不存在时，
+            // 从旧版扁平 session.json 迁移内容，原文件改名 .bak 保留
+            if slot == 0 && !p.exists() {
+                if let Ok(legacy) = legacy_session_path() {
+                    if legacy.exists() {
+                        if let Ok(content) = std::fs::read_to_string(&legacy) {
+                            if let Ok(tabs) = serde_json::from_str::<Vec<SessionTab>>(&content) {
+                                let _ = write_json(&p, &tabs);
+                                let _ = std::fs::rename(&legacy, legacy.with_extension("json.bak"));
+                                return tabs;
+                            }
+                        }
+                    }
+                }
+            }
+            read_json_or_default(&p)
+        }
         Err(_) => Vec::new(),
     }
 }
 
-pub fn save_session(tabs: &[SessionTab]) -> Result<()> {
-    write_json(&session_path()?, &tabs.to_vec())
+pub fn save_session(slot: usize, tabs: &[SessionTab]) -> Result<()> {
+    write_json(&session_path(slot)?, &tabs.to_vec())
 }
 
 pub fn load() -> Settings {
@@ -293,9 +357,4 @@ fn migrate(s: &mut Settings) {
     }
     // 终端不再全局施加字重，字重由字体名承载；归一化后此分支不再匹配
     s.font_weight = "normal".into();
-}
-
-pub fn save(settings: &Settings) -> Result<()> {
-    // 与 profiles/session 一致：原子写入 + 0600，避免半写导致 load() 判损后重置全部偏好
-    write_json(&settings_path()?, settings)
 }

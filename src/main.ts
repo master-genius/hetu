@@ -35,6 +35,9 @@ const PREVIEW_MAX_BYTES = 512 * 1024;
 
 async function bootstrap() {
   await loadSettings();
+  // 多实例 slot 分配：每个 hetushell 进程拿独立 slot，session 按 slot 分片持久化。
+  // 失败不阻塞启动（退化为本进程不持久化，不影响其它实例）。
+  await api.sessionAcquire().catch(() => {});
 
   // 等内置字体就绪再创建终端，避免 xterm 用回退字体测量出错误的单元格宽度。
   // 覆盖默认字体名（含「字重并入名字」别名），确保首帧用正确字体测量单元格。
@@ -138,13 +141,36 @@ async function bootstrap() {
   });
 
   /**
-   * 内建 hssh 命令入口（仅本地终端经 OSC 触发）。与「点连接面板」走同一条建连路径：
+   * 内建 hssh 命令入口（仅本地终端经 OSC 触发）。就地替换当前 pane 的连接（与右键
+   * 「切换连接」/连接图标弹窗同路径，走 switchPaneConnection，不新建标签页）：
    * - profile：密钥认证直连；密码认证不存密码 → 弹预填窗要密码。
    * - adhoc：给了密码/密钥则直连；都没给 → 弹预填窗询问。
-   * 稳定优先：任何异常仅 toast，不影响既有终端。
+   * 稳定优先：任何异常仅 toast，不影响既有终端；pane 已关闭则降级提示不做任何操作。
    */
-  const handleHssh = async (spec: HsshSpec) => {
+  const handleHssh = async (spec: HsshSpec, pane: Pane) => {
     try {
+      const found = tabs.findPane(pane.id);
+      if (!found) {
+        toast("hssh：当前终端已关闭", true);
+        return;
+      }
+      const { tab } = found;
+      // 替换当前 pane 的连接（复用已验证的 switchPaneConnection 路径，不新建标签）
+      const onConnect = async (params: ConnParams, profileId?: string | null) => {
+        const connId = await api.sshConnect(params);
+        recordConn(connId, params, profileId ?? null);
+        try {
+          await tabs.switchPaneConnection(tab, pane, connId, params.name);
+        } catch (err) {
+          // pane 已关闭或切换失败：回收刚建立的连接，避免泄漏
+          void api.sshDisconnect(connId).catch(() => {});
+          throw err;
+        }
+      };
+      const onLocal = async () => {
+        await tabs.switchPaneConnection(tab, pane, "local", "本地终端");
+      };
+
       if (spec.mode === "profile") {
         const profiles = await api.profilesList().catch(() => [] as Profile[]);
         const p = profiles.find((x) => x.name === spec.name);
@@ -153,9 +179,9 @@ async function bootstrap() {
           return;
         }
         if (p.auth === "password") {
-          showConnectDialog(connectAndOpenTabVoid, openLocalTabVoid, { kind: "profile", profile: p });
+          showConnectDialog(onConnect, onLocal, { kind: "profile", profile: p });
         } else {
-          await connectAndOpenTab(profileToParams(p), p.id);
+          await onConnect(profileToParams(p), p.id);
         }
         return;
       }
@@ -163,17 +189,17 @@ async function bootstrap() {
       const port = parseInt(spec.port, 10) || 22;
       const user = spec.user || "root";
       if (spec.password) {
-        await connectAndOpenTab(
+        await onConnect(
           { name: spec.host, host: spec.host, port, user, auth: "password", password: spec.password },
           null,
         );
       } else if (spec.identity) {
-        await connectAndOpenTab(
+        await onConnect(
           { name: spec.host, host: spec.host, port, user, auth: "key", keyPath: spec.identity },
           null,
         );
       } else {
-        showConnectDialog(connectAndOpenTabVoid, openLocalTabVoid, {
+        showConnectDialog(onConnect, onLocal, {
           kind: "adhoc",
           host: spec.host,
           user,
@@ -228,7 +254,7 @@ async function bootstrap() {
     // 终端聚焦时的按键先经全局快捷键分发（命中则不透传给 shell）
     pane.onAppKey = (e) => dispatchShortcut(e, pane);
     // 内建 hssh 命令（仅本地终端，Pane 内已按 isLocal 门控）
-    pane.onHssh = (spec) => void handleHssh(spec);
+    pane.onHssh = (spec, p) => void handleHssh(spec, p);
     pane.onTooltip = showFileTooltip;
     // Ctrl+单击文件/目录 → 下载（默认 Downloads / 每次询问，按设置）
     pane.onCtrlClick = (path) => void downloadFile(pane, path);
@@ -722,18 +748,18 @@ async function bootstrap() {
   // ---------- 窗口控制（自定义标题栏） ----------
 
   const win = getCurrentWindow();
+  // 最大化状态同步到 html data 属性，CSS 据此切换圆角（最大化时圆角变直角填满窗口，
+  // 避免透明窗口四角露出桌面小孔）
+  const syncMaximized = async () => {
+    document.documentElement.dataset.maximized = (await win.isMaximized()) ? "1" : "0";
+  };
+  await syncMaximized();
+  void win.onResized(() => void syncMaximized());
   document.getElementById("btn-about")!.addEventListener("click", showAboutDialog);
   document.getElementById("btn-min")!.addEventListener("click", () => void win.minimize());
   document.getElementById("btn-max")!.addEventListener("click", () => void win.toggleMaximize());
-  document.getElementById("btn-close")!.addEventListener("click", async () => {
-    const busy = tabs.tabs.some((t) => tabs.hasBusyPane(t));
-    const ok = await confirmDialog(
-      "退出 HetuShell",
-      busy ? "有标签页中可能有程序正在运行，确定退出吗？" : "确定要退出 HetuShell 吗？",
-    );
-    if (!ok) return;
-    await win.close();
-  });
+  // 关闭按钮触发 onCloseRequested，确认对话框与 session flush 统一在那里处理
+  document.getElementById("btn-close")!.addEventListener("click", () => void win.close());
 
   document.getElementById("btn-newtab")!.addEventListener("click", () => tabs.onNewTabRequest?.());
 
@@ -906,9 +932,9 @@ async function bootstrap() {
           a: snapLayout(n.a),
           b: snapLayout(n.b),
         };
-  const snapshotSession = () => {
+  const snapshotSession = (): Promise<void> => {
     // 未开启「记住最后的会话」时不写盘：既避免无谓写入，也不覆盖上次保存的会话
-    if (restoring || !getSettings().restoreSession) return;
+    if (restoring || !getSettings().restoreSession) return Promise.resolve();
     const snap = tabs.tabs.map((tab) => {
       const first = tab.layout.panes()[0];
       const info = first ? connMeta.get(first.connId) : undefined;
@@ -917,7 +943,7 @@ async function bootstrap() {
       if (!info || info.local) return { local: true, name: info?.name ?? "本地终端", layout };
       return { local: false, name: info.name, profileId: info.profileId ?? null, layout };
     });
-    void api.sessionSet(snap).catch(() => {});
+    return api.sessionSet(snap).catch(() => {});
   };
   let saveTimer: number | undefined;
   const scheduleSaveSession = () => {
@@ -929,6 +955,27 @@ async function bootstrap() {
     refreshPanels();
     scheduleSaveSession();
   };
+
+  // 窗口关闭：统一走 onCloseRequested——busy pane 弹确认防误关，关闭前 flush session
+  // 并释放 slot。preventDefault 后手动 destroy，否则窗口关不掉。
+  await win.onCloseRequested(async (event) => {
+    event.preventDefault();
+    if (tabs.tabs.some((t) => tabs.hasBusyPane(t))) {
+      const ok = await confirmDialog(
+        "退出 HetuShell",
+        "有标签页中可能有程序正在运行，确定退出吗？",
+      );
+      if (!ok) return; // 用户取消，窗口保持
+    }
+    // flush 待保存的 session：取消 debounce 定时器，立即写一次并等其落盘
+    if (saveTimer !== undefined) {
+      window.clearTimeout(saveTimer);
+      saveTimer = undefined;
+    }
+    await snapshotSession();
+    await api.sessionRelease().catch(() => {});
+    await win.destroy();
+  });
 
   // 标识连接：当前标签页每个终端中央浮层显示 连接名 + 地址，5 秒后淡出
   const identifyPanes = () => {
