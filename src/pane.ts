@@ -107,11 +107,6 @@ export class Pane {
   private wheelPending = 0;
   /** 像素余数累积：缓慢双指滚的亚行级 deltaY 累到下一帧，避免「吞距离」 */
   private wheelPixelCarry = 0;
-  /** 远程应用是否启用了鼠标模式（DECSET 1000/1002/1003）。
-   *  wheel 处理据此判断：鼠标模式开时让 xterm.js 处理滚轮（发转义序列），不干预；
-   *  关时由我们转 <C-E>/<C-Y>。避免依赖 e.defaultPrevented——xterm 在 alternate screen
-   *  可能即使无 scrollback 也 preventDefault wheel，导致我们的处理被误跳过。 */
-  private mouseMode = false;
 
   onFocus: (() => void) | null = null;
   /** 全局快捷键分发：返回 true 表示已处理（不透传给 shell） */
@@ -150,9 +145,13 @@ export class Pane {
       allowTransparency: true,
       // 深色背景下按前景/背景对比自动微提亮细字，让 canvas 灰度 AA 的文字更"实"
       // 1.6：在 1.58 基础上微提一档改善 Light 字细字发虚，又不至于像 2.0 那样洗白暗色 ANSI
+      // 高透明度（opacity<0.4）时降至 1.1：透明背景下 xterm 以黑色为基准算对比度，
+      // 过高的 MCR 会在高透场景产生白边
       // 浅色主题禁用：终端 background 设为透明(#00000000)，xterm 以黑色为基准算对比度，
       // 浅色主题下会误判（浅色 ANSI 色在"黑色"上对比度高、不调暗，实际白底上却看不清）
-      minimumContrastRatio: activeTheme().base === "dark" ? 1.6 : 1.0,
+      minimumContrastRatio: activeTheme().base === "dark"
+        ? (s.opacity < 0.4 ? 1.1 : 1.6)
+        : 1.0,
     });
     this.fit = new FitAddon();
     this.term.loadAddon(this.fit);
@@ -208,21 +207,6 @@ export class Pane {
       const pid = parseInt(data, 10);
       if (Number.isFinite(pid) && pid > 0) this.shellPid = pid;
       return true;
-    });
-
-    // 跟踪鼠标模式（DECSET ?1000/1002/1003 = 启用，DECRST = 禁用）：
-    // wheel 处理据此判断是否干预。返回 false 不阻止 xterm 默认处理（xterm 仍启用内部编码）。
-    this.term.parser.registerCsiHandler({ prefix: "?", final: "h" }, (params) => {
-      if (params[0] === 1000 || params[0] === 1002 || params[0] === 1003) {
-        this.mouseMode = true;
-      }
-      return false;
-    });
-    this.term.parser.registerCsiHandler({ prefix: "?", final: "l" }, (params) => {
-      if (params[0] === 1000 || params[0] === 1002 || params[0] === 1003) {
-        this.mouseMode = false;
-      }
-      return false;
     });
 
     // 复制即选中（可配置）
@@ -284,11 +268,12 @@ export class Pane {
     });
 
     // 备用屏幕（vim/less/man）下的滚轮 → 滚动键转换：
-    // 通过 DECSET/DECRST 跟踪鼠标模式状态——
-    // - 鼠标模式开 + xterm.js 已处理（preventDefault）→ 让 xterm 发原生鼠标转义序列
-    // - 鼠标模式开但 xterm.js 未处理 → fallback 发 <C-E>/<C-Y>（vim 默认滚轮绑定即此）
-    // - 鼠标模式关 → 由我们转 <C-E>/<C-Y>
-    // 这样即使 xterm.js 在鼠标模式下未正确编码 wheel，vim 仍能滚动。
+    // 使用 capture 阶段：xterm v6 的 xterm-scrollable-element 会在 bubble 阶段
+    // 调用 stopPropagation() 消费 wheel 事件，导致 bubble 监听器无法收到。
+    // capture 阶段在外层先执行，确保我们的 fallback 逻辑能运行。
+    //
+    // - 非备用屏幕（普通终端）→ 不干预，让 xterm 正常滚动
+    // - 备用屏幕 → 转为 <C-E>/<C-Y> 发送给 PTY（vim/less/man 均识别）
     //
     // 按键选择：发 <C-E>/<C-Y> 而非 ↑/↓。
     //  - vim 默认滚轮即绑定 <C-E>/<C-Y>（视口滚动，光标不动）；↑/↓ 在 normal 模式
@@ -300,11 +285,10 @@ export class Pane {
     this.element.addEventListener(
       "wheel",
       (e) => {
-        // 鼠标模式开（vim set mouse=a 等）且 xterm.js 已处理（preventDefault）→ 让 xterm 发原生鼠标转义序列
-        // 鼠标模式开但 xterm.js 未处理（某些版本/场景下 wheel 不被编码）→ fallback 发 <C-E>/<C-Y>
-        if (this.mouseMode && e.defaultPrevented) return;
         if (this.term.buffer.active.type !== "alternate") return;
+        // 备用屏幕：阻止 xterm-scrollable-element 的默认滚动行为
         e.preventDefault();
+        e.stopPropagation();
 
         let lines: number;
         switch (e.deltaMode) {
@@ -342,7 +326,7 @@ export class Pane {
           void api.paneInput(this.id, b64encode(key.repeat(Math.abs(clamped)))).catch(() => {});
         });
       },
-      { passive: false },
+      { capture: true, passive: false },
     );
 
     this.resizeObserver = new ResizeObserver(() => this.refit());

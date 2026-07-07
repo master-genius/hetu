@@ -160,26 +160,47 @@ body {
 
 /*
  * 玻璃内容层（终端背景真模糊）：backdrop-filter 够不到窗口外的桌面，
- * 所以自己垫「被模糊的内容」——全窗均匀的极淡随机噪声，再由上方玻璃面层真模糊。
- * 随机分布 → 无局部浓淡、无方向周期，不会在亮色背景上留下"水渍"斑或可辨网格。
- * 层级 -3：在玻璃面层(-2)、磨砂颗粒(-1)与所有内容之下、#app 半透明底色之上；
- * 剩余透明度仍透出桌面，与整窗透明不冲突。受「背景虚化」总开关控制。
+ * 所以自己垫「被模糊的内容」——用确定性的同色系文本点替代 canvas 随机噪声。
+ * 随机噪声 + blur 会产生统计性聚集（水渍）；确定性文本点经模糊后形成
+ * 均匀的钟形光晕，无水渍、无平铺接缝。受「背景虚化」总开关控制。
  */
-:root[data-glass="1"] #app::after {
-  content: "";
+:root[data-glass="1"] #glass-content {
+  display: block;
   position: absolute;
   inset: 0;
-  z-index: -3; /* 最后面：作为「玻璃后面的东西」，主要糊化交给上面的玻璃面层 */
+  z-index: -3; /* 在玻璃面层(-2)、磨砂颗粒(-1)与所有内容之下、#app 半透明底色之上 */
   pointer-events: none;
   border-radius: inherit;
-  /* 不用规则图案（交叉纹在亮色高透明下会显成可辨网格）——改为「极淡随机噪声」：
-     逐像素独立随机 → 无方向、无周期，永远不成网格；同色系、跟随主题（themes.ts
-     写入 --glass-noise）。轻预柔化把颗粒揉成均匀雾面，再由上方玻璃面层真模糊。 */
-  filter: blur(7px);
-  background-color: transparent;
-  background-image: var(--glass-noise, none);
-  background-size: 128px 128px;
+  overflow: hidden;
 }
+
+:root[data-glass="1"] #glass-content .gc-dot {
+  position: absolute;
+  font-size: 4px;
+  line-height: 1;
+  color: color-mix(in srgb, var(--term-fg) 12%, var(--term-bg));
+  filter: blur(4px);
+}
+
+/* 4×4 网格：16 个点均匀分布，模糊后覆盖全屏 */
+:root[data-glass="1"] #glass-content .gc-dot:nth-child(1) { top: 12.5%; left: 12.5%; }
+:root[data-glass="1"] #glass-content .gc-dot:nth-child(2) { top: 12.5%; left: 37.5%; }
+:root[data-glass="1"] #glass-content .gc-dot:nth-child(3) { top: 12.5%; left: 62.5%; }
+:root[data-glass="1"] #glass-content .gc-dot:nth-child(4) { top: 12.5%; left: 87.5%; }
+:root[data-glass="1"] #glass-content .gc-dot:nth-child(5) { top: 37.5%; left: 12.5%; }
+:root[data-glass="1"] #glass-content .gc-dot:nth-child(6) { top: 37.5%; left: 37.5%; }
+:root[data-glass="1"] #glass-content .gc-dot:nth-child(7) { top: 37.5%; left: 62.5%; }
+:root[data-glass="1"] #glass-content .gc-dot:nth-child(8) { top: 37.5%; left: 87.5%; }
+:root[data-glass="1"] #glass-content .gc-dot:nth-child(9) { top: 62.5%; left: 12.5%; }
+:root[data-glass="1"] #glass-content .gc-dot:nth-child(10) { top: 62.5%; left: 37.5%; }
+:root[data-glass="1"] #glass-content .gc-dot:nth-child(11) { top: 62.5%; left: 62.5%; }
+:root[data-glass="1"] #glass-content .gc-dot:nth-child(12) { top: 62.5%; left: 87.5%; }
+:root[data-glass="1"] #glass-content .gc-dot:nth-child(13) { top: 87.5%; left: 12.5%; }
+:root[data-glass="1"] #glass-content .gc-dot:nth-child(14) { top: 87.5%; left: 37.5%; }
+:root[data-glass="1"] #glass-content .gc-dot:nth-child(15) { top: 87.5%; left: 62.5%; }
+:root[data-glass="1"] #glass-content .gc-dot:nth-child(16) { top: 87.5%; left: 87.5%; }
+
+#glass-content { display: none; }
 
 /*
  * 玻璃面层（#glass-veil，真实 div 以获得独立于两个伪元素的层级）：
@@ -469,26 +490,26 @@ body {
   height: 0;
 }
 
-/* 自定义滚动条：默认 3px 极细，鼠标悬停于终端区域时加宽至 7px 方便操作 */
+/* 自定义滚动条：默认 2px 极细，鼠标悬停于终端区域时加宽至 5px 方便操作 */
 .xterm .xterm-scrollable-element > .scrollbar.vertical {
-  width: 3px !important;
+  width: 2px !important;
   transition: width 0.15s ease !important;
 }
 .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider {
   background: color-mix(in srgb, var(--term-fg) 30%, transparent) !important;
-  border-radius: 3px !important;
-  width: 3px !important;
+  border-radius: 2px !important;
+  width: 2px !important;
   left: 0 !important;
 }
 .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider:hover {
   background: color-mix(in srgb, var(--term-fg) 50%, transparent) !important;
 }
 .xterm .xterm-scrollable-element:hover > .scrollbar.vertical {
-  width: 7px !important;
+  width: 5px !important;
 }
 .xterm .xterm-scrollable-element:hover > .scrollbar.vertical > .slider {
-  width: 7px !important;
-  border-radius: 7px !important;
+  width: 5px !important;
+  border-radius: 5px !important;
 }
 
 /* 设置「显示终端滚动条」关闭时隐藏自定义滚动条（内容仍可滚轮/键盘滚动） */

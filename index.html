@@ -7,6 +7,13 @@
   </head>
   <body>
     <div id="app">
+      <!-- 玻璃内容层：替代 canvas 随机噪声，用同色系文本点提供可模糊内容，消除水渍 -->
+      <div id="glass-content" aria-hidden="true">
+        <span class="gc-dot"></span><span class="gc-dot"></span><span class="gc-dot"></span><span class="gc-dot"></span>
+        <span class="gc-dot"></span><span class="gc-dot"></span><span class="gc-dot"></span><span class="gc-dot"></span>
+        <span class="gc-dot"></span><span class="gc-dot"></span><span class="gc-dot"></span><span class="gc-dot"></span>
+        <span class="gc-dot"></span><span class="gc-dot"></span><span class="gc-dot"></span><span class="gc-dot"></span>
+      </div>
       <!-- 玻璃面层：盖在光晕内容层之上的"玻璃本体"（backdrop-filter 真模糊 + 主题色奶膜） -->
       <div id="glass-veil" aria-hidden="true"></div>
       <header id="titlebar" data-tauri-drag-region>

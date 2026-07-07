@@ -242,8 +242,6 @@ export function allThemes(custom: ThemeDef[]): ThemeDef[] {
  * alpha 由「磨砂程度」设置换算而来。按 (背景色, alpha) 缓存，换主题/调程度
  * 时才重新生成。
  */
-/** 玻璃内容层随机噪声的固定颗粒透明度（很低，仅供玻璃层模糊，不喧宾夺主）。 */
-const GLASS_NOISE_ALPHA = 10;
 
 const frostCache = new Map<string, string>();
 export function frostNoiseUrl(bg: string, alpha: number): string {
@@ -291,13 +289,13 @@ export function applyThemeToUI(
   const bg = theme.colors.background ?? "#10151c";
   const fg = theme.colors.foreground ?? "#d8dee9";
   const chromeAlpha = Math.min(1, opacity + 0.05);
-  // 文件面板透明度自适应：低透明度时略高（+2%）保持可用性，
-  // 高透明度时略低（-2%）保持通透美感，中间范围与主窗口一致
+  // 文件面板透明度自适应：低透明度时略高（+4%）保持可用性，
+  // 高透明度时略低（-4%）保持通透美感，中间范围与主窗口一致
   let panelAlpha: number;
   if (opacity <= 0.42) {
-    panelAlpha = Math.min(1, opacity + 0.02);
+    panelAlpha = Math.min(1, opacity + 0.04);
   } else if (opacity > 0.82) {
-    panelAlpha = Math.max(0, opacity - 0.02);
+    panelAlpha = Math.max(0, opacity - 0.04);
   } else {
     panelAlpha = opacity;
   }
@@ -324,9 +322,8 @@ export function applyThemeToUI(
   // 使整体"发蓝"。此处保持中性，忠实呈现主题黑色（弹窗模糊另有各自的 saturate）。
   root.style.setProperty("--bg-blur", bgOn ? `blur(${px}px)` : "none");
   root.dataset.glass = bgOn ? "1" : "0";
-  // 玻璃内容层的"可模糊内容"：极淡随机噪声（跟随主题背景取色）。随机 → 无方向、
-  // 无周期，永远不成网格，亮色高透明下也只是极细颗粒而非可辨的网纹。alpha 固定很低。
-  if (bgOn) root.style.setProperty("--glass-noise", frostNoiseUrl(bg, GLASS_NOISE_ALPHA));
+  // 玻璃内容层已改用确定性文本点（#glass-content .gc-dot），不再需要 canvas 噪声。
+  // 文本点颜色由 CSS color-mix(var(--term-fg), var(--term-bg)) 自动跟随主题。
 }
 
 export function hexToRgba(hex: string, alpha: number): string {

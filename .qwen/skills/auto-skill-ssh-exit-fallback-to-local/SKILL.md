@@ -56,3 +56,26 @@ void events.onPaneClosed((e) => {
 - `onPaneExit`（退出码提示）保持不变，仍在终端写入 `[进程已退出，状态码 N]`
 - 连接断开（`exited=false`）的重连逻辑不受影响
 - 如果 pane 是 tab 中最后一个 pane 且本地终端也 exit，`closePane` 会自动关闭整个 tab
+
+## 防循环机制（代码审查确认）
+
+`switchConnection` 调用 `api.paneClose()` 会关闭旧的后端 channel，可能触发
+`pane-closed` 事件。两种后端 pane 类型各有防循环策略，确保不会形成
+"switchConnection → paneClose → pane-closed → 又触发 switchConnection" 的循环：
+
+### SSH pane (`ssh/pane.rs`)
+
+`PaneCmd::Close` 分支只做 `channel.eof()` + `channel.close()` + break，
+**不发送 `pane-closed` 事件**。只有自然退出（`None` 分支）才发送。
+
+### 本地 PTY (`local.rs`)
+
+`PaneCmd::Close` 设置 `deliberate = true`，reader EOF 时
+`exited = !deliberate = false`，发送 `pane-closed`（`exited = false`）。
+前端 `onPaneClosed` 收到 `exited = false` → 跳过处理。
+
+### 审查建议（非阻塞）
+
+- `switchConnection("local").catch(() => {})` 静默吞没错误。如果本地 PTY 打开失败，
+  pane 会处于空白无 shell 状态。建议在 catch 中向终端写入错误提示。
+- `switchConnection` 方法开头建议加 `disposed` 状态检查。
