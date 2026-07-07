@@ -291,6 +291,7 @@ export function applyThemeToUI(
   const bg = theme.colors.background ?? "#10151c";
   const fg = theme.colors.foreground ?? "#d8dee9";
   const chromeAlpha = Math.min(1, opacity + 0.05);
+  const panelAlpha = Math.min(1, opacity + 0.02);
   root.dataset.base = theme.base;
   // 让原生控件（下拉列表、复选框、滚动条）跟随明暗，修正 select/option 白底看不清
   root.style.colorScheme = theme.base;
@@ -300,6 +301,7 @@ export function applyThemeToUI(
   root.style.setProperty("--bg-alpha", String(opacity));
   root.style.setProperty("--bg-rgba", hexToRgba(bg, opacity));
   root.style.setProperty("--chrome-rgba", hexToRgba(bg, chromeAlpha));
+  root.style.setProperty("--panel-rgba", hexToRgba(bg, panelAlpha));
   root.style.setProperty("--titlebar-rgba", hexToRgba(titlebarColor || bg, chromeAlpha));
   const px = Math.max(0, Math.round(blurAmount));
   root.style.setProperty("--blur", blur && px > 0 ? `blur(${px}px) saturate(1.3)` : "none");

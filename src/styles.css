@@ -562,8 +562,8 @@ body {
   bottom: 4px;
   width: 45%;
   z-index: 60;
-  /* 毛玻璃但偏实：文件操作需要专注，透明度低于弹窗，背后仍强模糊 */
-  background: color-mix(in srgb, var(--term-bg) 86%, transparent);
+  /* 毛玻璃但偏实：文件操作需要专注，透明度比主窗口高 2%，背后仍强模糊 */
+  background: var(--panel-rgba);
   backdrop-filter: blur(30px) saturate(1.4);
   -webkit-backdrop-filter: blur(30px) saturate(1.4);
   border: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
@@ -591,8 +591,8 @@ body {
   bottom: 4px;
   width: 45%;
   z-index: 60;
-  /* 毛玻璃但偏实：文件操作需要专注，透明度低于弹窗，背后仍强模糊 */
-  background: color-mix(in srgb, var(--term-bg) 86%, transparent);
+  /* 毛玻璃但偏实：文件操作需要专注，透明度比主窗口高 2%，背后仍强模糊 */
+  background: var(--panel-rgba);
   backdrop-filter: blur(30px) saturate(1.4);
   -webkit-backdrop-filter: blur(30px) saturate(1.4);
   border: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
@@ -933,8 +933,8 @@ body {
   /* 底色不透明度是文字对比度的地板：58% 时背后终端透出太多、字发灰，
      提到 72% 后各主题下文字都清晰，毛玻璃质感仍在 */
   background: color-mix(in srgb, var(--term-bg) 72%, transparent);
-  backdrop-filter: blur(34px) saturate(1.7);
-  -webkit-backdrop-filter: blur(34px) saturate(1.7);
+  backdrop-filter: blur(28px) saturate(1.7);
+  -webkit-backdrop-filter: blur(28px) saturate(1.7);
   border: 1px solid color-mix(in srgb, var(--term-fg) 18%, transparent);
   border-radius: var(--radius-modal);
   padding: 20px;

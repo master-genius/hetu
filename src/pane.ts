@@ -149,8 +149,10 @@ export class Pane {
       theme: { ...activeTheme().colors, background: "#00000000" } as never,
       allowTransparency: true,
       // 深色背景下按前景/背景对比自动微提亮细字，让 canvas 灰度 AA 的文字更"实"
-      // 1.58：在 1.5 基础上再提一档改善 Light 字细字发虚，又不至于像 2.0 那样洗白暗色 ANSI
-      minimumContrastRatio: 1.58,
+      // 1.6：在 1.58 基础上微提一档改善 Light 字细字发虚，又不至于像 2.0 那样洗白暗色 ANSI
+      // 浅色主题禁用：终端 background 设为透明(#00000000)，xterm 以黑色为基准算对比度，
+      // 浅色主题下会误判（浅色 ANSI 色在"黑色"上对比度高、不调暗，实际白底上却看不清）
+      minimumContrastRatio: activeTheme().base === "dark" ? 1.6 : 1.0,
     });
     this.fit = new FitAddon();
     this.term.loadAddon(this.fit);

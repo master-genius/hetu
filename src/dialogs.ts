@@ -369,8 +369,19 @@ export function showSettingsDialog() {
   const overlay = document.createElement("div");
   // peek：设置弹窗遮罩更淡，方便实时预览主题/透明度/模糊改动
   overlay.className = "modal-overlay peek";
+  // 先展示轻量骨架（标题 + loading），让用户立即看到点击反馈，
+  // 再用 rAF 延后填充完整内容（7 个 section + 33 张主题卡片 + 快捷键列表），
+  // 避免大 innerHTML 解析 + backdrop-filter 合成阻塞主线程导致点击无响应感。
   overlay.innerHTML = `
     <div class="modal settings">
+      <h3>设置</h3>
+      <div class="settings-loading" style="padding:40px;text-align:center;opacity:0.6">加载中…</div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const fillContent = () => {
+    const modal = overlay.querySelector(".modal")!;
+    modal.innerHTML = `
       <h3>设置</h3>
       <div class="settings-body">
         <section>
@@ -458,7 +469,6 @@ export function showSettingsDialog() {
         <button type="button" class="btn" data-act="close">关闭</button>
       </div>
     </div>`;
-  document.body.appendChild(overlay);
 
   const q = <T extends HTMLElement>(sel: string) => overlay.querySelector(sel) as T;
   const input = (n: string) => overlay.querySelector(`[name="${n}"]`) as HTMLInputElement;
@@ -759,20 +769,25 @@ export function showSettingsDialog() {
   overlay.querySelectorAll("input, select").forEach((el) => {
     el.addEventListener("change", commit);
   });
+  // 滑条拖动时 input 事件高频触发：每次 commit 都会 IPC 写盘 + 遍历所有终端
+  // refit()，导致拖动卡顿。debounce 90ms，change（松手）时已有通用绑定立即 commit。
+  let commitTimer: number | undefined;
+  const debouncedCommit = () => {
+    window.clearTimeout(commitTimer);
+    commitTimer = window.setTimeout(commit, 90);
+  };
   input("opacity").addEventListener("input", () => {
     q<HTMLElement>(".opacity-val").textContent =
       `${Math.round(parseFloat(input("opacity").value) * 100)}%`;
+    debouncedCommit();
   });
-  // 拖动即时预览：透明度/模糊立即应用，无需松手
-  input("opacity").addEventListener("input", commit);
   input("blurAmount").addEventListener("input", () => {
     q<HTMLElement>(".blur-val").textContent = `${Math.round(parseFloat(input("blurAmount").value))}px`;
-    commit();
+    debouncedCommit();
   });
-  // 磨砂程度拖动即时预览（贴图按 (背景色, alpha) 缓存，重生成开销可忽略）
   input("frostStrength").addEventListener("input", () => {
     q<HTMLElement>(".frost-val").textContent = `${input("frostStrength").value}%`;
-    commit();
+    debouncedCommit();
   });
 
   // 基于当前主题新建自定义主题
@@ -805,6 +820,9 @@ export function showSettingsDialog() {
   overlay.addEventListener("mousedown", (e) => {
     if (e.target === overlay) close();
   });
+  };
+
+  requestAnimationFrame(fillContent);
 }
 
 /** 主题配色示例卡片：背景 + 前景示意文字 + 一排 ANSI 色板；自定义主题带删除按钮 */

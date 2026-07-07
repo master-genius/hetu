@@ -977,7 +977,8 @@ async function bootstrap() {
     }
     await snapshotSession();
     await api.sessionRelease().catch(() => {});
-    await win.destroy();
+    // destroy 失败时重置 closing，否则后续关闭请求全被 closing flag 跳过、窗口永久卡死
+    await win.destroy().catch(() => { closing = false; });
   };
 
   // 窗口关闭：onCloseRequested 拦截系统关闭与 btn-close 的 win.close()。
@@ -1040,17 +1041,33 @@ async function bootstrap() {
 
   // ---------- 设置热应用到所有终端 ----------
 
+  // 追踪上次应用的主题 id + 基调：拖透明度/模糊时 onSettingsChange 仍会触发，
+  // 但主题没变就不重设 theme/minimumContrastRatio——xterm 设这两项会重算所有
+  // cell 的对比度（O(scrollback)），是拖滑条卡顿的根因。
+  let lastThemeId = "";
+  let lastThemeBase = "";
+
   onSettingsChange(() => {
     const s = getSettings();
-    const colors = { ...activeTheme().colors, background: "#00000000" };
+    const theme = activeTheme();
+    const themeChanged = theme.id !== lastThemeId;
+    const baseChanged = theme.base !== lastThemeBase;
     // 主题/字号/透明度立即生效（这些不依赖字体加载）
     for (const tab of tabs.tabs) {
       for (const pane of tab.layout.panes()) {
         pane.term.options.fontSize = s.fontSize;
         pane.term.options.fontWeight = "normal" as never;
-        pane.term.options.theme = colors as never;
+        // 仅主题切换时才重设 theme + mcr，避免拖透明度时全量重算对比度
+        if (themeChanged || baseChanged) {
+          const colors = { ...theme.colors, background: "#00000000" };
+          pane.term.options.theme = colors as never;
+          // 浅色主题禁用 mcr：透明背景下 xterm 以黑色为基准算对比度，浅色主题误判
+          pane.term.options.minimumContrastRatio = (theme.base === "dark" ? 1.6 : 1.0) as never;
+        }
       }
     }
+    lastThemeId = theme.id;
+    lastThemeBase = theme.base;
     // 字体单独处理：先确保所选字重（含各自 bold）就绪，再设 fontFamily 触发 xterm
     // 以正确字体重测单元格。否则切到未加载的字体（如 Light）时会用回退字体测量，首帧偏细/错位。
     const px = s.fontSize;

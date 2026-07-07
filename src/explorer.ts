@@ -131,7 +131,9 @@ export class Explorer {
   private pathInput: HTMLInputElement;
   private titleEl: HTMLElement;
   private viewBtn: HTMLButtonElement;
+  private hiddenBtn: HTMLButtonElement;
   private view: ViewMode;
+  private showHidden = false;
   private initialized = false;
   /** 当前目录条目与对应行元素（顺序一致），支撑选中态与键盘导航 */
   private entries: FsEntry[] = [];
@@ -155,6 +157,7 @@ export class Explorer {
       <div class="ex-head">
         <button class="btn ex-up" title="上一级">↑</button>
         <input class="ex-path" spellcheck="false">
+        <button class="btn ex-hidden" title="显示/隐藏 隐藏文件"></button>
         <button class="btn ex-view" title="切换视图"></button>
         <button class="btn ex-refresh" title="刷新"><span class="ex-refresh-icon">⟳</span></button>
       </div>
@@ -170,6 +173,13 @@ export class Explorer {
     this.installDrop();
 
     this.viewBtn = this.element.querySelector(".ex-view") as HTMLButtonElement;
+    this.hiddenBtn = this.element.querySelector(".ex-hidden") as HTMLButtonElement;
+    this.syncHiddenBtn();
+    this.hiddenBtn.addEventListener("click", () => {
+      this.showHidden = !this.showHidden;
+      this.syncHiddenBtn();
+      void this.load();
+    });
     this.element.querySelector(".ex-up")!.addEventListener("click", () => {
       void this.navigate(parentDir(this.cwd));
     });
@@ -306,17 +316,25 @@ export class Explorer {
     const entries = await this.backend.list(this.cwd);
     this.pathInput.value = this.cwd;
     this.listEl.textContent = "";
-    this.entries = entries;
+    const visible = this.showHidden ? entries : entries.filter((e) => !e.name.startsWith("."));
+    this.entries = visible;
     this.rowEls = [];
     this.selIdx = -1; // 换目录/刷新后清空选中（行元素已随列表清空，无需摘类）
-    entries.forEach((entry, i) => {
+    visible.forEach((entry, i) => {
       const row = this.renderRow(entry, i);
       this.rowEls.push(row);
       this.listEl.appendChild(row);
     });
-    if (entries.length === 0) {
+    if (visible.length === 0) {
       this.listEl.innerHTML = `<p class="hint" style="padding:12px">（空目录）</p>`;
     }
+    this.listEl.scrollTop = 0;
+  }
+
+  /** 隐藏文件按钮图标同步 */
+  private syncHiddenBtn(): void {
+    this.hiddenBtn.textContent = this.showHidden ? "●" : "○";
+    this.hiddenBtn.title = this.showHidden ? "点击隐藏隐藏文件" : "点击显示隐藏文件";
   }
 
   /** 取消选择（点击空白处 / 主动清理） */
