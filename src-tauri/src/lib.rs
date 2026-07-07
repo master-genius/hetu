@@ -607,6 +607,34 @@ fn open_external(url: String) -> Result<()> {
 
 // ---------- 应用入口 ----------
 
+/// 从最大化还原：在后端直接获取屏幕尺寸并设置窗口大小，避免前端 IPC 竞态。
+/// 按设置中的 restore_size 百分比计算，兜底 960×550。
+#[tauri::command]
+async fn restore_window_size(app: tauri::AppHandle) -> Result<()> {
+    let window = app.get_webview_window("main").ok_or_else(|| Error::msg("主窗口不存在"))?;
+    let settings = settings::load();
+    let pct = (settings.restore_size.max(50).min(90)) as f64 / 100.0;
+
+    let (mut lw, mut lh) = (960.0_f64, 550.0_f64);
+    if let Ok(Some(monitor)) = window.current_monitor() {
+        let sf = monitor.scale_factor();
+        let size = monitor.size();
+        let mw = size.width as f64 / sf;
+        let mh = size.height as f64 / sf;
+        if mw >= 700.0 && mh >= 500.0 {
+            lw = mw;
+            lh = mh;
+        }
+    }
+
+    let w = (lw * pct).round() as u32;
+    let h = (lh * pct).round() as u32;
+    window
+        .set_size(tauri::LogicalSize::new(w, h))
+        .map_err(|e| Error::msg(format!("设置窗口大小失败: {e}")))?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -685,6 +713,7 @@ pub fn run() {
             local_tab_info,
             read_key_file,
             open_external,
+            restore_window_size,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

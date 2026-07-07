@@ -76,6 +76,8 @@ export const api = {
   readKeyFile: (path: string) => invoke<string>("read_key_file", { path }),
   /** 用系统默认浏览器打开外部 http/https 链接 */
   openExternal: (url: string) => invoke<void>("open_external", { url }),
+  /** 从最大化还原窗口尺寸（后端直接获取屏幕尺寸 + 设置窗口） */
+  restoreWindowSize: () => invoke<void>("restore_window_size"),
 };
 
 export const events = {

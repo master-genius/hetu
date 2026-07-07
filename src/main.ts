@@ -5,7 +5,7 @@ import "./fonts.css";
 import "./styles.css";
 
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, events } from "./ipc";
 import { loadSettings, getSettings, onSettingsChange, activeTheme, fontStack } from "./settings";
 import { TabManager, type Tab } from "./tabs";
@@ -769,12 +769,11 @@ async function bootstrap() {
     const wasMaximized = await win.isMaximized();
     await win.toggleMaximize();
     if (wasMaximized) {
-      // 从最大化还原：按设置项的屏幕占比设置窗口尺寸（保持屏幕宽高比）
-      const pct = Math.min(90, Math.max(35, getSettings().restoreSize)) / 100;
-      // window.screen.width/height 已是 CSS 逻辑像素 = LogicalSize 单位，无需再乘 factor
-      const sw = Math.round(window.screen.width * pct);
-      const sh = Math.round(window.screen.height * pct);
-      await win.setSize(new LogicalSize(sw, sh)).catch(() => {});
+      // 从最大化还原：调用后端命令直接获取屏幕尺寸并设置窗口，
+      // 避免 WebKitGTK 下 window.screen/currentMonitor 返回异常值。
+      // 加 100ms 延迟让 window-state 插件先恢复，再覆盖为目标值。
+      await new Promise((r) => setTimeout(r, 100));
+      await api.restoreWindowSize().catch(() => {});
     }
   });
   // 关闭按钮触发 onCloseRequested，确认对话框与 session flush 统一在那里处理

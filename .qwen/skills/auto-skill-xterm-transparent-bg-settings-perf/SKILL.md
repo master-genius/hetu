@@ -20,12 +20,22 @@ xterm.js 计算 mcr 时取 `background` 的 RGB 值作为对比基准。`#000000
 
 ### 修复
 
+MCR 值按主题基调 + 透明度动态决定：
+
 ```ts
-// 初始化时按主题基调决定
-minimumContrastRatio: activeTheme().base === "dark" ? 1.6 : 1.0,
+// 初始化时
+minimumContrastRatio: activeTheme().base === "dark"
+  ? (s.opacity < 0.4 ? 1.1 : 1.6)  // 暗色：高透明度降至 1.1 避免白边
+  : 1.1,                            // 亮色：1.1 微提亮（1.0 太虚，1.1 只调最暗色，安全）
 
 // onSettingsChange 中也要同步（但要有条件，见场景二）
 ```
+
+**亮色 1.1 安全性**：1.1 极温和，只对最暗的颜色做微提亮，不会误调浅色 ANSI。
+原方案亮色 1.0（完全禁用）导致细字发虚，用户反馈 1.1 更好。
+
+**暗色高透明度 1.1**：opacity < 0.4 时，透明背景下 xterm 以黑色为基准算对比度，
+过高的 MCR（1.6）会在高透场景产生白边。降至 1.1 消除白边。
 
 ## 场景二：拖透明度滑条卡顿（开始快、越拖越卡）
 
@@ -38,29 +48,39 @@ minimumContrastRatio: activeTheme().base === "dark" ? 1.6 : 1.0,
 
 ### 修复
 
-用 `lastThemeId` / `lastThemeBase` 追踪，仅在主题真正变化时才设 theme + mcr：
+用 `lastThemeId` / `lastThemeBase` / `lastMcr` 追踪，仅在主题或 MCR 真正变化时才设 theme + mcr：
 
 ```ts
 let lastThemeId = "";
 let lastThemeBase = "";
+let lastMcr = 0;
 
 onSettingsChange(() => {
   const theme = activeTheme();
   const themeChanged = theme.id !== lastThemeId;
   const baseChanged = theme.base !== lastThemeBase;
+  // MCR 随主题和透明度变化（暗色高透明度 1.1，暗色正常 1.6，亮色 1.1）
+  const mcr = theme.base === "dark"
+    ? (s.opacity < 0.4 ? 1.1 : 1.6)
+    : 1.1;
+  const mcrChanged = mcr !== lastMcr;
 
   for (const tab of tabs.tabs) {
     for (const pane of tab.layout.panes()) {
       pane.term.options.fontSize = s.fontSize;  // 轻量，每次都设
-      // 仅主题切换时才重设——避免拖透明度时全量重算对比度
+      // 仅主题切换时才重设 theme
       if (themeChanged || baseChanged) {
         pane.term.options.theme = colors as never;
+      }
+      // 仅 MCR 实际变化时才重设（O(scrollback) 重算）
+      if (themeChanged || baseChanged || mcrChanged) {
         pane.term.options.minimumContrastRatio = mcr as never;
       }
     }
   }
   lastThemeId = theme.id;
   lastThemeBase = theme.base;
+  lastMcr = mcr;
 });
 ```
 
@@ -69,6 +89,8 @@ onSettingsChange(() => {
 - `term.options.fontSize` 修改不触发全量重算，可安全地每次设
 - `term.options.theme` 和 `term.options.minimumContrastRatio` 修改触发全量 cell 重算，**必须条件化**
 - `term.options.fontFamily` 修改触发单元格重测 + refit，也较重，应仅在字体实际变化时设
+- MCR 需要单独追踪（`lastMcr`）：透明度跨越 0.4 阈值时 MCR 值变化，需重设；
+  但透明度在阈值同侧滑动时 MCR 不变，不应触发重算
 
 ## 场景三：滑条 debounce 的正确用法
 

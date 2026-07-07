@@ -426,7 +426,7 @@ export function showSettingsDialog() {
           <label>磨砂程度 <span class="frost-val"></span>
             <input name="frostStrength" type="range" min="0" max="100" step="1"></label>
           <label>还原尺寸 <span class="restore-size-val"></span>
-            <input name="restoreSize" type="range" min="35" max="90" step="1"></label>
+            <input name="restoreSize" type="range" min="50" max="90" step="1"></label>
           <div class="settings-field">
             <span>界面圆角</span>
             <div class="radius-picker"></div>
