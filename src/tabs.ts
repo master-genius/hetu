@@ -117,14 +117,16 @@ export class TabManager {
     });
   }
 
-  /** 单 pane 且为本地终端的 pane（多 pane 分屏不动态改名，沿用静态名） */
-  private localSinglePane(tab: Tab): Pane | null {
+  /** 活动本地 pane（单 pane 直接取；多 pane 取当前 activePaneId 指向的本地 pane） */
+  private localActivePane(tab: Tab): Pane | null {
     const panes = tab.layout.panes();
-    return panes.length === 1 && panes[0].isLocal ? panes[0] : null;
+    if (panes.length === 1) return panes[0].isLocal ? panes[0] : null;
+    const active = panes.find((p) => p.id === tab.activePaneId);
+    return active && active.isLocal ? active : null;
   }
 
   /** cwd → 标题目录段：home 显示 `~`，根显示 `/`，否则末级目录名 */
-  private dirLabel(cwd: string): string {
+  dirLabel(cwd: string): string {
     if (this.localHomeDir && cwd === this.localHomeDir) return "~";
     const trimmed = cwd.replace(/\/+$/, "");
     if (!trimmed) return "/";
@@ -138,7 +140,7 @@ export class TabManager {
   async refreshLocalTabTitles(): Promise<void> {
     await Promise.all(
       this.tabs.map(async (tab) => {
-        const pane = this.localSinglePane(tab);
+        const pane = this.localActivePane(tab);
         if (!pane) return;
         const info = await api.localTabInfo(pane.id).catch(() => null);
         if (!info) return;
@@ -146,6 +148,19 @@ export class TabManager {
         if (title !== tab.fullTitle) this.setLabel(tab, title);
       }),
     );
+  }
+
+  /**
+   * 更新标签标题以反映当前活动 pane 的信息：
+   * - 本地 pane：立即设为 `目录:进程`（轮询会持续刷新）
+   * - 远程 pane：设为连接名（由 connMeta 传入，避免在 tabs.ts 反查）
+   * - 单 pane：沿用原逻辑（localActivePane 已覆盖）
+   */
+  updateActivePaneTitle(tab: Tab, title: string): void {
+    const panes = tab.layout.panes();
+    if (panes.length < 2) return;
+    if (tab.fullTitle === title) return;
+    this.setLabel(tab, title);
   }
 
   get active(): Tab | null {
@@ -407,12 +422,12 @@ export class TabManager {
       return;
     }
     await pane.switchConnection(newConnId);
-    // 单 pane 标签：标题跟随新连接；多 pane 分屏不改名，避免误导
+    // 单 pane 标签：标题跟随新连接；多 pane 分屏也更新标题以反映活动 pane 的连接
+    tab.title = name;
     if (tab.layout.panes().length === 1) {
-      tab.title = name;
-      this.setLabel(tab, name); // 切到本地终端后由轮询接管为 `目录:进程`
       tab.connId = newConnId;
     }
+    this.setLabel(tab, name); // 切到本地终端后由轮询接管为 `目录:进程`
     this.gcConnections([oldConn]);
     this.onLayoutChange?.();
   }

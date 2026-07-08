@@ -107,6 +107,13 @@ export class Pane {
   private wheelPending = 0;
   /** 像素余数累积：缓慢双指滚的亚行级 deltaY 累到下一帧，避免「吞距离」 */
   private wheelPixelCarry = 0;
+  /** 远程应用是否启用了鼠标模式（DECSET 1000/1002/1003）。
+   *  鼠标模式开时让 xterm core 编码并发送鼠标转义序列；关时由我们转 <C-E>/<C-Y>。 */
+  mouseMode = false;
+  /** 最近一次非空选中文本。TUI 应用（claude code 等）启用鼠标模式后，
+   *  右键 mousedown 可能清除 xterm 选区，此时 getSelection() 返回空。
+   *  缓存上次选中文本作为兜底，使右键"复制"和 Ctrl+Shift+C 仍可用。 */
+  private lastSelection = "";
 
   onFocus: (() => void) | null = null;
   /** 全局快捷键分发：返回 true 表示已处理（不透传给 shell） */
@@ -206,10 +213,34 @@ export class Pane {
       return true;
     });
 
-    // 复制即选中（可配置）
+    // 跟踪鼠标模式（DECSET ?1000/1002/1003 = 启用，DECRST = 禁用）：
+    // 鼠标模式开时让 xterm core 编码鼠标转义序列（capture 阶段只 preventDefault 不
+    // stopPropagation），关时由我们转 <C-E>/<C-Y>。返回 false 不阻止 xterm 默认处理。
+    this.term.parser.registerCsiHandler({ prefix: "?", final: "h" }, (params) => {
+      if (params[0] === 1000 || params[0] === 1002 || params[0] === 1003) {
+        this.mouseMode = true;
+      }
+      return false;
+    });
+    this.term.parser.registerCsiHandler({ prefix: "?", final: "l" }, (params) => {
+      if (params[0] === 1000 || params[0] === 1002 || params[0] === 1003) {
+        this.mouseMode = false;
+      }
+      return false;
+    });
+
+    // 复制即选中（可配置）+ 缓存非空选区供右键/Ctrl+Shift+C 兜底
     this.term.onSelectionChange(() => {
       const sel = this.term.getSelection();
+      if (sel) this.lastSelection = sel;
       if (sel && getSettings().copyOnSelect) void this.copyText(sel);
+    });
+
+    // mouseup 备份选区：鼠标模式下 onSelectionChange 可能不触发，
+    // mouseup 时再检查一次，确保 lastSelection 捕获到 Shift+drag 选中的文本
+    this.element.addEventListener("mouseup", () => {
+      const sel = this.term.getSelection();
+      if (sel) this.lastSelection = sel;
     });
 
     // 快捷键拦截：命中全局快捷键则返回 false，阻止按键透传给远端 shell（也防止终端聚焦
@@ -260,17 +291,20 @@ export class Pane {
 
     this.element.addEventListener("contextmenu", (e) => {
       e.preventDefault();
-      const word = this.term.getSelection().trim() || this.wordUnderMouse(e);
+      // word 只取鼠标下的词，不用选中文本——选中文本是"要复制的内容"而非"要下载的文件"
+      const word = this.wordUnderMouse(e);
       this.onContextMenu?.(e, word || null);
     });
 
-    // 备用屏幕（vim/less/man）下的滚轮 → 滚动键转换：
+    // 备用屏幕（vim/less/man/claude code/qwen code）下的滚轮处理：
     // 使用 capture 阶段：xterm v6 的 xterm-scrollable-element 会在 bubble 阶段
     // 调用 stopPropagation() 消费 wheel 事件，导致 bubble 监听器无法收到。
-    // capture 阶段在外层先执行，确保我们的 fallback 逻辑能运行。
     //
-    // - 非备用屏幕（普通终端）→ 不干预，让 xterm 正常滚动
-    // - 备用屏幕 → 转为 <C-E>/<C-Y> 发送给 PTY（vim/less/man 均识别）
+    // 两种路径：
+    // - 鼠标模式开（vim set mouse=a、claude code 等交互式 TUI）→ 只 preventDefault
+    //   不 stopPropagation，让 xterm core 编码并发送鼠标转义序列给 PTY
+    // - 鼠标模式关（less/man/普通 vim）→ preventDefault + stopPropagation，
+    //   转为 <C-E>/<C-Y> 发送给 PTY
     //
     // 按键选择：发 <C-E>/<C-Y> 而非 ↑/↓。
     //  - vim 默认滚轮即绑定 <C-E>/<C-Y>（视口滚动，光标不动）；↑/↓ 在 normal 模式
@@ -283,7 +317,9 @@ export class Pane {
       "wheel",
       (e) => {
         if (this.term.buffer.active.type !== "alternate") return;
-        // 备用屏幕：阻止 xterm-scrollable-element 的默认滚动行为
+        // 鼠标模式开：让 xterm core 编码鼠标转义序列，不干预事件传播
+        if (this.mouseMode) return;
+        // 鼠标模式关：阻止 xterm-scrollable-element 的默认滚动行为，转按键
         e.preventDefault();
         e.stopPropagation();
 
@@ -333,7 +369,13 @@ export class Pane {
   private async tryWebgl() {
     try {
       const { WebglAddon } = await import("@xterm/addon-webgl");
-      this.term.loadAddon(new WebglAddon());
+      const addon = new WebglAddon();
+      // WebGL 上下文丢失（GPU 驱动重置等）时重建渲染器，否则字符纹理累积损坏导致乱码
+      addon.onContextLoss(() => {
+        addon.dispose();
+        void this.tryWebgl();
+      });
+      this.term.loadAddon(addon);
     } catch {
       /* WebGL 不可用时回退 canvas 渲染 */
     }
@@ -486,6 +528,11 @@ export class Pane {
 
   focus() {
     this.term.focus();
+  }
+
+  /** 当前选中文本；若无（如鼠标模式下右键清除了选区），回退到最近非空选区或 DOM 选区 */
+  getSelectionText(): string {
+    return this.term.getSelection() || this.lastSelection || document.getSelection()?.toString() || "";
   }
 
   async copyText(text: string) {

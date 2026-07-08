@@ -248,8 +248,19 @@ async function bootstrap() {
     pane.onFocus = () => {
       const switched = tab.activePaneId !== pane.id;
       tab.activePaneId = pane.id;
-      // 焦点在不同连接的终端间切换时，远程面板/按钮需跟随聚焦终端的连接
-      if (switched && tab === tabs.active) refreshPanels();
+      if (switched && tab === tabs.active) {
+        refreshPanels();
+        // 多 pane 分屏：标签标题跟随活动 pane
+        if (pane.isLocal) {
+          // 本地 pane：异步取 `目录:进程`，轮询会持续刷新
+          void api.localTabInfo(pane.id).then((info) => {
+            if (info) tabs.updateActivePaneTitle(tab, `${tabs.dirLabel(info.cwd)}:${info.process}`);
+          }).catch(() => {});
+        } else {
+          const info = connMeta.get(pane.connId);
+          if (info) tabs.updateActivePaneTitle(tab, info.name);
+        }
+      }
     };
     // 终端聚焦时的按键先经全局快捷键分发（命中则不透传给 shell）
     pane.onAppKey = (e) => dispatchShortcut(e, pane);
@@ -286,11 +297,25 @@ async function bootstrap() {
       }
     };
     pane.onContextMenu = (e, word) => {
-      const sel = pane.term.getSelection();
-      // 本地终端没有 SFTP：预览/下载/上传不可用（避免调用 SSH-only 命令报误导性错误）
       const remote = !pane.isLocal;
+      // 备用屏幕 = TUI 全屏应用（vim/less/man/claude code）：界面上的词是应用渲染的
+      // 文字，不是 shell 输出中的文件路径，下载/预览无意义。仅普通 shell 输出才提供。
+      const normalBuf = pane.term.buffer.active.type === "normal";
+      const fileWord = normalBuf ? word : null;
+      // TUI 模式（备用屏幕 + 鼠标模式开）下右键复制需要 Shift+drag 选中
+      const tuiMode = !normalBuf && pane.mouseMode;
       showMenu(e.clientX, e.clientY, [
-        { label: "复制", disabled: !sel, action: () => void pane.copyText(sel) },
+        {
+          label: "复制",
+          action: () => {
+            const sel = pane.getSelectionText();
+            if (sel) {
+              void pane.copyText(sel);
+            } else if (tuiMode) {
+              toast("在 TUI 应用中需按住 Shift 拖动选中文本，再右键复制", true);
+            }
+          },
+        },
         { label: "粘贴", action: () => void pane.pasteFromClipboard() },
         { separator: true, label: "" },
         // 已连接 → 切换连接；本地终端 → 打开连接。均作用于本 pane。
@@ -302,18 +327,18 @@ async function bootstrap() {
         ...(remote
           ? [
               // 预览仅对图片提供（识别非图片则不展示，文本等无意义预览一律省去）
-              ...(word && VIEWABLE_IMG.test(word)
+              ...(fileWord && VIEWABLE_IMG.test(fileWord)
                 ? [
                     {
-                      label: `预览 “${truncate(word)}”`,
-                      action: () => void pane.onPreview?.(word),
+                      label: `预览 “${truncate(fileWord)}”`,
+                      action: () => void pane.onPreview?.(fileWord),
                     },
                   ]
                 : []),
               {
-                label: word ? `下载 “${truncate(word)}”` : "下载",
-                disabled: !word,
-                action: () => word && void downloadFile(pane, word),
+                label: fileWord ? `下载 “${truncate(fileWord)}”` : "下载",
+                disabled: !fileWord,
+                action: () => fileWord && void downloadFile(pane, fileWord),
               },
               { label: "上传文件到当前目录", action: () => void uploadViaDialog() },
               { separator: true, label: "" },
@@ -421,6 +446,10 @@ async function bootstrap() {
       toast("本地终端无需上传，直接在本机操作文件即可", true);
       return;
     }
+    const basename = (p: string) => p.replace(/[/\\]+$/, "").split(/[/\\]/).pop() ?? p;
+    // 立即为每个文件创建传输行（占位），让用户马上看到面板反馈
+    const entries = paths.map((p) => ({ path: p, name: basename(p), tid: crypto.randomUUID() }));
+    for (const e of entries) beginTransfer(e.tid, e.name, "upload", "解析目标目录…");
     // dirOverride（拖到某目录名上）最精确；否则用 pane 的已知 cwd，再退到 home。
     let dir: string | null;
     let guessed = false;
@@ -432,7 +461,7 @@ async function bootstrap() {
       guessed = u.guessed;
     }
     if (!dir) {
-      toast("尚未获取远端目录，请稍候重试", true);
+      for (const e of entries) failTransfer(e.tid, "尚未获取远端目录，请稍候重试");
       return;
     }
     // cwd 未由 OSC7 上报时，上传落到 home 目录——明确告知，避免用户以为传到了当前目录
@@ -441,16 +470,17 @@ async function bootstrap() {
         "确认上传目录",
         `未能获取该终端的当前工作目录（shell 未上报 OSC7）。\n将上传到用户主目录：${dir}\n\n继续吗？`,
       );
-      if (!ok) return;
+      if (!ok) {
+        for (const e of entries) failTransfer(e.tid, "用户取消");
+        return;
+      }
     }
     // 同名文件处理：默认直接覆盖；开启「提示确认」后按项询问，可选「后续都如此」。
     const confirmOverwrite = getSettings().confirmOverwrite;
     let bulk: "overwrite" | "skip" | null = null; // 记住「全部」选择
 
-    const basename = (p: string) => p.replace(/[/\\]+$/, "").split(/[/\\]/).pop() ?? p;
-
-    for (const p of paths) {
-      const name = basename(p);
+    for (const e of entries) {
+      const { path: p, name, tid } = e;
       if (confirmOverwrite && bulk !== "overwrite") {
         // 探测远端是否已有同名项（stat 成功即存在）
         const exists = await api.sftpStat(target.connId, `${dir}/${name}`).then(() => true).catch(() => false);
@@ -462,15 +492,13 @@ async function bootstrap() {
             decision = d.choice;
           }
           if (decision === "skip") {
-            toast(`已跳过 ${name}`);
+            failTransfer(tid, "已跳过同名文件");
             continue;
           }
         }
       }
       // 传输的成败/进度均由右下角传输面板呈现，不再用 toast，避免刷屏；
       // dir 作为行名悬停提示，让用户知道传到了哪里
-      const tid = crypto.randomUUID();
-      beginTransfer(tid, name, "upload", dir);
       try {
         await api.sftpUpload(target.connId, p, dir, tid);
         completeTransfer(tid);
@@ -543,6 +571,8 @@ async function bootstrap() {
   const performDrop = (paths: string[]) => {
     const t = dropTarget;
     clearDropIndicators();
+    // 拖放期间 xterm 可能创建选区（如从文本区拖到同一终端），释放后残留背景条
+    for (const tab of tabs.tabs) for (const p of tab.layout.panes()) p.term.clearSelection();
     void uploadFiles(paths, t?.pane, t?.dir);
   };
 
@@ -1152,6 +1182,15 @@ async function bootstrap() {
     if (best) {
       tab.activePaneId = best.id;
       best.focus();
+      // 多 pane 分屏：标签标题跟随新活动 pane
+      if (best.isLocal) {
+        void api.localTabInfo(best.id).then((info) => {
+          if (info) tabs.updateActivePaneTitle(tab, `${tabs.dirLabel(info.cwd)}:${info.process}`);
+        }).catch(() => {});
+      } else {
+        const info = connMeta.get(best.connId);
+        if (info) tabs.updateActivePaneTitle(tab, info.name);
+      }
     }
   };
 
@@ -1172,7 +1211,7 @@ async function bootstrap() {
       case "focusUp": focusNeighbor("up"); break;
       case "focusDown": focusNeighbor("down"); break;
       case "copy": {
-        const sel = p?.term.getSelection();
+        const sel = p?.getSelectionText();
         if (p && sel) void p.copyText(sel);
         break;
       }
