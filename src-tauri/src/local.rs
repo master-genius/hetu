@@ -192,6 +192,7 @@ prod 模式选项（仅在 --prod 下生效）:
   -f, --file <脚本文件>       连接后自动执行文件中的命令
   -s, --stdin                 从标准输入读取命令并执行
   -x, --exit                  命令执行完后退出，退出码跟随最后一条命令
+  --debug                     显示连接提示信息（prod 模式默认静默）
   -h, --help                  显示此帮助
 
 示例:
@@ -220,7 +221,7 @@ case "$first" in -*) usage; exit 1;; esac
 shift
 
 host=""; user=""; port=""; pass=""; ident=""; name=""; adhoc=0
-feed=""; feed_file=""; feed_stdin=0; do_exit=0
+feed=""; feed_file=""; feed_stdin=0; do_exit=0; debug=0
 case "$first" in
   *@*) user="${first%@*}"; host="${first#*@}"; adhoc=1;;
   *)   name="$first";;
@@ -239,6 +240,7 @@ while [ $# -gt 0 ]; do
     -f|--file)     [ "$prod_mode" = 1 ] || { echo "hssh: --file 需要 --prod 模式" >&2; exit 1; }; need $# "$1"; feed_file="$2"; shift 2;;
     -s|--stdin)    [ "$prod_mode" = 1 ] || { echo "hssh: --stdin 需要 --prod 模式" >&2; exit 1; }; feed_stdin=1; shift;;
     -x|--exit)     [ "$prod_mode" = 1 ] || { echo "hssh: --exit 需要 --prod 模式" >&2; exit 1; }; do_exit=1; shift;;
+    --debug)       debug=1; shift;;
     -h|--help)     usage; exit 0;;
     -*)            echo "hssh: 未知选项 $1" >&2; exit 1;;
     *)             host="$1"; adhoc=1; shift;;
@@ -276,12 +278,13 @@ feed_b64=""; [ -n "$feed_path" ] && feed_b64=$(b64 "$feed_path")
 exit_b64=""; [ "$do_exit" = 1 ] && exit_b64=$(b64 "1")
 if [ -n "$name" ]; then
   emit "v=1;tok=$tok;mode=profile;name=$(b64 "$name");feed=$feed_b64;exit=$exit_b64"
-  printf '→ 正在打开连接项「%s」…\n' "$name"
+  # prod 模式默认静默（不污染输出），--debug 时才显示连接提示
+  [ "$prod_mode" = 1 ] && [ "$debug" = 0 ] || printf '→ 正在打开连接项「%s」…\n' "$name"
 else
   [ -z "$host" ] && { echo 'hssh: 缺少主机' >&2; exit 1; }
   user="${user:-$(id -un)}"
   emit "v=1;tok=$tok;mode=adhoc;host=$(b64 "$host");user=$(b64 "$user");port=$(b64 "$port");pass=$(b64 "$pass");ident=$(b64 "$ident");feed=$feed_b64;exit=$exit_b64"
-  printf '→ 正在连接 %s@%s …\n' "$user" "$host"
+  [ "$prod_mode" = 1 ] && [ "$debug" = 0 ] || printf '→ 正在连接 %s@%s …\n' "$user" "$host"
 fi
 "#;
 
