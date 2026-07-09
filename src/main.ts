@@ -171,9 +171,11 @@ async function bootstrap() {
         if (spec.feedPath) {
           try {
             const content = await api.readFeedFile(spec.feedPath);
-            void feedPane(pane, content, spec.exitAfter);
+            void feedPane(pane, content, spec.exitAfter).catch((e) =>
+              toast(`hssh：喂入命令失败: ${e}`, true),
+            );
           } catch (err) {
-            toast(`hssh：喂入命令失败: ${err}`, true);
+            toast(`hssh：读取喂入文件失败: ${err}`, true);
           }
         }
       };

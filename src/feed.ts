@@ -29,8 +29,12 @@ function waitForShellReady(paneId: string, timeoutMs = 5000): Promise<void> {
       resolve();
     };
     events.onPaneOutput((e) => {
-      if (e.paneId === paneId && !done) finish();
-    }).then((fn) => { unlisten = fn; });
+      if (e.paneId === paneId) finish();
+    }).then((fn) => {
+      // 如果 timeout 已先触发（done=true），立即注销刚注册的监听器，杜绝泄漏
+      if (done) fn();
+      else unlisten = fn;
+    });
     setTimeout(finish, timeoutMs);
   });
 }
@@ -55,8 +59,7 @@ export async function feedPane(
   if (!feed.endsWith("\r")) feed += "\r";
   await api.paneInput(pane.id, b64encode(feed));
   if (exitAfter) {
-    // 短暂等待确保上面的输入已被 shell 接收处理
-    await new Promise((r) => setTimeout(r, 200));
+    // mpsc channel 保序：上一条 paneInput 已入队，exit $? 必在所有命令之后被 shell 处理
     await api.paneInput(pane.id, b64encode("exit $?\r"));
   }
 }
