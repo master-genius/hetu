@@ -392,9 +392,10 @@ async function bootstrap() {
     const found = tabs.findPane(e.paneId);
     if (!found) return;
     if (e.exited) {
-      // 远程 shell 正常退出（用户 exit）→ 退回本地终端，不关闭 pane
+      // 远程 shell 正常退出（用户 exit / hsshprod --exit）→ 退回本地终端，不关闭 pane。
+      // preserve=true 保留远程输出不清屏，用户可查看命令执行结果。
       if (!found.pane.isLocal) {
-        found.pane.switchConnection("local").catch(() => {});
+        found.pane.switchConnection("local", true).catch(() => {});
       } else {
         // 本地终端退出 → 收起该分屏
         void tabs.closePane(found.tab, found.pane);
@@ -1338,16 +1339,37 @@ async function bootstrap() {
       const info = connMeta.get(pane.connId);
       if (info && !info.local && info.profileId === leaf.profileId) continue;
 
-      // 建立新 SSH 连接并切换
+      // 建立新 SSH 连接并切换（最多重试 3 次，全部失败则该 pane 回退本地终端）
+      const connParams = {
+        name: p.name, host: p.host, port: p.port, user: p.user,
+        auth: p.auth, keyPath: p.keyPath ?? undefined, keyData: p.keyData ?? undefined,
+        keepalive: p.keepalive ?? undefined, timeout: p.timeout ?? undefined,
+      };
+      let connId: string | null = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          connId = await api.sshConnect(connParams);
+          break;
+        } catch (err) {
+          if (attempt < 3) {
+            await new Promise((r) => setTimeout(r, 1000 * attempt));
+            continue;
+          }
+          toast(`恢复分屏连接「${leaf.name}」失败（重试 3 次）：${err}`, true);
+        }
+      }
+      if (!connId) {
+        if (!pane.isLocal) {
+          await tabs.switchPaneConnection(tab, pane, "local", "本地终端").catch(() => {});
+        }
+        continue;
+      }
+      recordConn(connId, { name: p.name, host: p.host, port: p.port, user: p.user, auth: p.auth } as ConnParams, p.id);
       try {
-        const connId = await api.sshConnect({
-          name: p.name, host: p.host, port: p.port, user: p.user,
-          auth: p.auth, keyPath: p.keyPath ?? undefined, keyData: p.keyData ?? undefined,
-          keepalive: p.keepalive ?? undefined, timeout: p.timeout ?? undefined,
-        });
-        recordConn(connId, { name: p.name, host: p.host, port: p.port, user: p.user, auth: p.auth } as ConnParams, p.id);
         await tabs.switchPaneConnection(tab, pane, connId, p.name);
       } catch (err) {
+        void api.sshDisconnect(connId).catch(() => {});
+        connMeta.delete(connId);
         toast(`恢复分屏连接「${leaf.name}」失败：${err}`, true);
       }
     }

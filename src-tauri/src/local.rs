@@ -178,27 +178,42 @@ usage() {
   hssh <连接项名称>            直接打开已保存的连接项（密钥认证直连；密码认证会弹窗要密码）
   hssh 用户@主机 [选项]        临时连接（缺密码且无密钥时弹窗询问）
   hssh 主机 -w 密码 [选项]     临时连接裸主机（裸名不带选项时按连接项名解析）
-选项:
+  hssh --prod <连接项> [选项]  prod 模式：连接后自动执行命令并可选退出
+  hsshprod <连接项> [选项]     hssh --prod 的快捷别名
+
+连接选项:
   -p, --port <端口>           端口（默认 22）
   -u, --user <用户名>         用户名（也可写成 用户@主机）
   -w, --password <密码>       密码（明文，注意会进 shell 历史）
   -i, --identity <私钥文件>   私钥文件路径
+
+prod 模式选项（仅在 --prod 下生效）:
   -e, --exec <命令>           连接后自动执行命令（多条用分号分隔）
   -f, --file <脚本文件>       连接后自动执行文件中的命令
   -s, --stdin                 从标准输入读取命令并执行
   -x, --exit                  命令执行完后退出，退出码跟随最后一条命令
   -h, --help                  显示此帮助
+
 示例:
   hssh prod
   hssh root@10.0.0.9 -p 2222 -w 'secret'
-  hssh prod --exec "ls -la; df -h"
-  hssh prod --file deploy.sh --exit
-  echo "uptime; free -m" | hssh prod --stdin --exit
+  hssh --prod claude --exec "ls -la; df -h"
+  hssh --prod claude --file deploy.sh --exit
+  echo "uptime; free -m" | hsshprod claude --stdin --exit
 EOF
 }
 
 [ $# -eq 0 ] && { usage; exit 1; }
 case "$1" in -h|--help) usage; exit 0;; esac
+
+# prod 模式预扫描：--prod 作为首参数时消费它，后续参数同常规解析。
+# --prod 也可出现在选项中（hssh claude --prod --exec "ls"），option loop 会再设一次。
+prod_mode=0
+if [ "$1" = "--prod" ]; then
+  prod_mode=1
+  shift
+  [ $# -eq 0 ] && { echo "hssh: --prod 需要连接项名称或主机" >&2; exit 1; }
+fi
 
 first="$1"
 case "$first" in -*) usage; exit 1;; esac
@@ -215,14 +230,15 @@ esac
 need() { [ "$1" -ge 2 ] || { echo "hssh: 选项 $2 缺少参数" >&2; exit 1; }; }
 while [ $# -gt 0 ]; do
   case "$1" in
+    --prod)        prod_mode=1; shift;;
     -p|--port)     need $# "$1"; port="$2"; adhoc=1; shift 2;;
     -u|--user)     need $# "$1"; user="$2"; adhoc=1; shift 2;;
     -w|--password) need $# "$1"; pass="$2"; adhoc=1; shift 2;;
     -i|--identity) need $# "$1"; ident="$2"; adhoc=1; shift 2;;
-    -e|--exec)     need $# "$1"; feed="$2"; shift 2;;
-    -f|--file)     need $# "$1"; feed_file="$2"; shift 2;;
-    -s|--stdin)    feed_stdin=1; shift;;
-    -x|--exit)     do_exit=1; shift;;
+    -e|--exec)     [ "$prod_mode" = 1 ] || { echo "hssh: --exec 需要 --prod 模式" >&2; exit 1; }; need $# "$1"; feed="$2"; shift 2;;
+    -f|--file)     [ "$prod_mode" = 1 ] || { echo "hssh: --file 需要 --prod 模式" >&2; exit 1; }; need $# "$1"; feed_file="$2"; shift 2;;
+    -s|--stdin)    [ "$prod_mode" = 1 ] || { echo "hssh: --stdin 需要 --prod 模式" >&2; exit 1; }; feed_stdin=1; shift;;
+    -x|--exit)     [ "$prod_mode" = 1 ] || { echo "hssh: --exit 需要 --prod 模式" >&2; exit 1; }; do_exit=1; shift;;
     -h|--help)     usage; exit 0;;
     -*)            echo "hssh: 未知选项 $1" >&2; exit 1;;
     *)             host="$1"; adhoc=1; shift;;
@@ -234,21 +250,23 @@ if [ "$adhoc" = 1 ] && [ -n "$name" ] && [ -z "$host" ]; then
   host="$name"; name=""
 fi
 
-# 自动化喂入：收集命令到临时文件，路径随 OSC 传给前端，连接成功后由前端读回喂入。
-# 所有模式均写入临时文件（用完由后端 read_feed_file 删除），原文件不受影响。
+# 自动化喂入（仅 prod 模式）：收集命令到临时文件，路径随 OSC 传给前端，连接成功后由前端读回喂入。
+# 用完由后端 read_feed_file 删除，原文件不受影响。
 feed_path=""
-if [ -n "$feed_file" ]; then
-  [ -f "$feed_file" ] || { echo "hssh: 文件不存在: $feed_file" >&2; exit 1; }
-  fsize=$(wc -c < "$feed_file" 2>/dev/null || echo 0)
-  [ "$fsize" -gt 1048576 ] && { echo "hssh: 脚本文件过大（上限 1MB）" >&2; exit 1; }
-  feed_path=$(mktemp "${TMPDIR:-/tmp}/hssh_feed.XXXXXX") || { echo "hssh: 创建临时文件失败" >&2; exit 1; }
-  cat "$feed_file" > "$feed_path"
-elif [ -n "$feed" ]; then
-  feed_path=$(mktemp "${TMPDIR:-/tmp}/hssh_feed.XXXXXX") || { echo "hssh: 创建临时文件失败" >&2; exit 1; }
-  printf '%s\n' "$feed" > "$feed_path"
-elif [ "$feed_stdin" = 1 ]; then
-  feed_path=$(mktemp "${TMPDIR:-/tmp}/hssh_feed.XXXXXX") || { echo "hssh: 创建临时文件失败" >&2; exit 1; }
-  cat > "$feed_path"
+if [ "$prod_mode" = 1 ]; then
+  if [ -n "$feed_file" ]; then
+    [ -f "$feed_file" ] || { echo "hssh: 文件不存在: $feed_file" >&2; exit 1; }
+    fsize=$(wc -c < "$feed_file" 2>/dev/null || echo 0)
+    [ "$fsize" -gt 1048576 ] && { echo "hssh: 脚本文件过大（上限 1MB）" >&2; exit 1; }
+    feed_path=$(mktemp "${TMPDIR:-/tmp}/hssh_feed.XXXXXX") || { echo "hssh: 创建临时文件失败" >&2; exit 1; }
+    cat "$feed_file" > "$feed_path"
+  elif [ -n "$feed" ]; then
+    feed_path=$(mktemp "${TMPDIR:-/tmp}/hssh_feed.XXXXXX") || { echo "hssh: 创建临时文件失败" >&2; exit 1; }
+    printf '%s\n' "$feed" > "$feed_path"
+  elif [ "$feed_stdin" = 1 ]; then
+    feed_path=$(mktemp "${TMPDIR:-/tmp}/hssh_feed.XXXXXX") || { echo "hssh: 创建临时文件失败" >&2; exit 1; }
+    cat > "$feed_path"
+  fi
 fi
 
 # 能力令牌：仅由本地 shell 环境中的 $HSSH_TOKEN 提供，供前端校验来源，
@@ -267,22 +285,34 @@ else
 fi
 "#;
 
-/// 把 hssh 脚本落地到 bin 目录并置可执行位，返回该目录用于前置 PATH。
+/// hsshprod 快捷别名：等价于 `hssh --prod`，仅转发参数。
+const HSSHPROD_SCRIPT: &str = r#"#!/bin/sh
+exec hssh --prod "$@"
+"#;
+
+/// 把 hssh / hsshprod 脚本落地到 bin 目录并置可执行位，返回该目录用于前置 PATH。
 /// 内容一致则不重写（避免每次 spawn 写盘）；任何失败都返回 None（不影响终端启动）。
 #[cfg(not(windows))]
 fn install_hssh() -> Option<std::path::PathBuf> {
     let dir = crate::settings::bin_dir().ok()?;
-    let path = dir.join("hssh");
-    let need = std::fs::read_to_string(&path)
-        .map(|c| c != HSSH_SCRIPT)
-        .unwrap_or(true);
-    if need {
-        std::fs::write(&path, HSSH_SCRIPT).ok()?;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755));
+    for (name, content) in [("hssh", HSSH_SCRIPT), ("hsshprod", HSSHPROD_SCRIPT)] {
+        let path = dir.join(name);
+        let need = std::fs::read_to_string(&path)
+            .map(|c| c != content)
+            .unwrap_or(true);
+        if need {
+            // hsshprod 安装失败不影响 hssh（hssh 是核心命令，hsshprod 只是别名）
+            if name == "hsshprod" {
+                let _ = std::fs::write(&path, content);
+            } else {
+                std::fs::write(&path, content).ok()?;
+            }
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755));
+        }
     }
     Some(dir)
 }

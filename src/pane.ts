@@ -448,14 +448,15 @@ export class Pane {
    * 就地切换到另一条连接：关闭旧 channel、清空主机相关状态、指向新连接并重开 shell。
    * newConnId 需已建立（SSH）或为 "local"。
    */
-  async switchConnection(newConnId: string): Promise<void> {
+  async switchConnection(newConnId: string, preserve = false): Promise<void> {
     await api.paneClose(this.id).catch(() => {});
     this.connId = newConnId;
     this.cwd = null;
     this.homeDir = null;
     this.shellPid = null; // 旧主机的 shell PID 不能用于新连接的 /proc 读取
     this.statCache.clear();
-    this.term.reset();
+    // preserve=true（SSH 退出回退本地）：不清屏，保留远程输出供用户查看
+    if (!preserve) this.term.reset();
     await this.open();
     this.focus();
   }
@@ -542,10 +543,29 @@ export class Pane {
 
   async copyText(text: string) {
     if (!text) return;
-    // 走 WebView 自身剪贴板：WebKitGTK 已通过 GTK 对接当前桌面剪贴板并常驻持有选区，
-    // 天然跨桌面（GNOME/KDE、X11/Wayland 皆同），无需任何外部工具。
-    // 注意：不用 tauri 插件（底层 arboard 在 WebKitGTK 下写入后不持有选区 → 静默失效）。
-    // ① 首选异步 Clipboard API；② 老 WebKitGTK 无该 API 或无权限时退到同步 execCommand。
+    const tui = this.term.buffer.active.type === "alternate" && this.mouseMode;
+    if (tui) {
+      // TUI 模式（备用屏幕 + 鼠标模式）：避免 execCopy —— 其 DOM 操作（textarea 注入、
+      // select、term.focus）会干扰 xterm 在鼠标模式下的交互状态，导致 TUI 应用重绘/重设。
+      // 只用非侵入式通道：
+      // ① navigator.clipboard.writeText — 大多数时候成功（WebKit → GTK → 系统剪贴板）
+      // ② tauri 插件 writeText — arboard 直写系统剪贴板；与 pasteFromClipboard 的 readText
+      //   同源（均走 arboard），确保读写一致，解决 navigator.clipboard 静默失效时的粘贴错位
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text);
+          return;
+        }
+      } catch {}
+      try {
+        const { writeText } = await import("@tauri-apps/plugin-clipboard-manager");
+        await writeText(text);
+      } catch (err) {
+        console.error("[copy] TUI 写入剪贴板失败:", err);
+      }
+      return;
+    }
+    // 非 TUI 模式：原链路不变（navigator.clipboard → execCopy → tauri 插件）
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
@@ -555,7 +575,6 @@ export class Pane {
       console.warn("[copy] navigator.clipboard 不可用，回退 execCommand:", err);
     }
     if (this.execCopy(text)) return;
-    // 末档：tauri 插件（主要覆盖 macOS/Windows；Linux 上可能不持有选区）
     try {
       const { writeText } = await import("@tauri-apps/plugin-clipboard-manager");
       await writeText(text);
