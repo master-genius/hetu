@@ -1140,11 +1140,7 @@ async function bootstrap() {
         // 仅主题切换时才重设 theme，避免拖透明度时全量重算对比度
         if (themeChanged || baseChanged) {
           const colors: Record<string, string> = { ...theme.colors, background: "#00000000" };
-          // 主题的 selectionBackground 带 alpha（为不透明背景设计），透明背景下不可见。
-          // 去掉 alpha 使其在透明终端上依然清晰。
-          if (colors.selectionBackground) {
-            colors.selectionBackground = colors.selectionBackground.substring(0, 7);
-          }
+          colors.selectionBackground = "#80808059";
           pane.term.options.theme = colors as never;
         }
         // 仅 MCR 实际变化时才重设（O(scrollback) 重算）

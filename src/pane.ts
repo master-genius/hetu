@@ -161,7 +161,7 @@ export class Pane {
       scrollback: 10000,
       theme: (() => {
         const c: Record<string, string> = { ...activeTheme().colors, background: "#00000000" };
-        if (c.selectionBackground) c.selectionBackground = c.selectionBackground.substring(0, 7);
+        c.selectionBackground = "#80808059";
         return c as never;
       })(),
       allowTransparency: true,
