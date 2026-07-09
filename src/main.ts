@@ -978,20 +978,28 @@ async function bootstrap() {
     syncRemotePanel();
     updateRemoteBtn();
   };
-  // 会话快照：每个标签页取其首个 pane 的连接来源（连接项 id，不含机密），防抖写入 session.json。
+  // 会话快照：遍历布局树逐 leaf 记录连接来源（不含机密），防抖写入 session.json。
   // 恢复期间 restoring=true 时跳过，避免在标签页尚未全部重建时把会话写成半截而丢失。
   let restoring = false;
-  /** 布局树 → 可持久化快照（只留结构与比例，比例取 3 位小数避免噪声写盘） */
-  const snapLayout = (n: LayoutNode): SessionLayout =>
-    n.type === "leaf"
-      ? { type: "leaf" }
-      : {
-          type: "split",
-          dir: n.dir,
-          ratio: Math.round(n.ratio * 1000) / 1000,
-          a: snapLayout(n.a),
-          b: snapLayout(n.b),
-        };
+  /** 布局树 → 可持久化快照：每个 leaf 记录自己的连接来源，split 只记结构与比例 */
+  const snapLayout = (n: LayoutNode): SessionLayout => {
+    if (n.type === "leaf") {
+      const info = connMeta.get(n.pane.connId);
+      return {
+        type: "leaf",
+        local: !info || info.local,
+        name: info?.name ?? "本地终端",
+        profileId: info?.profileId ?? null,
+      };
+    }
+    return {
+      type: "split",
+      dir: n.dir,
+      ratio: Math.round(n.ratio * 1000) / 1000,
+      a: snapLayout(n.a),
+      b: snapLayout(n.b),
+    };
+  };
   const snapshotSession = (): Promise<void> => {
     // 未开启「记住最后的会话」时不写盘：既避免无谓写入，也不覆盖上次保存的会话
     if (restoring || !getSettings().restoreSession) return Promise.resolve();
@@ -1262,11 +1270,31 @@ async function bootstrap() {
   // 启动：若开启「记住最后的会话」则恢复上次的标签页并自动连接；否则开一个本地终端。
   // 远程连接只恢复来自已保存连接项（含密钥）的会话；临时/手输、密码认证（未存密码）的一律跳过。
   /**
-   * 按会话快照重建某标签页的分屏结构：对首 pane 递归重放切分（新 pane 沿用被切分
-   * pane 的连接）。快照来自持久化文件，逐节点校验；越界/打开失败即停在当前结构，
-   * 绝不让损坏的 session.json 阻断启动恢复。
+   * 按布局快照重放分屏结构，并为每个 leaf 恢复其各自的连接。
+   *
+   * 外层已按 tab 级信息创建了首个 pane（本地或 SSH 已连接）。rebuild 递归 split
+   * 创建新 pane（继承被切分 pane 的连接），随后对每个 leaf 检查其保存的连接信息：
+   * - 与当前 connId 一致 → 无需切换
+   * - 本地终端 → switchConnection("local")
+   * - SSH 连接 → 建立连接后 switchPaneConnection
+   *
+   * 向后兼容：旧版 session.json 的 leaf 无 local/profileId 字段 → 回退到 tab 级信息，行为同旧版。
    */
   const applySessionLayout = async (tab: Tab, snap?: SessionLayout | null) => {
+    /** 布局树中的 leaf 节点类型（从 discriminated union 中提取） */
+    type LeafNode = Extract<SessionLayout, { type: "leaf" }>;
+    /** 收集布局树中所有 leaf 的连接信息（按前序遍历，与 panes() 顺序一致） */
+    const collectLeaves = (node: SessionLayout | null | undefined): LeafNode[] => {
+      if (!node || node.type !== "split") return [];
+      const out: LeafNode[] = [];
+      const walk = (n: SessionLayout) => {
+        if (n.type === "leaf") out.push(n);
+        else { walk(n.a); walk(n.b); }
+      };
+      walk(node);
+      return out;
+    };
+
     const rebuild = async (node: SessionLayout, pane: Pane): Promise<void> => {
       if (node?.type !== "split" || (node.dir !== "row" && node.dir !== "col")) return;
       const ratio = typeof node.ratio === "number" ? node.ratio : 0.5;
@@ -1275,7 +1303,55 @@ async function bootstrap() {
       await rebuild(node.a, pane);
       await rebuild(node.b, created);
     };
+
     if (snap?.type === "split") await rebuild(snap, tab.layout.panes()[0]);
+
+    // 分屏结构重建后，逐 leaf 校正连接：splitPane 继承了源 pane 的 connId，
+    // 需按快照中各 leaf 自己的连接信息独立切换。
+    const leaves = collectLeaves(snap);
+    const panes = tab.layout.panes();
+    const profiles = leaves.some((l) => !l.local && l.profileId)
+      ? await api.profilesList().catch(() => [] as Profile[])
+      : [];
+
+    for (let i = 0; i < leaves.length && i < panes.length; i++) {
+      const leaf = leaves[i];
+      const pane = panes[i];
+      // 向后兼容：旧版 leaf 无 local 字段 → 跳过（继承 tab 级连接，行为同旧版）
+      if (leaf.local === undefined) break;
+
+      if (leaf.local) {
+        if (!pane.isLocal) {
+          await tabs.switchPaneConnection(tab, pane, "local", leaf.name ?? "本地终端");
+        }
+        continue;
+      }
+
+      // SSH leaf：需要 profileId 且连接项仍存在
+      if (!leaf.profileId) continue;
+      const p = profiles.find((pr) => pr.id === leaf.profileId);
+      if (!p) continue;
+      const hasKey = !!(p.keyData || p.keyPath);
+      if (p.auth !== "key" || !hasKey) continue;
+
+      // 已在同一连接上（外层 connectAndOpenTab 已为此 pane 建立连接）→ 无需切换
+      const info = connMeta.get(pane.connId);
+      if (info && !info.local && info.profileId === leaf.profileId) continue;
+
+      // 建立新 SSH 连接并切换
+      try {
+        const connId = await api.sshConnect({
+          name: p.name, host: p.host, port: p.port, user: p.user,
+          auth: p.auth, keyPath: p.keyPath ?? undefined, keyData: p.keyData ?? undefined,
+          keepalive: p.keepalive ?? undefined, timeout: p.timeout ?? undefined,
+        });
+        recordConn(connId, { name: p.name, host: p.host, port: p.port, user: p.user, auth: p.auth } as ConnParams, p.id);
+        await tabs.switchPaneConnection(tab, pane, connId, p.name);
+      } catch (err) {
+        toast(`恢复分屏连接「${leaf.name}」失败：${err}`, true);
+      }
+    }
+
     // 重放过程中 activePaneId 落在最后创建的 pane 上，恢复完成后焦点回到首 pane
     const first = tab.layout.panes()[0];
     if (first) tab.activePaneId = first.id;

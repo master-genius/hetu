@@ -76,9 +76,9 @@ export interface Settings {
   keybindings: Record<string, string>;
 }
 
-/** 分屏布局快照：只记结构与比例（不含 pane 内容），随会话持久化 */
+/** 分屏布局快照：结构 + 比例 + 每个 leaf 的连接来源，随会话持久化 */
 export type SessionLayout =
-  | { type: "leaf" }
+  | { type: "leaf"; local: boolean; profileId?: string | null; name: string }
   | { type: "split"; dir: "row" | "col"; ratio: number; a: SessionLayout; b: SessionLayout };
 
 /** 会话中一个标签页的可持久化描述（不含任何机密） */
