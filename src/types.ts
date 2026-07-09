@@ -76,9 +76,11 @@ export interface Settings {
   keybindings: Record<string, string>;
 }
 
-/** 分屏布局快照：结构 + 比例 + 每个 leaf 的连接来源，随会话持久化 */
+/** 分屏布局快照：结构 + 比例 + 每个 leaf 的连接来源，随会话持久化。
+ *  local/profileId/name 为可选字段：旧版 session.json 的 leaf 不携带这些字段，
+ *  恢复时回退到 tab 级信息（向后兼容）。 */
 export type SessionLayout =
-  | { type: "leaf"; local: boolean; profileId?: string | null; name: string }
+  | { type: "leaf"; local?: boolean; profileId?: string | null; name?: string }
   | { type: "split"; dir: "row" | "col"; ratio: number; a: SessionLayout; b: SessionLayout };
 
 /** 会话中一个标签页的可持久化描述（不含任何机密） */
