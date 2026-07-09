@@ -17,8 +17,8 @@ const HSSH_OSC = 1729;
 /** hssh 解析出的连接意图（tok 为来源校验令牌）：直连已保存连接项，或临时连接。
  *  feedPath/exitAfter 为自动化喂入字段，旧版 OSC 不携带时为 undefined/false（向后兼容）。 */
 export type HsshSpec =
-  | { tok: string; mode: "profile"; name: string; feedPath?: string; exitAfter?: boolean }
-  | { tok: string; mode: "adhoc"; host: string; user: string; port: string; password: string; identity: string; feedPath?: string; exitAfter?: boolean };
+  | { tok: string; mode: "profile"; name: string; feedPath?: string; exitAfter?: boolean; quiet?: boolean; debug?: boolean }
+  | { tok: string; mode: "adhoc"; host: string; user: string; port: string; password: string; identity: string; feedPath?: string; exitAfter?: boolean; quiet?: boolean; debug?: boolean };
 
 /** base64 → UTF-8 字符串（hssh 各字段单独 base64，避免分隔符冲突）。失败返回空串。 */
 function b64utf8(s: string): string {
@@ -40,9 +40,11 @@ export function parseHssh(data: string): HsshSpec | null {
   const tok = b64utf8(f.tok);
   const feedPath = b64utf8(f.feed) || undefined;
   const exitAfter = b64utf8(f.exit) === "1";
+  const quiet = b64utf8(f.quiet) === "1";
+  const debug = b64utf8(f.debug) === "1";
   if (f.mode === "profile") {
     const name = b64utf8(f.name);
-    return name ? { tok, mode: "profile", name, feedPath, exitAfter } : null;
+    return name ? { tok, mode: "profile", name, feedPath, exitAfter, quiet, debug } : null;
   }
   if (f.mode === "adhoc") {
     const host = b64utf8(f.host);
@@ -57,6 +59,8 @@ export function parseHssh(data: string): HsshSpec | null {
       identity: b64utf8(f.ident),
       feedPath,
       exitAfter,
+      quiet,
+      debug,
     };
   }
   return null;
@@ -119,6 +123,8 @@ export class Pane {
    *  右键 mousedown 可能清除 xterm 选区，此时 getSelection() 返回空。
    *  缓存上次选中文本作为兜底，使右键"复制"和 Ctrl+Shift+C 仍可用。 */
   private lastSelection = "";
+  /** hssh --debug 标志：进程退出时输出状态码提示。仅 hssh --prod --debug 场景为 true。 */
+  debugExit = false;
 
   onFocus: (() => void) | null = null;
   /** 全局快捷键分发：返回 true 表示已处理（不透传给 shell） */
@@ -153,7 +159,11 @@ export class Pane {
       fontWeight: "normal" as never,
       cursorBlink: true,
       scrollback: 10000,
-      theme: { ...activeTheme().colors, background: "#00000000" } as never,
+      theme: (() => {
+        const c: Record<string, string> = { ...activeTheme().colors, background: "#00000000" };
+        if (c.selectionBackground) c.selectionBackground = c.selectionBackground.substring(0, 7);
+        return c as never;
+      })(),
       allowTransparency: true,
       // 深色背景下按前景/背景对比自动微提亮细字，让 canvas 灰度 AA 的文字更"实"
       // 暗色 1.6（高透明度时 1.1 避免白边）；亮色 1.1（极温和微提亮，避免细字发虚，

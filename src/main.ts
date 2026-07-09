@@ -167,6 +167,8 @@ async function bootstrap() {
           void api.sshDisconnect(connId).catch(() => {});
           throw err;
         }
+        // hssh --debug：进程退出时在终端输出状态码提示
+        pane.debugExit = !!spec.debug;
         // 自动化喂入：连接成功后读取临时文件，喂入命令到新 pane
         if (spec.feedPath) {
           try {
@@ -385,7 +387,10 @@ async function bootstrap() {
 
   void events.onPaneExit((e) => {
     const found = tabs.findPane(e.paneId);
-    found?.pane.term.write(`\r\n\x1b[90m[进程已退出，状态码 ${e.status}]\x1b[0m\r\n`);
+    if (found?.pane.debugExit) {
+      found.pane.term.write(`\r\n\x1b[90m[退出，状态码 ${e.status}]\x1b[0m\r\n`);
+      found.pane.debugExit = false;
+    }
   });
 
   void events.onPaneClosed((e) => {
@@ -1134,7 +1139,12 @@ async function bootstrap() {
         pane.term.options.fontWeight = "normal" as never;
         // 仅主题切换时才重设 theme，避免拖透明度时全量重算对比度
         if (themeChanged || baseChanged) {
-          const colors = { ...theme.colors, background: "#00000000" };
+          const colors: Record<string, string> = { ...theme.colors, background: "#00000000" };
+          // 主题的 selectionBackground 带 alpha（为不透明背景设计），透明背景下不可见。
+          // 去掉 alpha 使其在透明终端上依然清晰。
+          if (colors.selectionBackground) {
+            colors.selectionBackground = colors.selectionBackground.substring(0, 7);
+          }
           pane.term.options.theme = colors as never;
         }
         // 仅 MCR 实际变化时才重设（O(scrollback) 重算）
