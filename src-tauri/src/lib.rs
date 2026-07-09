@@ -563,6 +563,20 @@ fn read_key_file(path: String) -> Result<String> {
     Ok(std::fs::read_to_string(&path)?)
 }
 
+/// 读取 hssh --exec/--file/--stdin 写入的临时喂入文件，读完即删。
+/// 限制 1MB；无论读取成功与否都尝试删除临时文件，避免残留。
+#[tauri::command]
+fn read_feed_file(path: String) -> Result<String> {
+    let meta = std::fs::metadata(&path)?;
+    if meta.len() > 1024 * 1024 {
+        let _ = std::fs::remove_file(&path);
+        return Err(Error::msg("喂入文件过大（上限 1MB）"));
+    }
+    let result = std::fs::read_to_string(&path);
+    let _ = std::fs::remove_file(&path);
+    Ok(result?)
+}
+
 /// 用系统默认浏览器打开外部链接（终端里 Ctrl+单击 URL 触发）。
 /// 仅放行 http/https，杜绝把任意字符串当命令参数注入到系统 opener。
 #[tauri::command]
@@ -712,6 +726,7 @@ pub fn run() {
             local_cwd,
             local_tab_info,
             read_key_file,
+            read_feed_file,
             open_external,
             restore_window_size,
         ])

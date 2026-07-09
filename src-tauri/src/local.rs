@@ -183,10 +183,17 @@ usage() {
   -u, --user <用户名>         用户名（也可写成 用户@主机）
   -w, --password <密码>       密码（明文，注意会进 shell 历史）
   -i, --identity <私钥文件>   私钥文件路径
+  -e, --exec <命令>           连接后自动执行命令（多条用分号分隔）
+  -f, --file <脚本文件>       连接后自动执行文件中的命令
+  -s, --stdin                 从标准输入读取命令并执行
+  -x, --exit                  命令执行完后退出，退出码跟随最后一条命令
   -h, --help                  显示此帮助
 示例:
   hssh prod
   hssh root@10.0.0.9 -p 2222 -w 'secret'
+  hssh prod --exec "ls -la; df -h"
+  hssh prod --file deploy.sh --exit
+  echo "uptime; free -m" | hssh prod --stdin --exit
 EOF
 }
 
@@ -198,6 +205,7 @@ case "$first" in -*) usage; exit 1;; esac
 shift
 
 host=""; user=""; port=""; pass=""; ident=""; name=""; adhoc=0
+feed=""; feed_file=""; feed_stdin=0; do_exit=0
 case "$first" in
   *@*) user="${first%@*}"; host="${first#*@}"; adhoc=1;;
   *)   name="$first";;
@@ -211,6 +219,10 @@ while [ $# -gt 0 ]; do
     -u|--user)     need $# "$1"; user="$2"; adhoc=1; shift 2;;
     -w|--password) need $# "$1"; pass="$2"; adhoc=1; shift 2;;
     -i|--identity) need $# "$1"; ident="$2"; adhoc=1; shift 2;;
+    -e|--exec)     need $# "$1"; feed="$2"; shift 2;;
+    -f|--file)     need $# "$1"; feed_file="$2"; shift 2;;
+    -s|--stdin)    feed_stdin=1; shift;;
+    -x|--exit)     do_exit=1; shift;;
     -h|--help)     usage; exit 0;;
     -*)            echo "hssh: 未知选项 $1" >&2; exit 1;;
     *)             host="$1"; adhoc=1; shift;;
@@ -222,16 +234,35 @@ if [ "$adhoc" = 1 ] && [ -n "$name" ] && [ -z "$host" ]; then
   host="$name"; name=""
 fi
 
+# 自动化喂入：收集命令到临时文件，路径随 OSC 传给前端，连接成功后由前端读回喂入。
+# 所有模式均写入临时文件（用完由后端 read_feed_file 删除），原文件不受影响。
+feed_path=""
+if [ -n "$feed_file" ]; then
+  [ -f "$feed_file" ] || { echo "hssh: 文件不存在: $feed_file" >&2; exit 1; }
+  fsize=$(wc -c < "$feed_file" 2>/dev/null || echo 0)
+  [ "$fsize" -gt 1048576 ] && { echo "hssh: 脚本文件过大（上限 1MB）" >&2; exit 1; }
+  feed_path=$(mktemp "${TMPDIR:-/tmp}/hssh_feed.XXXXXX") || { echo "hssh: 创建临时文件失败" >&2; exit 1; }
+  cat "$feed_file" > "$feed_path"
+elif [ -n "$feed" ]; then
+  feed_path=$(mktemp "${TMPDIR:-/tmp}/hssh_feed.XXXXXX") || { echo "hssh: 创建临时文件失败" >&2; exit 1; }
+  printf '%s\n' "$feed" > "$feed_path"
+elif [ "$feed_stdin" = 1 ]; then
+  feed_path=$(mktemp "${TMPDIR:-/tmp}/hssh_feed.XXXXXX") || { echo "hssh: 创建临时文件失败" >&2; exit 1; }
+  cat > "$feed_path"
+fi
+
 # 能力令牌：仅由本地 shell 环境中的 $HSSH_TOKEN 提供，供前端校验来源，
 # 防止终端里被渲染的不可信内容（cat 恶意文件、ls 恶意文件名等）伪造本序列诱导建连。
 tok=$(b64 "${HSSH_TOKEN:-}")
+feed_b64=""; [ -n "$feed_path" ] && feed_b64=$(b64 "$feed_path")
+exit_b64=""; [ "$do_exit" = 1 ] && exit_b64=$(b64 "1")
 if [ -n "$name" ]; then
-  emit "v=1;tok=$tok;mode=profile;name=$(b64 "$name")"
+  emit "v=1;tok=$tok;mode=profile;name=$(b64 "$name");feed=$feed_b64;exit=$exit_b64"
   printf '→ 正在打开连接项「%s」…\n' "$name"
 else
   [ -z "$host" ] && { echo 'hssh: 缺少主机' >&2; exit 1; }
   user="${user:-$(id -un)}"
-  emit "v=1;tok=$tok;mode=adhoc;host=$(b64 "$host");user=$(b64 "$user");port=$(b64 "$port");pass=$(b64 "$pass");ident=$(b64 "$ident")"
+  emit "v=1;tok=$tok;mode=adhoc;host=$(b64 "$host");user=$(b64 "$user");port=$(b64 "$port");pass=$(b64 "$pass");ident=$(b64 "$ident");feed=$feed_b64;exit=$exit_b64"
   printf '→ 正在连接 %s@%s …\n' "$user" "$host"
 fi
 "#;

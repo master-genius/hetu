@@ -20,6 +20,7 @@ import {
 } from "./explorer";
 import { type Action, matchAction, resolveBindings } from "./keybindings";
 import { showAboutDialog, showConnectDialog, showSettingsDialog } from "./dialogs";
+import { feedPane } from "./feed";
 import { initPanelResize } from "./panelResize";
 import {
   confirmDialog, confirmOverwriteDialog, formatSize, showFileTooltip, showMenu, showPreview,
@@ -165,6 +166,15 @@ async function bootstrap() {
           // pane 已关闭或切换失败：回收刚建立的连接，避免泄漏
           void api.sshDisconnect(connId).catch(() => {});
           throw err;
+        }
+        // 自动化喂入：连接成功后读取临时文件，喂入命令到新 pane
+        if (spec.feedPath) {
+          try {
+            const content = await api.readFeedFile(spec.feedPath);
+            void feedPane(pane, content, spec.exitAfter);
+          } catch (err) {
+            toast(`hssh：喂入命令失败: ${err}`, true);
+          }
         }
       };
       const onLocal = async () => {

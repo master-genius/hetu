@@ -74,6 +74,8 @@ export const api = {
   localTabInfo: (paneId: string) =>
     invoke<{ cwd: string; process: string }>("local_tab_info", { paneId }),
   readKeyFile: (path: string) => invoke<string>("read_key_file", { path }),
+  /** 读取 hssh 自动化喂入临时文件（读完即删） */
+  readFeedFile: (path: string) => invoke<string>("read_feed_file", { path }),
   /** 用系统默认浏览器打开外部 http/https 链接 */
   openExternal: (url: string) => invoke<void>("open_external", { url }),
   /** 从最大化还原窗口尺寸（后端直接获取屏幕尺寸 + 设置窗口） */

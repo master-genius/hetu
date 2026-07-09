@@ -14,10 +14,11 @@ import type { FileMeta } from "./types";
 /** hssh 内建命令通过此 OSC 标识符通知前端（见 local.rs 注入的 hssh 脚本）。 */
 const HSSH_OSC = 1729;
 
-/** hssh 解析出的连接意图（tok 为来源校验令牌）：直连已保存连接项，或临时连接。 */
+/** hssh 解析出的连接意图（tok 为来源校验令牌）：直连已保存连接项，或临时连接。
+ *  feedPath/exitAfter 为自动化喂入字段，旧版 OSC 不携带时为 undefined/false（向后兼容）。 */
 export type HsshSpec =
-  | { tok: string; mode: "profile"; name: string }
-  | { tok: string; mode: "adhoc"; host: string; user: string; port: string; password: string; identity: string };
+  | { tok: string; mode: "profile"; name: string; feedPath?: string; exitAfter?: boolean }
+  | { tok: string; mode: "adhoc"; host: string; user: string; port: string; password: string; identity: string; feedPath?: string; exitAfter?: boolean };
 
 /** base64 → UTF-8 字符串（hssh 各字段单独 base64，避免分隔符冲突）。失败返回空串。 */
 function b64utf8(s: string): string {
@@ -37,9 +38,11 @@ export function parseHssh(data: string): HsshSpec | null {
     if (i > 0) f[kv.slice(0, i)] = kv.slice(i + 1);
   }
   const tok = b64utf8(f.tok);
+  const feedPath = b64utf8(f.feed) || undefined;
+  const exitAfter = b64utf8(f.exit) === "1";
   if (f.mode === "profile") {
     const name = b64utf8(f.name);
-    return name ? { tok, mode: "profile", name } : null;
+    return name ? { tok, mode: "profile", name, feedPath, exitAfter } : null;
   }
   if (f.mode === "adhoc") {
     const host = b64utf8(f.host);
@@ -52,6 +55,8 @@ export function parseHssh(data: string): HsshSpec | null {
       port: b64utf8(f.port),
       password: b64utf8(f.pass),
       identity: b64utf8(f.ident),
+      feedPath,
+      exitAfter,
     };
   }
   return null;
