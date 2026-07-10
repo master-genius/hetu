@@ -15,6 +15,8 @@ import type { FileMeta } from "./types";
 const HSSH_OSC = 1729;
 /** hexit 内建命令通过此 OSC 标识符通知前端直接退出（无确认）。 */
 const HEXIT_OSC = 1730;
+/** himage 内建命令通过此 OSC 标识符通知前端弹出图片查看器。 */
+const HIMAGE_OSC = 1731;
 
 /** hssh 解析出的连接意图（tok 为来源校验令牌）：直连已保存连接项，或临时连接。
  *  feedPath/exitAfter 为自动化喂入字段，旧版 OSC 不携带时为 undefined/false（向后兼容）。 */
@@ -142,6 +144,8 @@ export class Pane {
   onHssh: ((spec: HsshSpec, pane: Pane) => void) | null = null;
   /** 内建 hexit 命令：仅本地终端触发，宿主据此直接退出 HetuShell（跳过确认，仍保存会话） */
   onHexit: (() => void) | null = null;
+  /** 内建 himage 命令：仅本地终端触发，paths 为图片绝对路径数组 */
+  onHimage: ((paths: string[], pane: Pane) => void) | null = null;
   /** hssh 来源校验令牌：随本地 shell 注入 $HSSH_TOKEN，OSC 载荷须回带一致值才受理，
    *  杜绝终端里被渲染的不可信内容伪造 hssh 序列诱导建连。每 pane 一枚随机值。 */
   private readonly hsshToken = crypto.randomUUID();
@@ -170,10 +174,10 @@ export class Pane {
       })(),
       allowTransparency: true,
       // 深色背景下按前景/背景对比自动微提亮细字，让 canvas 灰度 AA 的文字更"实"
-      // 暗色 1.57（中透明 1.3，高透明 1.1 避免白边）；亮色 1.1（极温和微提亮，避免细字发虚，
-      // 1.1 只对最暗的颜色做微调，不会误调浅色 ANSI）
+      // 暗色：高不透明(>0.83) 1.61，中(≥0.6) 1.57，中透明(≥0.4) 1.3，高透明 1.1 避免白边；
+      // 亮色 1.1（极温和微提亮，不会误调浅色 ANSI）
       minimumContrastRatio: activeTheme().base === "dark"
-        ? (s.opacity < 0.4 ? 1.1 : s.opacity < 0.6 ? 1.3 : 1.57)
+        ? (s.opacity < 0.4 ? 1.1 : s.opacity < 0.6 ? 1.3 : s.opacity <= 0.83 ? 1.57 : 1.61)
         : 1.1,
     });
     this.fit = new FitAddon();
@@ -220,6 +224,28 @@ export class Pane {
           }
           const tok = b64utf8(f.tok ?? "");
           if (tok && tok === this.hsshToken) this.onHexit?.();
+        }
+      } catch {
+        /* 忽略 */
+      }
+      return true;
+    });
+
+    // himage 内建命令（OSC 1731）：仅本地终端接受，安全模型同 hssh。
+    this.term.parser.registerOscHandler(HIMAGE_OSC, (data) => {
+      try {
+        if (this.isLocal) {
+          const f: Record<string, string> = {};
+          for (const kv of data.split(";")) {
+            const i = kv.indexOf("=");
+            if (i > 0) f[kv.slice(0, i)] = kv.slice(i + 1);
+          }
+          const tok = b64utf8(f.tok ?? "");
+          if (tok && tok === this.hsshToken) {
+            const raw = b64utf8(f.paths ?? "");
+            const paths = raw.split("\n").map((s) => s.trim()).filter(Boolean);
+            if (paths.length > 0) this.onHimage?.(paths, this);
+          }
         }
       } catch {
         /* 忽略 */

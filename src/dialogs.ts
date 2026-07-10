@@ -427,6 +427,8 @@ export function showSettingsDialog() {
             <input name="frostStrength" type="range" min="0" max="100" step="1"></label>
           <label>还原尺寸 <span class="restore-size-val"></span>
             <input name="restoreSize" type="range" min="50" max="90" step="1"></label>
+          <label>图片预览上限 <span class="max-image-mb-val"></span>
+            <input name="maxImageMb" type="range" min="32" max="512" step="1"></label>
           <div class="settings-field">
             <span>界面圆角</span>
             <div class="radius-picker"></div>
@@ -487,6 +489,8 @@ export function showSettingsDialog() {
   q<HTMLElement>(".frost-val").textContent = `${s.frostStrength}%`;
   input("restoreSize").value = String(s.restoreSize);
   q<HTMLElement>(".restore-size-val").textContent = `${s.restoreSize}%`;
+  input("maxImageMb").value = String(s.maxImageMb ?? 128);
+  q<HTMLElement>(".max-image-mb-val").textContent = `${s.maxImageMb ?? 128} MB`;
   input("autoReconnect").checked = s.autoReconnect;
   input("copyOnSelect").checked = s.copyOnSelect;
   input("showScrollbar").checked = s.showScrollbar;
@@ -755,6 +759,7 @@ export function showSettingsDialog() {
       frosted: input("frosted").checked,
       frostStrength: parseInt(input("frostStrength").value, 10) || 0,
       restoreSize: parseInt(input("restoreSize").value, 10) || 78,
+      maxImageMb: Math.max(32, Math.min(512, parseInt(input("maxImageMb").value, 10) || 128)),
       newTabMode: newTabModeSel.getValue() as "local" | "dialog",
       autoReconnect: input("autoReconnect").checked,
       copyOnSelect: input("copyOnSelect").checked,
@@ -796,6 +801,10 @@ export function showSettingsDialog() {
   });
   input("restoreSize").addEventListener("input", () => {
     q<HTMLElement>(".restore-size-val").textContent = `${input("restoreSize").value}%`;
+    debouncedCommit();
+  });
+  input("maxImageMb").addEventListener("input", () => {
+    q<HTMLElement>(".max-image-mb-val").textContent = `${input("maxImageMb").value} MB`;
     debouncedCommit();
   });
 

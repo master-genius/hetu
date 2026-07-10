@@ -23,7 +23,7 @@ import { showAboutDialog, showConnectDialog, showSettingsDialog } from "./dialog
 import { feedPane } from "./feed";
 import { initPanelResize } from "./panelResize";
 import {
-  confirmDialog, confirmOverwriteDialog, formatSize, showFileTooltip, showMenu, showPreview,
+  confirmDialog, confirmOverwriteDialog, formatSize, IMAGE_MIME, showFileTooltip, showHimageViewer, showMenu, showPreview,
   toast,
 } from "./ui";
 import {
@@ -245,6 +245,20 @@ async function bootstrap() {
     ]);
   };
 
+  // himage：在终端内弹出图片查看器（多图可切换、缩放/旋转/底色复用现有组件）
+  const handleHimage = (paths: string[], _pane: Pane) => {
+    const items = paths.map((p) => {
+      const ext = p.split(".").pop()?.toLowerCase() ?? "png";
+      const mime = IMAGE_MIME[ext] ?? "image/png";
+      const name = p.split("/").pop() ?? p;
+      return {
+        name,
+        load: () => api.imagePreview("local", p).then((r) => `data:${mime};base64,${r.data}`),
+      };
+    });
+    showHimageViewer(items);
+  };
+
   const requestCloseTab = async (tab: Tab) => {
     if (tabs.hasBusyPane(tab)) {
       const ok = await confirmDialog(
@@ -282,6 +296,8 @@ async function bootstrap() {
     pane.onHssh = (spec, p) => void handleHssh(spec, p);
     // 内建 hexit 命令：跳过确认，保存会话后直接 destroy（会话下次启动恢复）
     pane.onHexit = () => void performHexit();
+    // 内建 himage 命令：弹出图片查看器
+    pane.onHimage = (paths, p) => handleHimage(paths, p);
     pane.onTooltip = showFileTooltip;
     // Ctrl+单击文件/目录 → 下载（默认 Downloads / 每次询问，按设置）
     pane.onCtrlClick = (path) => void downloadFile(pane, path);
@@ -1143,9 +1159,9 @@ async function bootstrap() {
     const theme = activeTheme();
     const themeChanged = theme.id !== lastThemeId;
     const baseChanged = theme.base !== lastThemeBase;
-    // MCR：暗色 1.57（中透明 1.3，高透明 1.1 避免白边），亮色 1.1（微提亮避免发虚）
+    // 暗色：高不透明(>0.83) 1.61，中(≥0.6) 1.57，中透明(≥0.4) 1.3，高透明 1.1 避免白边
     const mcr = theme.base === "dark"
-      ? (s.opacity < 0.4 ? 1.1 : s.opacity < 0.6 ? 1.3 : 1.57)
+      ? (s.opacity < 0.4 ? 1.1 : s.opacity < 0.6 ? 1.3 : s.opacity <= 0.83 ? 1.57 : 1.61)
       : 1.1;
     const mcrChanged = mcr !== lastMcr;
     // 主题/字号/透明度立即生效（这些不依赖字体加载）
@@ -1253,6 +1269,10 @@ async function bootstrap() {
       case "focusRight": focusNeighbor("right"); break;
       case "focusUp": focusNeighbor("up"); break;
       case "focusDown": focusNeighbor("down"); break;
+      case "resizeLeft": if (tab && p) tab.layout.adjustDivider(p, "left"); break;
+      case "resizeRight": if (tab && p) tab.layout.adjustDivider(p, "right"); break;
+      case "resizeUp": if (tab && p) tab.layout.adjustDivider(p, "up"); break;
+      case "resizeDown": if (tab && p) tab.layout.adjustDivider(p, "down"); break;
       case "copy": {
         const sel = p?.getSelectionText();
         if (p && sel) void p.copyText(sel);

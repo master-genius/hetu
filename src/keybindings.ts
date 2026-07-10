@@ -15,6 +15,10 @@ export type Action =
   | "focusRight"
   | "focusUp"
   | "focusDown"
+  | "resizeLeft"
+  | "resizeRight"
+  | "resizeUp"
+  | "resizeDown"
   | "copy"
   | "paste";
 
@@ -31,6 +35,10 @@ export const ACTIONS: Array<{ action: Action; label: string }> = [
   { action: "focusRight", label: "焦点移到右侧分屏" },
   { action: "focusUp", label: "焦点移到上方分屏" },
   { action: "focusDown", label: "焦点移到下方分屏" },
+  { action: "resizeLeft", label: "调整左侧分割线（左移）" },
+  { action: "resizeRight", label: "调整右侧分割线（右移）" },
+  { action: "resizeUp", label: "调整上方分割线（上移）" },
+  { action: "resizeDown", label: "调整下方分割线（下移）" },
   { action: "copy", label: "复制" },
   { action: "paste", label: "粘贴" },
 ];
@@ -47,6 +55,10 @@ export const DEFAULT_KEYBINDINGS: Record<Action, string> = {
   focusRight: "Alt+ArrowRight",
   focusUp: "Alt+ArrowUp",
   focusDown: "Alt+ArrowDown",
+  resizeLeft: "Ctrl+Shift+ArrowLeft",
+  resizeRight: "Ctrl+Shift+ArrowRight",
+  resizeUp: "Ctrl+Shift+ArrowUp",
+  resizeDown: "Ctrl+Shift+ArrowDown",
   copy: "Ctrl+Shift+KeyC",
   paste: "Ctrl+Shift+KeyV",
 };

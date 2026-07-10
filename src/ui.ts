@@ -483,4 +483,300 @@ export function showImageViewer(name: string, load: Promise<string>): void {
   document.body.appendChild(overlay);
 }
 
+/**
+ * himage 专用图片查看器：支持多图左右切换、80% 屏幕居中、最大化/还原、ESC 确认关闭。
+ * 复用现有 image-viewer 的缩放/旋转/平移/底色逻辑，新增多图导航与最大化。
+ */
+export function showHimageViewer(items: { name: string; load: () => Promise<string> }[]): void {
+  if (items.length === 0) return;
+  let idx = 0;
+  let maximized = false;
+  let thumbsOpen = false;
+  const thumbCache: Map<number, string> = new Map();
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal preview image-viewer himage-viewer">
+      <div class="preview-header">
+        <div class="himage-left">
+          <button class="btn iv-max-toggle" data-act="max" title="最大化/还原">⤢</button>
+          <button class="btn iv-nav" data-act="prev" title="上一张 (←)"${items.length < 2 ? " disabled" : ""}>◀</button>
+          <span class="iv-index"></span>
+          <button class="btn iv-nav" data-act="next" title="下一张 (→)"${items.length < 2 ? " disabled" : ""}>▶</button>
+          ${items.length > 1 ? '<button class="btn iv-thumbs-toggle" data-act="thumbs" title="缩略图列表">▤</button>' : ""}
+        </div>
+        <span class="preview-title"></span>
+        <div class="iv-tools">
+          <button class="btn" data-act="out" title="缩小">−</button>
+          <span class="iv-pct">--</span>
+          <button class="btn" data-act="in" title="放大">＋</button>
+          <button class="btn" data-act="fit" title="适应窗口">适应</button>
+          <button class="btn" data-act="bg" title="切换底色：主题 → 棋盘格 → 白 → 黑">底色</button>
+          <button class="btn" data-act="ccw" title="向左旋转 90°">↺</button>
+          <button class="btn" data-act="cw" title="向右旋转 90°">↻</button>
+          <button class="btn" data-act="close" title="关闭 (ESC)">关闭</button>
+        </div>
+      </div>
+      <div class="himage-content">
+        <div class="himage-thumbs" data-thumbs hidden></div>
+        <div class="preview-body"><p class="hint" style="padding:24px">加载中…</p></div>
+      </div>
+    </div>`;
+
+  const titleEl = overlay.querySelector(".preview-title") as HTMLElement;
+  const indexEl = overlay.querySelector(".iv-index") as HTMLElement;
+  const body = overlay.querySelector(".preview-body") as HTMLElement;
+  const pct = overlay.querySelector(".iv-pct") as HTMLElement;
+  const maxToggle = overlay.querySelector(".iv-max-toggle") as HTMLElement;
+  const thumbsEl = overlay.querySelector("[data-thumbs]") as HTMLElement;
+  const modal = overlay.querySelector(".modal") as HTMLElement;
+  const on = (act: string, fn: () => void) => {
+    const el = overlay.querySelector(`[data-act="${act}"]`);
+    if (el) el.addEventListener("click", fn);
+  };
+
+  let img: HTMLImageElement | null = null;
+  let scale = 1;
+  let rot = 0;
+  let tx = 0;
+  let ty = 0;
+
+  const BG_MODES = ["", "iv-bg-checker", "iv-bg-white", "iv-bg-black"] as const;
+  let bgIdx = 0;
+  const applyBg = () => {
+    if (!img) return;
+    for (const c of BG_MODES) if (c) img.classList.remove(c);
+    const cls = BG_MODES[bgIdx];
+    if (cls) img.classList.add(cls);
+  };
+
+  const apply = () => {
+    if (!img) return;
+    img.style.transform = `translate(${tx}px, ${ty}px) rotate(${rot}deg) scale(${scale})`;
+    pct.textContent = `${Math.round(scale * 100)}%`;
+  };
+  const fitScale = () => {
+    if (!img || !img.naturalWidth || !img.naturalHeight) return 1;
+    const swap = rot % 180 !== 0;
+    const w = swap ? img.naturalHeight : img.naturalWidth;
+    const h = swap ? img.naturalWidth : img.naturalHeight;
+    return Math.min((body.clientWidth - 32) / w, (body.clientHeight - 32) / h, 1) || 1;
+  };
+  const fit = () => {
+    scale = fitScale();
+    tx = ty = 0;
+    apply();
+  };
+  const zoom = (factor: number) => {
+    scale = Math.min(20, Math.max(0.05, scale * factor));
+    apply();
+  };
+  const rotate = (deg: number) => {
+    rot = (rot + deg + 360) % 360;
+    fit();
+  };
+
+  // 多图导航
+  const updateIndex = () => {
+    indexEl.textContent = items.length > 1 ? `${idx + 1}/${items.length}` : "";
+  };
+  const loadImage = (i: number) => {
+    idx = i;
+    updateIndex();
+    titleEl.textContent = items[idx].name;
+
+    // 重置变换（保留 bgIdx：用户选定的底色应跨图片保持）
+    scale = 1; rot = 0; tx = 0; ty = 0;
+    img = null;
+
+    const hint = document.createElement("p");
+    hint.className = "hint";
+    hint.style.padding = "24px";
+    hint.textContent = "加载中…";
+    body.replaceChildren(hint);
+
+    items[idx].load()
+      .then((src) => {
+        const el = document.createElement("img");
+        el.draggable = false;
+        el.onload = () => {
+          img = el;
+          body.replaceChildren(el);
+          applyBg();
+          fit();
+        };
+        el.onerror = () => {
+          const p = document.createElement("p");
+          p.className = "hint";
+          p.style.padding = "24px";
+          p.textContent = "图片解码失败，格式可能不受支持";
+          body.replaceChildren(p);
+        };
+        el.src = src;
+      })
+      .catch((err) => {
+        const p = document.createElement("p");
+        p.className = "hint";
+        p.style.padding = "24px";
+        p.textContent = `加载失败: ${err}`;
+        body.replaceChildren(p);
+      });
+
+    // 预加载相邻图（不显示，仅触发后端读取+缓存）
+    if (items.length > 1) {
+      const next = (idx + 1) % items.length;
+      items[next].load().catch(() => {});
+    }
+
+    // 更新缩略图高亮
+    updateThumbHighlight();
+  };
+
+  const goPrev = () => { if (items.length > 1) loadImage((idx - 1 + items.length) % items.length); };
+  const goNext = () => { if (items.length > 1) loadImage((idx + 1) % items.length); };
+
+  // 缩略图侧边栏
+  const updateThumbHighlight = () => {
+    const thumbs = thumbsEl.querySelectorAll(".himage-thumb");
+    thumbs.forEach((el, i) => el.classList.toggle("active", i === idx));
+    const active = thumbs[idx] as HTMLElement | undefined;
+    if (active) active.scrollIntoView({ block: "nearest" });
+  };
+  const buildThumbs = () => {
+    if (thumbsEl.children.length > 0) return;
+    // IntersectionObserver：仅加载进入视口的缩略图，避免 300 张同时请求
+    const io = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const el = entry.target as HTMLElement;
+        const i = Number(el.dataset.idx);
+        io.unobserve(el);
+        if (thumbCache.has(i)) {
+          const img = document.createElement("img");
+          img.src = thumbCache.get(i)!;
+          img.draggable = false;
+          el.replaceChildren(img);
+        } else {
+          items[i].load().then((src) => {
+            thumbCache.set(i, src);
+            if (thumbsOpen && el.isConnected) {
+              const img = document.createElement("img");
+              img.src = src;
+              img.draggable = false;
+              el.replaceChildren(img);
+            }
+          }).catch(() => {});
+        }
+      }
+    }, { root: thumbsEl, rootMargin: "100px" });
+    items.forEach((item, i) => {
+      const div = document.createElement("div");
+      div.className = "himage-thumb";
+      div.title = item.name;
+      div.dataset.idx = String(i);
+      const ph = document.createElement("div");
+      ph.className = "himage-thumb-placeholder";
+      ph.textContent = "···";
+      div.appendChild(ph);
+      div.addEventListener("click", () => loadImage(i));
+      thumbsEl.appendChild(div);
+      io.observe(div);
+    });
+    updateThumbHighlight();
+  };
+  const toggleThumbs = () => {
+    thumbsOpen = !thumbsOpen;
+    thumbsEl.hidden = !thumbsOpen;
+    modal.classList.toggle("thumbs-open", thumbsOpen);
+    if (thumbsOpen) {
+      buildThumbs();
+      // 已缓存的缩略图渲染出来
+      const thumbs = thumbsEl.querySelectorAll(".himage-thumb");
+      thumbs.forEach((el, i) => {
+        if (thumbCache.has(i) && !el.querySelector("img")) {
+          const img = document.createElement("img");
+          img.src = thumbCache.get(i)!;
+          img.draggable = false;
+          el.replaceChildren(img);
+        }
+      });
+      updateThumbHighlight();
+    }
+    if (img) fit();
+  };
+
+  // 最大化/还原
+  const toggleMax = () => {
+    maximized = !maximized;
+    modal.classList.toggle("iv-maximized", maximized);
+    maxToggle.textContent = maximized ? "⤡" : "⤢";
+    maxToggle.title = maximized ? "还原" : "最大化";
+    if (img) fit();
+  };
+
+  // ESC 确认关闭
+  let closing = false;
+  const close = () => {
+    overlay.remove();
+    window.removeEventListener("keydown", onKey);
+  };
+  const tryClose = () => {
+    if (closing) return;
+    if (items.length > 1) {
+      closing = true;
+      void confirmDialog("关闭图片查看器", "确定要关闭图片查看器吗？").then((ok) => {
+        closing = false;
+        if (ok) close();
+      });
+    } else {
+      close();
+    }
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") { e.preventDefault(); tryClose(); }
+    else if (e.key === "ArrowLeft" && items.length > 1) { e.preventDefault(); goPrev(); }
+    else if (e.key === "ArrowRight" && items.length > 1) { e.preventDefault(); goNext(); }
+  };
+  window.addEventListener("keydown", onKey);
+  overlay.addEventListener("mousedown", (e) => {
+    if (e.target === overlay) tryClose();
+  });
+
+  on("close", tryClose);
+  on("in", () => zoom(1.25));
+  on("out", () => zoom(0.8));
+  on("fit", fit);
+  on("bg", () => { bgIdx = (bgIdx + 1) % BG_MODES.length; applyBg(); });
+  on("ccw", () => rotate(-90));
+  on("cw", () => rotate(90));
+  on("prev", goPrev);
+  on("next", goNext);
+  on("max", toggleMax);
+  on("thumbs", toggleThumbs);
+
+  body.addEventListener("wheel", (e) => { e.preventDefault(); zoom(e.deltaY < 0 ? 1.12 : 1 / 1.12); }, { passive: false });
+  body.addEventListener("mousedown", (e) => {
+    if (!img || e.button !== 0) return;
+    e.preventDefault();
+    const sx = e.clientX - tx;
+    const sy = e.clientY - ty;
+    img.classList.add("panning");
+    const move = (ev: MouseEvent) => { tx = ev.clientX - sx; ty = ev.clientY - sy; apply(); };
+    const up = () => { img?.classList.remove("panning"); window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  });
+  body.addEventListener("dblclick", () => {
+    if (!img) return;
+    const f = fitScale();
+    scale = Math.abs(scale - f) < 0.001 ? 1 : f;
+    tx = ty = 0;
+    apply();
+  });
+
+  document.body.appendChild(overlay);
+  loadImage(0);
+}
+
 // 传输进度面板已迁出到 transfers.ts（列表化、含暂停/取消/删除与速度展示）。

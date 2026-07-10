@@ -449,8 +449,8 @@ body {
 /* 分割线：加粗便于抓取，悬停按方向提示左右/上下拖拽光标 */
 
 .split-divider {
-  flex: 0 0 6px;
-  background: color-mix(in srgb, var(--term-fg) 12%, var(--chrome-rgba));
+  flex: 0 0 5.4px;
+  background: rgba(66, 66, 66, calc(var(--bg-alpha) - 0.15));
   border-radius: 4px;
   transition: background 0.15s;
   position: relative;
@@ -475,7 +475,7 @@ body {
 
 .split-divider:hover,
 .split-divider:active {
-  background: color-mix(in srgb, var(--accent) 75%, transparent);
+  background: rgba(66, 66, 66, calc(var(--bg-alpha) - 0.05));
 }
 
 /* xterm v6 使用 VSCode 风格自定义滚动条（.xterm-scrollable-element > .scrollbar）。
@@ -1791,6 +1791,124 @@ input[type="checkbox"] {
   min-width: 44px;
   text-align: center;
   font-variant-numeric: tabular-nums;
+}
+
+/* ---------- himage 图片查看器（多图导航 + 最大化） ---------- */
+
+.himage-viewer {
+  width: 80vw;
+  max-width: 80vw;
+}
+
+.himage-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.himage-thumbs {
+  width: 140px;
+  flex: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-right: 1px solid color-mix(in srgb, var(--term-fg) 10%, transparent);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.himage-viewer .preview-body {
+  flex: 1;
+}
+
+.himage-thumb {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid transparent;
+  transition: border-color 0.15s;
+}
+
+.himage-thumb:hover {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.himage-thumb.active {
+  border-color: var(--accent);
+}
+
+.himage-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.himage-thumb-placeholder {
+  font-size: 16px;
+  opacity: 0.3;
+}
+
+.iv-thumbs-toggle {
+  padding: 2px 8px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.himage-viewer .preview-body {
+  height: 80vh;
+  max-height: 80vh;
+}
+
+.himage-viewer.iv-maximized {
+  width: 100vw;
+  max-width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  border-radius: 0;
+}
+
+.himage-viewer.iv-maximized .preview-body {
+  height: calc(100vh - var(--preview-header-h, 48px));
+  max-height: none;
+}
+
+.himage-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.iv-index {
+  font-size: 12px;
+  opacity: 0.78;
+  min-width: 56px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.iv-nav {
+  padding: 2px 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.iv-nav:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.iv-max-toggle {
+  padding: 2px 8px;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 /* ---------- toast / 传输进度 ---------- */

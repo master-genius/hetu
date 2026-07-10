@@ -72,6 +72,8 @@ export interface Settings {
   restoreSession: boolean;
   /** 窗口还原尺寸（屏幕占比百分比 35-90，默认 78） */
   restoreSize: number;
+  /** 图片预览单张上限（MB），范围 32–512，默认 128 */
+  maxImageMb: number;
   /** 自定义快捷键：动作 → 组合键（仅存覆盖项） */
   keybindings: Record<string, string>;
 }

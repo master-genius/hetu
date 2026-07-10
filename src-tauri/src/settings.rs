@@ -61,6 +61,9 @@ fn default_source() -> String {
 fn default_restore_size() -> u16 {
     78
 }
+fn default_max_image_mb() -> u16 {
+    128
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -116,6 +119,9 @@ pub struct Settings {
     /// 窗口还原尺寸（屏幕占比百分比 35-90，默认 78）
     #[serde(default = "default_restore_size")]
     pub restore_size: u16,
+    /// 图片预览单张上限（MB），范围 32–512，默认 128
+    #[serde(default = "default_max_image_mb")]
+    pub max_image_mb: u16,
     /// 自定义快捷键：动作 → 组合键（仅存与默认不同的覆盖项）
     #[serde(default)]
     pub keybindings: std::collections::HashMap<String, String>,
@@ -155,6 +161,7 @@ impl Default for Settings {
             track_remote_cwd: true,
             restore_session: true,
             restore_size: 78,
+            max_image_mb: 128,
             keybindings: std::collections::HashMap::new(),
         }
     }

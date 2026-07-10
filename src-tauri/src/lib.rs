@@ -358,18 +358,19 @@ async fn sftp_preview(
     ssh::sftp::preview(&conn, &path, max_bytes).await
 }
 
-/// 图片整读预览（文件面板右键）：本地直接读文件；远端经磁盘缓存
-/// （键含 size+mtime，远端文件变化自动失效），单张上限见 cache::MAX_IMAGE_BYTES。
+/// 图片整读预览（文件面板右键 / himage 命令）：本地直接读文件；远端经磁盘缓存。
+/// 单张上限由设置 max_image_mb 决定（默认 128MB，范围 32–512，非法值回退 64MB）。
 #[tauri::command]
 async fn image_preview(state: State<'_>, conn_id: String, path: String) -> Result<cache::ImageData> {
+    let max_bytes = cache::resolve_max_bytes(settings::load().max_image_mb);
     if conn_id == "local" {
         // 同步文件读取放到阻塞线程池，不占用异步执行器
-        tokio::task::spawn_blocking(move || cache::local_image(&path))
+        tokio::task::spawn_blocking(move || cache::local_image(&path, max_bytes))
             .await
             .map_err(|e| Error::msg(format!("预览任务失败: {e}")))?
     } else {
         let conn = get_conn(&state, &conn_id).await?;
-        cache::remote_image(&conn, &path).await
+        cache::remote_image(&conn, &path, max_bytes).await
     }
 }
 

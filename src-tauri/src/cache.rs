@@ -15,14 +15,25 @@ use serde::Serialize;
 use crate::error::{Error, Result};
 use crate::ssh::conn::Connection;
 
-/// 单张图片上限：base64 后整体驻留内存并跨 IPC 传输，必须设硬上限
-const MAX_IMAGE_BYTES: u64 = 32 * 1024 * 1024;
 /// 缓存总量上限：超出后按最旧优先删除
 const MAX_CACHE_BYTES: u64 = 200 * 1024 * 1024;
 /// 条目最大寿命：7 天未再访问即清除
 const MAX_AGE_SECS: u64 = 7 * 24 * 3600;
 /// 半写残留（.part）超过 1 小时视为死条目（正常写入毫秒级完成）
 const PART_STALE_SECS: u64 = 3600;
+
+/// 图片大小上限的回退值：设置值缺失或非法时使用
+pub const FALLBACK_MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
+
+/// 将用户设置的 max_image_mb 转为字节。
+/// 非法值（0 或溢出）回退 64MB；超出 512 按 512MB 走。
+pub fn resolve_max_bytes(max_image_mb: u16) -> u64 {
+    let mb = max_image_mb as u64;
+    if mb == 0 {
+        return FALLBACK_MAX_IMAGE_BYTES;
+    }
+    mb.clamp(32, 512) * 1024 * 1024
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,11 +51,11 @@ fn preview_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
-fn too_big(size: u64) -> Error {
+fn too_big(size: u64, max_bytes: u64) -> Error {
     Error::msg(format!(
         "图片过大（{} MB，上限 {} MB），请下载后在本地查看",
         size / (1024 * 1024),
-        MAX_IMAGE_BYTES / (1024 * 1024)
+        max_bytes / (1024 * 1024)
     ))
 }
 
@@ -56,43 +67,43 @@ fn encode(bytes: Vec<u8>) -> ImageData {
 }
 
 /// 本地图片：直接整读，无需缓存
-pub fn local_image(path: &str) -> Result<ImageData> {
+pub fn local_image(path: &str, max_bytes: u64) -> Result<ImageData> {
     use std::io::Read;
     let meta = std::fs::metadata(path)?;
     // 拒绝非常规文件：字符设备（如 /dev/zero，无界）、FIFO（open 会阻塞）、目录等
     if !meta.is_file() {
         return Err(Error::msg("不是常规文件，无法预览"));
     }
-    if meta.len() > MAX_IMAGE_BYTES {
-        return Err(too_big(meta.len()));
+    if meta.len() > max_bytes {
+        return Err(too_big(meta.len(), max_bytes));
     }
     // take 兜底：stat 与 read 之间文件可能增长（TOCTOU），按实际读取量二次设限
     let mut buf = Vec::with_capacity(meta.len() as usize);
     std::fs::File::open(path)?
-        .take(MAX_IMAGE_BYTES + 1)
+        .take(max_bytes + 1)
         .read_to_end(&mut buf)?;
-    if buf.len() as u64 > MAX_IMAGE_BYTES {
-        return Err(too_big(buf.len() as u64));
+    if buf.len() as u64 > max_bytes {
+        return Err(too_big(buf.len() as u64, max_bytes));
     }
     Ok(encode(buf))
 }
 
 /// 远端图片：查磁盘缓存（键含 size+mtime，命中即免网络往返），未命中整读远端并落盘
-pub async fn remote_image(conn: &Arc<Connection>, path: &str) -> Result<ImageData> {
+pub async fn remote_image(conn: &Arc<Connection>, path: &str, max_bytes: u64) -> Result<ImageData> {
     let meta = crate::ssh::sftp::stat(conn, path).await?;
     if meta.is_dir {
         return Err(Error::msg("目录不可作为图片预览"));
     }
     let size = meta.size.unwrap_or(0);
-    if size > MAX_IMAGE_BYTES {
-        return Err(too_big(size));
+    if size > max_bytes {
+        return Err(too_big(size, max_bytes));
     }
 
     // 服务端未提供 mtime 时无法构造可靠的失效键（同尺寸修改会永久命中旧内容）：
     // 跳过缓存，直接整读
     let Some(mtime) = meta.mtime else {
         return Ok(encode(
-            crate::ssh::sftp::read_file_bytes(conn, path, MAX_IMAGE_BYTES).await?,
+            crate::ssh::sftp::read_file_bytes(conn, path, max_bytes).await?,
         ));
     };
 
@@ -112,7 +123,7 @@ pub async fn remote_image(conn: &Arc<Connection>, path: &str) -> Result<ImageDat
         }
     }
 
-    let bytes = crate::ssh::sftp::read_file_bytes(conn, path, MAX_IMAGE_BYTES).await?;
+    let bytes = crate::ssh::sftp::read_file_bytes(conn, path, max_bytes).await?;
     // 写缓存失败（磁盘满/权限）只损失缓存，不影响本次预览；temp+rename 防半写被命中
     let tmp = file.with_extension("part");
     if std::fs::write(&tmp, &bytes)

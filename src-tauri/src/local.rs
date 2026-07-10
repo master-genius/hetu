@@ -309,12 +309,68 @@ b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
 emit "tok=$(b64 "${HSSH_TOKEN:-}")"
 "#;
 
+/// himage 图片查看命令：仅本地终端有效，发出 OSC 1731 携带图片路径列表。
+/// 参数可以是图片文件或目录（目录自动扫描图片按名排序，上限 300 张）。
+/// 复用 $HSSH_TOKEN 来源校验。
+#[cfg(not(windows))]
+const HIMAGE_SCRIPT: &str = r#"#!/bin/sh
+# HetuShell 内建命令：在终端内弹出图片查看器。
+# 用法: himage <图片路径|目录> [<图片路径|目录> ...]
+# 目录参数自动展开为目录下的图片文件（按名排序），上限 300 张。
+OSC=1731
+emit() { printf '\033]%s;%s\007' "$OSC" "$1"; }
+b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
+
+# 收集图片路径到 _paths（绝对路径，每行一个）
+_paths=""
+_count=0
+add_path() {
+  _paths="${_paths}${1}
+"
+  _count=$((_count + 1))
+}
+
+for _arg in "$@"; do
+  # 转绝对路径
+  _abs=$(readlink -f "$_arg" 2>/dev/null) || _abs="$_arg"
+  if [ -d "$_abs" ]; then
+    # 扫描目录下的图片（find + while read 安全处理含空格文件名）
+    # 管道子 shell 中变量修改不可见，用临时文件传递
+    _tmpfile=$(mktemp 2>/dev/null) || _tmpfile="/tmp/himage_$$_tmp"
+    _find_expr=""
+    for _ext in png jpg jpeg gif webp bmp svg ico; do
+      _find_expr="${_find_expr:+$_find_expr -o }-iname \"*.$_ext\""
+    done
+    eval "find \"\$_abs\" -maxdepth 1 -type f \( $_find_expr \)" 2>/dev/null | sort > "$_tmpfile"
+    while IFS= read -r _f; do
+      [ -z "$_f" ] && continue
+      [ $_count -ge 300 ] && break
+      add_path "$_f"
+    done < "$_tmpfile"
+    rm -f "$_tmpfile" 2>/dev/null
+  elif [ -f "$_abs" ]; then
+    [ $_count -ge 300 ] && break
+    add_path "$_abs"
+  fi
+done
+
+if [ $_count -eq 0 ]; then
+  echo "himage: 未找到图片文件" >&2
+  exit 1
+fi
+
+# 构造 OSC 载荷：tok=<b64>;paths=<b64 path1>\n<b64 path2>...
+# 路径列表整体 base64 编码（内含换行符，解码后 split 即可）
+_payload="tok=$(b64 "${HSSH_TOKEN:-}");paths=$(printf '%s' "$_paths" | base64 | tr -d '\n')"
+emit "$_payload"
+"#;
+
 /// 把 hssh / hsshprod 脚本落地到 bin 目录并置可执行位，返回该目录用于前置 PATH。
 /// 内容一致则不重写（避免每次 spawn 写盘）；任何失败都返回 None（不影响终端启动）。
 #[cfg(not(windows))]
 fn install_hssh() -> Option<std::path::PathBuf> {
     let dir = crate::settings::bin_dir().ok()?;
-    for (name, content) in [("hssh", HSSH_SCRIPT), ("hsshprod", HSSHPROD_SCRIPT), ("hexit", HEXIT_SCRIPT)] {
+    for (name, content) in [("hssh", HSSH_SCRIPT), ("hsshprod", HSSHPROD_SCRIPT), ("hexit", HEXIT_SCRIPT), ("himage", HIMAGE_SCRIPT)] {
         let path = dir.join(name);
         let need = std::fs::read_to_string(&path)
             .map(|c| c != content)
