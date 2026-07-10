@@ -558,7 +558,7 @@ export function showHimageViewer(
           <span class="iv-index"></span>
           <button class="btn iv-nav" data-act="next" title="下一张 (→)"${items.length < 2 ? " disabled" : ""}>▶</button>
           ${items.length > 1 ? '<button class="btn iv-thumbs-toggle" data-act="thumbs" title="缩略图列表">▤</button>' : ""}
-          ${items.length > 1 ? '<button class="btn iv-play-toggle" data-act="play" title="幻灯片播放 (空格)">▶</button>' : ""}
+          ${items.length > 1 ? '<button class="btn iv-play-toggle" data-act="play" title="幻灯片播放 (空格)">⏯</button>' : ""}
         </div>
         <span class="preview-title"></span>
         <div class="iv-tools">
@@ -771,7 +771,7 @@ export function showHimageViewer(
   const togglePlay = () => {
     playing = !playing;
     if (playToggle) {
-      playToggle.textContent = playing ? "⏸" : "▶";
+      playToggle.textContent = playing ? "⏸" : "⏵";
       playToggle.title = playing ? "暂停 (空格)" : "幻灯片播放 (空格)";
     }
     if (playing) {
@@ -790,11 +790,14 @@ export function showHimageViewer(
     thumbObserver = null;
     cache.clear();
     pending.clear();
-    overlay.remove();
+    // anchor 模式：modal 直接挂在 body 上；非 anchor：modal 在 overlay 内
+    (anchor ? modal : overlay).remove();
     window.removeEventListener("keydown", onKey);
   };
   const tryClose = () => {
     if (closing) return;
+    // anchor 模式（-w 跟随终端）：非独占，直接关闭无确认
+    if (anchor) { close(); return; }
     if (items.length > 1) {
       closing = true;
       void confirmDialog("关闭图片查看器", "确定要关闭图片查看器吗？").then((ok) => {
@@ -812,9 +815,12 @@ export function showHimageViewer(
     else if (e.key === " " && items.length > 1) { e.preventDefault(); togglePlay(); }
   };
   window.addEventListener("keydown", onKey);
-  overlay.addEventListener("mousedown", (e) => {
-    if (e.target === overlay) tryClose();
-  });
+  // anchor 模式无全屏 overlay，不需要点击外部关闭
+  if (!anchor) {
+    overlay.addEventListener("mousedown", (e) => {
+      if (e.target === overlay) tryClose();
+    });
+  }
 
   on("close", tryClose);
   on("in", () => zoom(1.25));
@@ -849,20 +855,21 @@ export function showHimageViewer(
     apply();
   });
 
-  // anchor 模式：弹窗跟随分屏终端大小和位置
+  // anchor 模式：弹窗居中在终端区域，不使用全屏 overlay（非独占，可多开）
   if (anchor) {
-    modal.classList.add("iv-anchored");
-    modal.style.left = `${anchor.left}px`;
-    modal.style.top = `${anchor.top}px`;
-    modal.style.width = `${anchor.width}px`;
-    modal.style.height = `${anchor.height}px`;
+    modal.classList.add("iv-anchored", "iv-compact");
+    modal.style.left = `${anchor.left + anchor.width * 0.1}px`;
+    modal.style.top = `${anchor.top + anchor.height * 0.1}px`;
+    modal.style.width = `${anchor.width * 0.8}px`;
+    modal.style.height = `${anchor.height * 0.8}px`;
     modal.style.maxWidth = "none";
     modal.style.maxHeight = "none";
+    document.body.appendChild(modal);
+  } else {
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
   }
-
-  document.body.appendChild(overlay);
   loadImage(0);
-  precache(0);
 }
 
 // 传输进度面板已迁出到 transfers.ts（列表化、含暂停/取消/删除与速度展示）。

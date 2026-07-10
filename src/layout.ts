@@ -84,34 +84,31 @@ export class Layout {
 
   /**
    * 快捷键调整分割线比例。
-   * 从 root 向下遍历到 target pane 的路径，找第一个方向匹配的 split 节点：
-   * - row split + resizeLeft/Right → 调整水平分割线
-   * - col split + resizeUp/Down → 调整垂直分割线
-   * target 在 a 侧：resizeLeft/Up → ratio 减小；resizeRight/Down → ratio 增大
-   * target 在 b 侧：resizeLeft/Up → ratio 增大；resizeRight/Down → ratio 减小
-   * 找到则调整并 render，找不到（无对应方向分割线）则静默忽略。
+   * 沿 root → target 路径收集 split 节点，取第一个方向匹配的（最外层 = 最左/最上分割线）：
+   * - row split + resizeLeft/Right → 调整垂直分割线
+   * - col split + resizeUp/Down → 调整水平分割线
+   * 方向语义固定：Left/Up → ratio 减小（a 侧变窄）；Right/Down → ratio 增大（a 侧变宽）。
+   * 找不到（无对应方向分割线）则静默忽略。
    */
   adjustDivider(target: Pane, dir: "left" | "right" | "up" | "down", step = 0.015): void {
     const wantRow = dir === "left" || dir === "right";
     const increase = dir === "right" || dir === "down";
 
-    const find = (n: LayoutNode): LayoutNode | null => {
-      if (n.type === "leaf") return null;
-      if (n.dir === (wantRow ? "row" : "col")) {
-        const inA = this.contains(n.a, target);
-        const inB = this.contains(n.b, target);
-        if (inA || inB) return n;
-      }
-      return find(n.a) ?? find(n.b);
+    // 沿 root → target 路径收集 split 节点，取第一个方向匹配的（最外层优先）
+    const path: LayoutNode[] = [];
+    const trace = (n: LayoutNode): boolean => {
+      if (n.type === "leaf") return n.pane === target;
+      path.push(n);
+      const found = trace(n.a) || trace(n.b);
+      if (!found) path.pop();
+      return found;
     };
+    trace(this.root);
 
-    const splitNode = find(this.root);
-    if (!splitNode || splitNode.type === "leaf") return;
+    const splitNode = path.find((n) => n.type === "split" && n.dir === (wantRow ? "row" : "col"));
+    if (!splitNode || splitNode.type !== "split") return;
 
-    const inA = this.contains(splitNode.a, target);
-    // target 在 a 侧：increase → ratio 增大（a 变大）；在 b 侧：increase → ratio 减小（b 变大）
-    const delta = inA ? (increase ? step : -step) : (increase ? -step : step);
-    splitNode.ratio = Math.min(0.9, Math.max(0.1, splitNode.ratio + delta));
+    splitNode.ratio = Math.min(0.9, Math.max(0.1, splitNode.ratio + (increase ? step : -step)));
     this.render();
     this.onChange?.();
   }

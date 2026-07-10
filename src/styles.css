@@ -523,6 +523,14 @@ body {
   padding: 4px;
   border-radius: var(--radius);
   position: relative; /* 标识连接浮层的定位基准 */
+  transition: outline-color 0.15s, box-shadow 0.15s;
+  outline: 1px solid transparent;
+  outline-offset: -1px;
+}
+
+/* 聚焦 pane：柔和边框高亮 */
+.pane-focused {
+  outline-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
 /* 「标识连接」浮层：终端中央的连接名 + 地址，淡入淡出 */
@@ -1072,6 +1080,7 @@ body {
 
 .btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--term-fg) 8%, transparent);
+  color: var(--accent);
 }
 
 .btn.primary {
@@ -1914,12 +1923,30 @@ input[type="checkbox"] {
 
 .himage-viewer.iv-anchored {
   position: fixed;
-  border-radius: 0;
+  border-radius: var(--radius);
+  z-index: 200;
 }
 
 .himage-viewer.iv-anchored .preview-body {
   height: calc(100% - var(--preview-header-h, 48px));
   max-height: none;
+}
+
+/* compact 模式：-w 跟随终端，按钮缩小、头部更紧凑 */
+.iv-compact .preview-header {
+  padding: 6px 10px;
+}
+.iv-compact .iv-tools .btn,
+.iv-compact .himage-left .btn {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+.iv-compact .iv-pct {
+  font-size: 11px;
+  min-width: 40px;
+}
+.iv-compact .preview-title {
+  font-size: 11px;
 }
 
 .iv-play-toggle {

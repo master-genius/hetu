@@ -297,6 +297,11 @@ export class TabManager {
   }
 
   activate(tabId: string) {
+    const prevTab = this.active;
+    // 旧标签页 pane 停止光标闪烁
+    if (prevTab && prevTab.id !== tabId) {
+      prevTab.layout.panes().forEach((p) => p.blur());
+    }
     this.activeTabId = tabId;
     for (const t of this.tabs) {
       const active = t.id === tabId;

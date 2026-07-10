@@ -275,8 +275,15 @@ async function bootstrap() {
 
   tabs.onPaneCreated = (pane, tab) => {
     pane.onFocus = () => {
-      const switched = tab.activePaneId !== pane.id;
+      const prevId = tab.activePaneId;
+      const switched = prevId !== pane.id;
+      // 移除同标签页内其他 pane 的聚焦样式
+      if (switched && prevId) {
+        const prev = tab.layout.panes().find((p) => p.id === prevId);
+        prev?.blur();
+      }
       tab.activePaneId = pane.id;
+      pane.focus();
       if (switched && tab === tabs.active) {
         refreshPanels();
         // 多 pane 分屏：标签标题跟随活动 pane
@@ -1489,6 +1496,8 @@ async function bootstrap() {
       restoring = false;
       if (tabs.tabs.length === 0) void openLocalTab();
       tabs.reorderRestored();
+      // 恢复完成后，聚焦活动标签页的活动 pane
+      tabs.activePane()?.focus();
       snapshotSession();
     });
   }

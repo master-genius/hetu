@@ -597,7 +597,15 @@ export class Pane {
   }
 
   focus() {
+    this.element.classList.add("pane-focused");
+    this.term.options.cursorBlink = true;
     this.term.focus();
+  }
+
+  /** 标记失去焦点：停止光标闪烁，移除聚焦边框 */
+  blur() {
+    this.element.classList.remove("pane-focused");
+    this.term.options.cursorBlink = false;
   }
 
   /** 当前选中文本；若无（如鼠标模式下右键清除了选区），回退到最近非空选区或 DOM 选区 */
