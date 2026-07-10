@@ -113,11 +113,6 @@ export class Layout {
     this.onChange?.();
   }
 
-  private contains(node: LayoutNode, target: Pane): boolean {
-    if (node.type === "leaf") return node.pane === target;
-    return this.contains(node.a, target) || this.contains(node.b, target);
-  }
-
   /** 重建 DOM。pane 元素被移动而非重建，xterm 状态保留。 */
   render(): void {
     this.container.textContent = "";
