@@ -487,12 +487,38 @@ export function showImageViewer(name: string, load: Promise<string>): void {
  * himage 专用图片查看器：支持多图左右切换、80% 屏幕居中、最大化/还原、ESC 确认关闭。
  * 复用现有 image-viewer 的缩放/旋转/平移/底色逻辑，新增多图导航与最大化。
  */
+
+/** 检测图片是否有透明像素（采样检测，大图按 256×256 网格降采样） */
+function hasTransparency(img: HTMLImageElement): boolean {
+  const w = img.naturalWidth, h = img.naturalHeight;
+  if (!w || !h) return false;
+  const canvas = document.createElement("canvas");
+  const step = Math.max(1, Math.floor(Math.min(w, h) / 256));
+  canvas.width = Math.ceil(w / step);
+  canvas.height = Math.ceil(h / step);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return false;
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  try {
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] < 255) return true;
+    }
+  } catch {
+    // 跨域 canvas 污染 → 假定无透明（不误设底色）
+    return false;
+  }
+  return false;
+}
+
 export function showHimageViewer(items: { name: string; load: () => Promise<string> }[]): void {
   if (items.length === 0) return;
   let idx = 0;
   let maximized = false;
   let thumbsOpen = false;
   const thumbCache: Map<number, string> = new Map();
+  const imgCache: Map<number, string> = new Map();
+  let thumbObserver: IntersectionObserver | null = null;
 
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
@@ -596,13 +622,23 @@ export function showHimageViewer(items: { name: string; load: () => Promise<stri
     hint.textContent = "加载中…";
     body.replaceChildren(hint);
 
-    items[idx].load()
+    // 主图加载（带缓存，避免预加载浪费）
+    const loadMain = (i: number): Promise<string> => {
+      const cached = imgCache.get(i);
+      if (cached) return Promise.resolve(cached);
+      return items[i].load().then((src) => { imgCache.set(i, src); return src; });
+    };
+
+    loadMain(idx)
       .then((src) => {
         const el = document.createElement("img");
         el.draggable = false;
         el.onload = () => {
           img = el;
           body.replaceChildren(el);
+          // 首次加载且用户未手动切换底色（bgIdx==0）时，检测透明通道自动选底色：
+          // 透明 PNG/WebP/GIF/ICO/SVG → 棋盘格；普通图片 → 无底色
+          if (bgIdx === 0 && hasTransparency(el)) bgIdx = 1;
           applyBg();
           fit();
         };
@@ -623,10 +659,10 @@ export function showHimageViewer(items: { name: string; load: () => Promise<stri
         body.replaceChildren(p);
       });
 
-    // 预加载相邻图（不显示，仅触发后端读取+缓存）
+    // 预加载相邻图（不显示，仅触发后端读取+缓存到 imgCache）
     if (items.length > 1) {
       const next = (idx + 1) % items.length;
-      items[next].load().catch(() => {});
+      if (!imgCache.has(next)) loadMain(next).catch(() => {});
     }
 
     // 更新缩略图高亮
@@ -646,12 +682,12 @@ export function showHimageViewer(items: { name: string; load: () => Promise<stri
   const buildThumbs = () => {
     if (thumbsEl.children.length > 0) return;
     // IntersectionObserver：仅加载进入视口的缩略图，避免 300 张同时请求
-    const io = new IntersectionObserver((entries) => {
+    thumbObserver = new IntersectionObserver((entries) => {
       for (const entry of entries) {
         if (!entry.isIntersecting) continue;
         const el = entry.target as HTMLElement;
         const i = Number(el.dataset.idx);
-        io.unobserve(el);
+        thumbObserver?.unobserve(el);
         if (thumbCache.has(i)) {
           const img = document.createElement("img");
           img.src = thumbCache.get(i)!;
@@ -681,7 +717,7 @@ export function showHimageViewer(items: { name: string; load: () => Promise<stri
       div.appendChild(ph);
       div.addEventListener("click", () => loadImage(i));
       thumbsEl.appendChild(div);
-      io.observe(div);
+      thumbObserver?.observe(div);
     });
     updateThumbHighlight();
   };
@@ -718,6 +754,10 @@ export function showHimageViewer(items: { name: string; load: () => Promise<stri
   // ESC 确认关闭
   let closing = false;
   const close = () => {
+    thumbObserver?.disconnect();
+    thumbObserver = null;
+    thumbCache.clear();
+    imgCache.clear();
     overlay.remove();
     window.removeEventListener("keydown", onKey);
   };

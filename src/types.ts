@@ -74,6 +74,10 @@ export interface Settings {
   restoreSize: number;
   /** 图片预览单张上限（MB），范围 32–512，默认 128 */
   maxImageMb: number;
+  /** 光标样式："block" | "bar" */
+  cursorStyle: "block" | "bar";
+  /** 光标颜色（#rrggbb）；null 表示跟随主题 */
+  cursorColor: string | null;
   /** 自定义快捷键：动作 → 组合键（仅存覆盖项） */
   keybindings: Record<string, string>;
 }

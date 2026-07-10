@@ -64,6 +64,9 @@ fn default_restore_size() -> u16 {
 fn default_max_image_mb() -> u16 {
     128
 }
+fn default_cursor_style() -> String {
+    "block".to_string()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -122,6 +125,12 @@ pub struct Settings {
     /// 图片预览单张上限（MB），范围 32–512，默认 128
     #[serde(default = "default_max_image_mb")]
     pub max_image_mb: u16,
+    /// 光标样式："block" | "bar"
+    #[serde(default = "default_cursor_style")]
+    pub cursor_style: String,
+    /// 光标颜色（#rrggbb）；None 表示跟随主题
+    #[serde(default)]
+    pub cursor_color: Option<String>,
     /// 自定义快捷键：动作 → 组合键（仅存与默认不同的覆盖项）
     #[serde(default)]
     pub keybindings: std::collections::HashMap<String, String>,
@@ -162,6 +171,8 @@ impl Default for Settings {
             restore_session: true,
             restore_size: 78,
             max_image_mb: 128,
+            cursor_style: "block".into(),
+            cursor_color: None,
             keybindings: std::collections::HashMap::new(),
         }
     }

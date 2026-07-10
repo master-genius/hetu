@@ -433,6 +433,11 @@ export function showSettingsDialog() {
             <span>界面圆角</span>
             <div class="radius-picker"></div>
           </div>
+          <div class="settings-field">
+            <span>光标样式</span>
+            <div class="cursor-picker"></div>
+          </div>
+          <label>光标颜色 <input name="cursorColor" type="color" class="color-input"><button type="button" class="btn cursor-reset" title="重置为跟随主题">重置</button></label>
         </section>
         <section>
           <h4>标签页</h4>
@@ -536,7 +541,51 @@ export function showSettingsDialog() {
   };
   renderRadius();
 
-  // 字体下拉：推荐字体（字重并入名字）在上，系统字体经 list_fonts 异步注入到分隔线下方
+  // 光标样式选择器（复用 radius-picker 的按钮组模式）
+  const cursorPicker = q<HTMLElement>(".cursor-picker");
+  let cursorStyle: "block" | "bar" = s.cursorStyle === "bar" ? "bar" : "block";
+  const renderCursor = () => {
+    cursorPicker.textContent = "";
+    const opts: Array<{ v: "block" | "bar"; label: string; svg: string }> = [
+      { v: "block", label: "方块", svg: '<rect x="8" y="4" width="14" height="16" fill="currentColor"/>' },
+      { v: "bar", label: "竖线", svg: '<rect x="12" y="4" width="3" height="16" fill="currentColor"/>' },
+    ];
+    for (const { v, label, svg } of opts) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "radius-opt" + (v === cursorStyle ? " selected" : "");
+      b.title = label;
+      b.innerHTML = `<svg viewBox="0 0 30 24" width="26" height="21">${svg}</svg>`;
+      b.addEventListener("click", () => {
+        cursorStyle = v;
+        renderCursor();
+        commit();
+      });
+      cursorPicker.appendChild(b);
+    }
+  };
+  renderCursor();
+
+  // 光标颜色选择器
+  const cursorColorInput = input("cursorColor") as HTMLInputElement;
+  const cursorResetBtn = q<HTMLElement>(".cursor-reset");
+  // null = 跟随主题；有值 = 自定义颜色
+  let cursorColor: string | null = s.cursorColor ?? null;
+  if (cursorColor && /^#[0-9a-fA-F]{6}$/.test(cursorColor)) {
+    cursorColorInput.value = cursorColor;
+  } else {
+    cursorColorInput.value = "#88c0d0"; // 占位颜色，实际跟随主题
+  }
+  cursorColorInput.addEventListener("input", () => {
+    const v = cursorColorInput.value.trim();
+    cursorColor = /^#[0-9a-fA-F]{6}$/.test(v) ? v : null;
+    debouncedCommit();
+  });
+  cursorResetBtn.addEventListener("click", () => {
+    cursorColor = null;
+    cursorColorInput.value = "#88c0d0";
+    debouncedCommit();
+  });
   const toOpts = (names: string[]) => names.map((n) => ({ value: n, label: n }));
   // 字体列表可能很长：限高 280px 可滚动，弹框紧凑、顶部内置默认字体始终可见
   const monoFontSel = customSelect(toOpts(MONO_FONTS), s.fontFamily, () => commit(), 280);
@@ -760,6 +809,8 @@ export function showSettingsDialog() {
       frostStrength: parseInt(input("frostStrength").value, 10) || 0,
       restoreSize: parseInt(input("restoreSize").value, 10) || 78,
       maxImageMb: Math.max(32, Math.min(512, parseInt(input("maxImageMb").value, 10) || 128)),
+      cursorStyle,
+      cursorColor,
       newTabMode: newTabModeSel.getValue() as "local" | "dialog",
       autoReconnect: input("autoReconnect").checked,
       copyOnSelect: input("copyOnSelect").checked,

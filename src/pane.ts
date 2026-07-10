@@ -159,6 +159,7 @@ export class Pane {
     this.element.dataset.paneId = id;
 
     const s = getSettings();
+    const theme = activeTheme();
     this.term = new Terminal({
       allowProposedApi: true,
       fontFamily: fontStack(),
@@ -166,17 +167,22 @@ export class Pane {
       // 字重由字体名承载（如 "…Light"），终端统一 normal，避免把 Light 强加到 CJK
       fontWeight: "normal" as never,
       cursorBlink: true,
+      cursorStyle: (s.cursorStyle === "bar" ? "bar" : "block") as never,
+      cursorWidth: s.cursorStyle === "bar" ? 2 : undefined,
       scrollback: 10000,
       theme: (() => {
-        const c: Record<string, string> = { ...activeTheme().colors, background: "#00000000" };
+        const c: Record<string, string> = { ...theme.colors, background: "#00000000" };
         c.selectionBackground = "#8080806B";
+        // 光标颜色：用户自定义优先（校验合法 hex），否则跟随主题（主题已含 cursor）
+        const cc = s.cursorColor?.trim();
+        if (cc && /^#[0-9a-fA-F]{6}$/.test(cc)) c.cursor = cc;
         return c as never;
       })(),
       allowTransparency: true,
       // 深色背景下按前景/背景对比自动微提亮细字，让 canvas 灰度 AA 的文字更"实"
       // 暗色：高不透明(>0.83) 1.61，中(≥0.6) 1.57，中透明(≥0.4) 1.3，高透明 1.1 避免白边；
       // 亮色 1.1（极温和微提亮，不会误调浅色 ANSI）
-      minimumContrastRatio: activeTheme().base === "dark"
+      minimumContrastRatio: theme.base === "dark"
         ? (s.opacity < 0.4 ? 1.1 : s.opacity < 0.6 ? 1.3 : s.opacity <= 0.83 ? 1.57 : 1.61)
         : 1.1,
     });

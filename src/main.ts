@@ -1153,6 +1153,8 @@ async function bootstrap() {
   let lastThemeId = "";
   let lastThemeBase = "";
   let lastMcr = 0;
+  let lastCursorStyle = "";
+  let lastCursorColor = "";
 
   onSettingsChange(() => {
     const s = getSettings();
@@ -1169,10 +1171,19 @@ async function bootstrap() {
       for (const pane of tab.layout.panes()) {
         pane.term.options.fontSize = s.fontSize;
         pane.term.options.fontWeight = "normal" as never;
-        // 仅主题切换时才重设 theme，避免拖透明度时全量重算对比度
-        if (themeChanged || baseChanged) {
+        // 光标样式：非法值回退 block
+        const cStyle = s.cursorStyle === "bar" ? "bar" : "block";
+        if (cStyle !== lastCursorStyle) {
+          pane.term.options.cursorStyle = cStyle as never;
+          pane.term.options.cursorWidth = cStyle === "bar" ? 2 : undefined;
+        }
+        // 光标颜色随 theme 一起重设（cursor 字段在 theme 内）
+        const cursorColorChanged = (s.cursorColor ?? "") !== lastCursorColor;
+        if (themeChanged || baseChanged || cursorColorChanged) {
           const colors: Record<string, string> = { ...theme.colors, background: "#00000000" };
           colors.selectionBackground = "#8080806B";
+          const cc = s.cursorColor?.trim();
+          if (cc && /^#[0-9a-fA-F]{6}$/.test(cc)) colors.cursor = cc;
           pane.term.options.theme = colors as never;
         }
         // 仅 MCR 实际变化时才重设（O(scrollback) 重算）
@@ -1184,6 +1195,8 @@ async function bootstrap() {
     lastThemeId = theme.id;
     lastThemeBase = theme.base;
     lastMcr = mcr;
+    lastCursorStyle = s.cursorStyle;
+    lastCursorColor = s.cursorColor ?? "";
     // 字体单独处理：先确保所选字重（含各自 bold）就绪，再设 fontFamily 触发 xterm
     // 以正确字体重测单元格。否则切到未加载的字体（如 Light）时会用回退字体测量，首帧偏细/错位。
     const px = s.fontSize;

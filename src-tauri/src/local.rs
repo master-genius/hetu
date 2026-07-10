@@ -376,11 +376,11 @@ fn install_hssh() -> Option<std::path::PathBuf> {
             .map(|c| c != content)
             .unwrap_or(true);
         if need {
-            // hsshprod 安装失败不影响 hssh（hssh 是核心命令，hsshprod 只是别名）
-            if name == "hsshprod" {
-                let _ = std::fs::write(&path, content);
-            } else {
+            // hssh 是核心命令，写入失败则整体放弃；其余辅助命令失败不影响 hssh
+            if name == "hssh" {
                 std::fs::write(&path, content).ok()?;
+            } else {
+                let _ = std::fs::write(&path, content);
             }
         }
         #[cfg(unix)]

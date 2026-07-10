@@ -362,7 +362,7 @@ async fn sftp_preview(
 /// 单张上限由设置 max_image_mb 决定（默认 128MB，范围 32–512，非法值回退 64MB）。
 #[tauri::command]
 async fn image_preview(state: State<'_>, conn_id: String, path: String) -> Result<cache::ImageData> {
-    let max_bytes = cache::resolve_max_bytes(settings::load().max_image_mb);
+    let max_bytes = cache::resolve_max_bytes(state.settings.lock().await.max_image_mb);
     if conn_id == "local" {
         // 同步文件读取放到阻塞线程池，不占用异步执行器
         tokio::task::spawn_blocking(move || cache::local_image(&path, max_bytes))

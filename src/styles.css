@@ -1584,6 +1584,27 @@ input[type="checkbox"] {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
+.cursor-picker {
+  display: flex;
+  gap: 6px;
+}
+
+.color-input {
+  width: 32px;
+  height: 26px;
+  padding: 2px;
+  border: 1px solid color-mix(in srgb, var(--term-fg) 18%, transparent);
+  border-radius: var(--radius-tab);
+  background: transparent;
+  cursor: pointer;
+}
+
+.cursor-reset {
+  margin-left: 6px;
+  padding: 2px 10px;
+  font-size: 12px;
+}
+
 .color-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
