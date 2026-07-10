@@ -13,6 +13,8 @@ import type { FileMeta } from "./types";
 
 /** hssh 内建命令通过此 OSC 标识符通知前端（见 local.rs 注入的 hssh 脚本）。 */
 const HSSH_OSC = 1729;
+/** hexit 内建命令通过此 OSC 标识符通知前端直接退出（无确认）。 */
+const HEXIT_OSC = 1730;
 
 /** hssh 解析出的连接意图（tok 为来源校验令牌）：直连已保存连接项，或临时连接。
  *  feedPath/exitAfter 为自动化喂入字段，旧版 OSC 不携带时为 undefined/false（向后兼容）。 */
@@ -138,6 +140,8 @@ export class Pane {
   onCtrlDragStart: ((path: string, e: DragEvent) => void) | null = null;
   /** 内建 hssh 命令：仅本地终端触发，宿主据此按「点面板」路径打开连接 */
   onHssh: ((spec: HsshSpec, pane: Pane) => void) | null = null;
+  /** 内建 hexit 命令：仅本地终端触发，宿主据此直接退出 HetuShell（跳过确认，仍保存会话） */
+  onHexit: (() => void) | null = null;
   /** hssh 来源校验令牌：随本地 shell 注入 $HSSH_TOKEN，OSC 载荷须回带一致值才受理，
    *  杜绝终端里被渲染的不可信内容伪造 hssh 序列诱导建连。每 pane 一枚随机值。 */
   private readonly hsshToken = crypto.randomUUID();
@@ -161,7 +165,7 @@ export class Pane {
       scrollback: 10000,
       theme: (() => {
         const c: Record<string, string> = { ...activeTheme().colors, background: "#00000000" };
-        c.selectionBackground = "#80808059";
+        c.selectionBackground = "#8080806B";
         return c as never;
       })(),
       allowTransparency: true,
@@ -201,6 +205,24 @@ export class Pane {
         }
       } catch {
         /* 忽略：绝不因辅助命令影响终端本身 */
+      }
+      return true;
+    });
+
+    // hexit 内建命令（OSC 1730）：仅本地终端接受，安全模型同 hssh。
+    this.term.parser.registerOscHandler(HEXIT_OSC, (data) => {
+      try {
+        if (this.isLocal) {
+          const f: Record<string, string> = {};
+          for (const kv of data.split(";")) {
+            const i = kv.indexOf("=");
+            if (i > 0) f[kv.slice(0, i)] = kv.slice(i + 1);
+          }
+          const tok = b64utf8(f.tok ?? "");
+          if (tok && tok === this.hsshToken) this.onHexit?.();
+        }
+      } catch {
+        /* 忽略 */
       }
       return true;
     });

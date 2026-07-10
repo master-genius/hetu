@@ -221,7 +221,7 @@ body {
   border-radius: inherit;
   backdrop-filter: var(--bg-blur);
   -webkit-backdrop-filter: var(--bg-blur);
-  background: color-mix(in srgb, var(--term-bg) 36%, transparent);
+  background: color-mix(in srgb, var(--term-bg) 33%, transparent);
 }
 
 /* 仅一个标签页时不显示标签栏（由 JS 切换 .single 类） */

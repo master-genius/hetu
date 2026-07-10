@@ -297,12 +297,24 @@ const HSSHPROD_SCRIPT: &str = r#"#!/bin/sh
 exec hssh --prod --quiet "$@"
 "#;
 
+/// hexit 退出命令：仅本地终端有效，发出 OSC 1730 通知前端直接退出（无确认弹窗）。
+/// 复用 $HSSH_TOKEN 来源校验，防止终端中被渲染的不可信内容伪造退出序列。
+#[cfg(not(windows))]
+const HEXIT_SCRIPT: &str = r#"#!/bin/sh
+# HetuShell 内建命令：直接退出当前 HetuShell 窗口（无确认弹窗）。
+# 通过 OSC 1730 通知宿主前端，仅本地终端有效。
+OSC=1730
+emit() { printf '\033]%s;%s\007' "$OSC" "$1"; }
+b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
+emit "tok=$(b64 "${HSSH_TOKEN:-}")"
+"#;
+
 /// 把 hssh / hsshprod 脚本落地到 bin 目录并置可执行位，返回该目录用于前置 PATH。
 /// 内容一致则不重写（避免每次 spawn 写盘）；任何失败都返回 None（不影响终端启动）。
 #[cfg(not(windows))]
 fn install_hssh() -> Option<std::path::PathBuf> {
     let dir = crate::settings::bin_dir().ok()?;
-    for (name, content) in [("hssh", HSSH_SCRIPT), ("hsshprod", HSSHPROD_SCRIPT)] {
+    for (name, content) in [("hssh", HSSH_SCRIPT), ("hsshprod", HSSHPROD_SCRIPT), ("hexit", HEXIT_SCRIPT)] {
         let path = dir.join(name);
         let need = std::fs::read_to_string(&path)
             .map(|c| c != content)

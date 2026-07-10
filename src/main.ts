@@ -280,6 +280,8 @@ async function bootstrap() {
     pane.onAppKey = (e) => dispatchShortcut(e, pane);
     // 内建 hssh 命令（仅本地终端，Pane 内已按 isLocal 门控）
     pane.onHssh = (spec, p) => void handleHssh(spec, p);
+    // 内建 hexit 命令：跳过确认，保存会话后直接 destroy（会话下次启动恢复）
+    pane.onHexit = () => void performHexit();
     pane.onTooltip = showFileTooltip;
     // Ctrl+单击文件/目录 → 下载（默认 Downloads / 每次询问，按设置）
     pane.onCtrlClick = (path) => void downloadFile(pane, path);
@@ -1055,6 +1057,20 @@ async function bootstrap() {
     await win.destroy().catch(() => { closing = false; });
   };
 
+  // hexit：跳过确认，保存会话后直接 destroy（会话下次启动恢复）。
+  // 复用 closing flag 防重入——若 performClose 已在进行中则不再触发。
+  const performHexit = async (): Promise<void> => {
+    if (closing) return;
+    closing = true;
+    if (saveTimer !== undefined) {
+      window.clearTimeout(saveTimer);
+      saveTimer = undefined;
+    }
+    await snapshotSession();
+    await api.sessionRelease().catch(() => {});
+    await win.destroy().catch(() => { closing = false; });
+  };
+
   // 窗口关闭：onCloseRequested 拦截系统关闭与 btn-close 的 win.close()。
   // preventDefault 后用 setTimeout(0) 把 performClose 移出 listen 回调上下文——
   // snapshotSession/sessionRelease/destroy 均为 IPC invoke，在 listen 回调的
@@ -1140,7 +1156,7 @@ async function bootstrap() {
         // 仅主题切换时才重设 theme，避免拖透明度时全量重算对比度
         if (themeChanged || baseChanged) {
           const colors: Record<string, string> = { ...theme.colors, background: "#00000000" };
-          colors.selectionBackground = "#80808059";
+          colors.selectionBackground = "#8080806B";
           pane.term.options.theme = colors as never;
         }
         // 仅 MCR 实际变化时才重设（O(scrollback) 重算）
