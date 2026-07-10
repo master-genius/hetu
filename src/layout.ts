@@ -91,7 +91,7 @@ export class Layout {
    * target 在 b 侧：resizeLeft/Up → ratio 增大；resizeRight/Down → ratio 减小
    * 找到则调整并 render，找不到（无对应方向分割线）则静默忽略。
    */
-  adjustDivider(target: Pane, dir: "left" | "right" | "up" | "down", step = 0.05): void {
+  adjustDivider(target: Pane, dir: "left" | "right" | "up" | "down", step = 0.015): void {
     const wantRow = dir === "left" || dir === "right";
     const increase = dir === "right" || dir === "down";
 

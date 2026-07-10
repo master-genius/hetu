@@ -246,7 +246,7 @@ async function bootstrap() {
   };
 
   // himage：在终端内弹出图片查看器（多图可切换、缩放/旋转/底色复用现有组件）
-  const handleHimage = (paths: string[], _pane: Pane) => {
+  const handleHimage = (paths: string[], withShell: boolean, pane: Pane) => {
     const items = paths.map((p) => {
       const ext = p.split(".").pop()?.toLowerCase() ?? "png";
       const mime = IMAGE_MIME[ext] ?? "image/png";
@@ -256,7 +256,8 @@ async function bootstrap() {
         load: () => api.imagePreview("local", p).then((r) => `data:${mime};base64,${r.data}`),
       };
     });
-    showHimageViewer(items);
+    const anchor = withShell ? pane.element.getBoundingClientRect() : null;
+    showHimageViewer(items, anchor);
   };
 
   const requestCloseTab = async (tab: Tab) => {
@@ -297,7 +298,7 @@ async function bootstrap() {
     // 内建 hexit 命令：跳过确认，保存会话后直接 destroy（会话下次启动恢复）
     pane.onHexit = () => void performHexit();
     // 内建 himage 命令：弹出图片查看器
-    pane.onHimage = (paths, p) => handleHimage(paths, p);
+    pane.onHimage = (paths, withShell, p) => handleHimage(paths, withShell, p);
     pane.onTooltip = showFileTooltip;
     // Ctrl+单击文件/目录 → 下载（默认 Downloads / 每次询问，按设置）
     pane.onCtrlClick = (path) => void downloadFile(pane, path);
@@ -1161,9 +1162,9 @@ async function bootstrap() {
     const theme = activeTheme();
     const themeChanged = theme.id !== lastThemeId;
     const baseChanged = theme.base !== lastThemeBase;
-    // 暗色：高不透明(>0.83) 1.61，中(≥0.6) 1.57，中透明(≥0.4) 1.3，高透明 1.1 避免白边
+    // 暗色：高不透明(>=0.85) 1.61，中(>=0.6) 1.57，中透明(>=0.4) 1.3，高透明 1.1 避免白边
     const mcr = theme.base === "dark"
-      ? (s.opacity < 0.4 ? 1.1 : s.opacity < 0.6 ? 1.3 : s.opacity <= 0.83 ? 1.57 : 1.61)
+      ? (s.opacity < 0.4 ? 1.1 : s.opacity < 0.6 ? 1.3 : s.opacity < 0.85 ? 1.57 : 1.61)
       : 1.1;
     const mcrChanged = mcr !== lastMcr;
     // 主题/字号/透明度立即生效（这些不依赖字体加载）

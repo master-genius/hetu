@@ -511,13 +511,40 @@ function hasTransparency(img: HTMLImageElement): boolean {
   return false;
 }
 
-export function showHimageViewer(items: { name: string; load: () => Promise<string> }[]): void {
+export function showHimageViewer(
+  items: { name: string; load: () => Promise<string> }[],
+  anchor: DOMRect | null = null,
+): void {
   if (items.length === 0) return;
   let idx = 0;
   let maximized = false;
   let thumbsOpen = false;
-  const thumbCache: Map<number, string> = new Map();
-  const imgCache: Map<number, string> = new Map();
+  const cache: Map<number, string> = new Map();
+  const pending: Map<number, Promise<string>> = new Map();
+  const PRECACHE_COUNT = 25;
+  const loadSrc = (i: number): Promise<string> => {
+    const cached = cache.get(i);
+    if (cached) return Promise.resolve(cached);
+    const p = pending.get(i);
+    if (p) return p;
+    const promise = items[i].load().then((src) => {
+      cache.set(i, src);
+      pending.delete(i);
+      return src;
+    }).catch((err) => {
+      pending.delete(i);
+      throw err;
+    });
+    pending.set(i, promise);
+    return promise;
+  };
+  const precache = (start: number) => {
+    const n = Math.min(PRECACHE_COUNT, items.length);
+    for (let k = 0; k < n; k++) {
+      const i = (start + k) % items.length;
+      loadSrc(i).catch(() => {});
+    }
+  };
   let thumbObserver: IntersectionObserver | null = null;
 
   const overlay = document.createElement("div");
@@ -531,6 +558,7 @@ export function showHimageViewer(items: { name: string; load: () => Promise<stri
           <span class="iv-index"></span>
           <button class="btn iv-nav" data-act="next" title="下一张 (→)"${items.length < 2 ? " disabled" : ""}>▶</button>
           ${items.length > 1 ? '<button class="btn iv-thumbs-toggle" data-act="thumbs" title="缩略图列表">▤</button>' : ""}
+          ${items.length > 1 ? '<button class="btn iv-play-toggle" data-act="play" title="幻灯片播放 (空格)">▶</button>' : ""}
         </div>
         <span class="preview-title"></span>
         <div class="iv-tools">
@@ -555,6 +583,7 @@ export function showHimageViewer(items: { name: string; load: () => Promise<stri
   const body = overlay.querySelector(".preview-body") as HTMLElement;
   const pct = overlay.querySelector(".iv-pct") as HTMLElement;
   const maxToggle = overlay.querySelector(".iv-max-toggle") as HTMLElement;
+  const playToggle = overlay.querySelector(".iv-play-toggle") as HTMLElement | null;
   const thumbsEl = overlay.querySelector("[data-thumbs]") as HTMLElement;
   const modal = overlay.querySelector(".modal") as HTMLElement;
   const on = (act: string, fn: () => void) => {
@@ -622,14 +651,8 @@ export function showHimageViewer(items: { name: string; load: () => Promise<stri
     hint.textContent = "加载中…";
     body.replaceChildren(hint);
 
-    // 主图加载（带缓存，避免预加载浪费）
-    const loadMain = (i: number): Promise<string> => {
-      const cached = imgCache.get(i);
-      if (cached) return Promise.resolve(cached);
-      return items[i].load().then((src) => { imgCache.set(i, src); return src; });
-    };
-
-    loadMain(idx)
+    // 统一缓存加载（imgCache/thumbCache 已合并为 cache）
+    loadSrc(idx)
       .then((src) => {
         const el = document.createElement("img");
         el.draggable = false;
@@ -659,11 +682,8 @@ export function showHimageViewer(items: { name: string; load: () => Promise<stri
         body.replaceChildren(p);
       });
 
-    // 预加载相邻图（不显示，仅触发后端读取+缓存到 imgCache）
-    if (items.length > 1) {
-      const next = (idx + 1) % items.length;
-      if (!imgCache.has(next)) loadMain(next).catch(() => {});
-    }
+    // 预缓存相邻 25 张（本地图片读取快，内存充足，用户有 maxImageMb 兜底）
+    if (items.length > 1) precache(idx);
 
     // 更新缩略图高亮
     updateThumbHighlight();
@@ -688,22 +708,14 @@ export function showHimageViewer(items: { name: string; load: () => Promise<stri
         const el = entry.target as HTMLElement;
         const i = Number(el.dataset.idx);
         thumbObserver?.unobserve(el);
-        if (thumbCache.has(i)) {
-          const img = document.createElement("img");
-          img.src = thumbCache.get(i)!;
-          img.draggable = false;
-          el.replaceChildren(img);
-        } else {
-          items[i].load().then((src) => {
-            thumbCache.set(i, src);
-            if (thumbsOpen && el.isConnected) {
-              const img = document.createElement("img");
-              img.src = src;
-              img.draggable = false;
-              el.replaceChildren(img);
-            }
-          }).catch(() => {});
-        }
+        loadSrc(i).then((src) => {
+          if (thumbsOpen && el.isConnected) {
+            const img = document.createElement("img");
+            img.src = src;
+            img.draggable = false;
+            el.replaceChildren(img);
+          }
+        }).catch(() => {});
       }
     }, { root: thumbsEl, rootMargin: "100px" });
     items.forEach((item, i) => {
@@ -730,9 +742,9 @@ export function showHimageViewer(items: { name: string; load: () => Promise<stri
       // 已缓存的缩略图渲染出来
       const thumbs = thumbsEl.querySelectorAll(".himage-thumb");
       thumbs.forEach((el, i) => {
-        if (thumbCache.has(i) && !el.querySelector("img")) {
+        if (cache.has(i) && !el.querySelector("img")) {
           const img = document.createElement("img");
-          img.src = thumbCache.get(i)!;
+          img.src = cache.get(i)!;
           img.draggable = false;
           el.replaceChildren(img);
         }
@@ -742,8 +754,9 @@ export function showHimageViewer(items: { name: string; load: () => Promise<stri
     if (img) fit();
   };
 
-  // 最大化/还原
+  // 最大化/还原（anchor 模式下无意义，直接跳过）
   const toggleMax = () => {
+    if (anchor) return;
     maximized = !maximized;
     modal.classList.toggle("iv-maximized", maximized);
     maxToggle.textContent = maximized ? "⤡" : "⤢";
@@ -751,13 +764,32 @@ export function showHimageViewer(items: { name: string; load: () => Promise<stri
     if (img) fit();
   };
 
+  // 幻灯片播放
+  let playing = false;
+  let playTimer: ReturnType<typeof setInterval> | null = null;
+  const SLIDE_INTERVAL = 5000;
+  const togglePlay = () => {
+    playing = !playing;
+    if (playToggle) {
+      playToggle.textContent = playing ? "⏸" : "▶";
+      playToggle.title = playing ? "暂停 (空格)" : "幻灯片播放 (空格)";
+    }
+    if (playing) {
+      playTimer = setInterval(() => goNext(), SLIDE_INTERVAL);
+    } else if (playTimer) {
+      clearInterval(playTimer);
+      playTimer = null;
+    }
+  };
+
   // ESC 确认关闭
   let closing = false;
   const close = () => {
+    if (playTimer) clearInterval(playTimer);
     thumbObserver?.disconnect();
     thumbObserver = null;
-    thumbCache.clear();
-    imgCache.clear();
+    cache.clear();
+    pending.clear();
     overlay.remove();
     window.removeEventListener("keydown", onKey);
   };
@@ -777,6 +809,7 @@ export function showHimageViewer(items: { name: string; load: () => Promise<stri
     if (e.key === "Escape") { e.preventDefault(); tryClose(); }
     else if (e.key === "ArrowLeft" && items.length > 1) { e.preventDefault(); goPrev(); }
     else if (e.key === "ArrowRight" && items.length > 1) { e.preventDefault(); goNext(); }
+    else if (e.key === " " && items.length > 1) { e.preventDefault(); togglePlay(); }
   };
   window.addEventListener("keydown", onKey);
   overlay.addEventListener("mousedown", (e) => {
@@ -794,6 +827,7 @@ export function showHimageViewer(items: { name: string; load: () => Promise<stri
   on("next", goNext);
   on("max", toggleMax);
   on("thumbs", toggleThumbs);
+  on("play", togglePlay);
 
   body.addEventListener("wheel", (e) => { e.preventDefault(); zoom(e.deltaY < 0 ? 1.12 : 1 / 1.12); }, { passive: false });
   body.addEventListener("mousedown", (e) => {
@@ -815,8 +849,20 @@ export function showHimageViewer(items: { name: string; load: () => Promise<stri
     apply();
   });
 
+  // anchor 模式：弹窗跟随分屏终端大小和位置
+  if (anchor) {
+    modal.classList.add("iv-anchored");
+    modal.style.left = `${anchor.left}px`;
+    modal.style.top = `${anchor.top}px`;
+    modal.style.width = `${anchor.width}px`;
+    modal.style.height = `${anchor.height}px`;
+    modal.style.maxWidth = "none";
+    modal.style.maxHeight = "none";
+  }
+
   document.body.appendChild(overlay);
   loadImage(0);
+  precache(0);
 }
 
 // 传输进度面板已迁出到 transfers.ts（列表化、含暂停/取消/删除与速度展示）。

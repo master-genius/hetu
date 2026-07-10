@@ -145,7 +145,7 @@ export class Pane {
   /** 内建 hexit 命令：仅本地终端触发，宿主据此直接退出 HetuShell（跳过确认，仍保存会话） */
   onHexit: (() => void) | null = null;
   /** 内建 himage 命令：仅本地终端触发，paths 为图片绝对路径数组 */
-  onHimage: ((paths: string[], pane: Pane) => void) | null = null;
+  onHimage: ((paths: string[], withShell: boolean, pane: Pane) => void) | null = null;
   /** hssh 来源校验令牌：随本地 shell 注入 $HSSH_TOKEN，OSC 载荷须回带一致值才受理，
    *  杜绝终端里被渲染的不可信内容伪造 hssh 序列诱导建连。每 pane 一枚随机值。 */
   private readonly hsshToken = crypto.randomUUID();
@@ -180,10 +180,10 @@ export class Pane {
       })(),
       allowTransparency: true,
       // 深色背景下按前景/背景对比自动微提亮细字，让 canvas 灰度 AA 的文字更"实"
-      // 暗色：高不透明(>0.83) 1.61，中(≥0.6) 1.57，中透明(≥0.4) 1.3，高透明 1.1 避免白边；
+      // 暗色：高不透明(>=0.85) 1.61，中(>=0.6) 1.57，中透明(>=0.4) 1.3，高透明 1.1 避免白边；
       // 亮色 1.1（极温和微提亮，不会误调浅色 ANSI）
       minimumContrastRatio: theme.base === "dark"
-        ? (s.opacity < 0.4 ? 1.1 : s.opacity < 0.6 ? 1.3 : s.opacity <= 0.83 ? 1.57 : 1.61)
+        ? (s.opacity < 0.4 ? 1.1 : s.opacity < 0.6 ? 1.3 : s.opacity < 0.85 ? 1.57 : 1.61)
         : 1.1,
     });
     this.fit = new FitAddon();
@@ -250,7 +250,7 @@ export class Pane {
           if (tok && tok === this.hsshToken) {
             const raw = b64utf8(f.paths ?? "");
             const paths = raw.split("\n").map((s) => s.trim()).filter(Boolean);
-            if (paths.length > 0) this.onHimage?.(paths, this);
+            if (paths.length > 0) this.onHimage?.(paths, (f.w ?? "0") === "1", this);
           }
         }
       } catch {

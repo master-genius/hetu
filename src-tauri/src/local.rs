@@ -316,12 +316,14 @@ emit "tok=$(b64 "${HSSH_TOKEN:-}")"
 const HIMAGE_SCRIPT: &str = r#"#!/bin/sh
 # HetuShell 内建命令：在终端内弹出图片查看器。
 # 用法: himage <图片路径|目录> [<图片路径|目录> ...]
+#       himage -w, --with-shell <图片路径|目录> [...]
+# -w/--with-shell: 弹窗跟随当前终端分屏大小定位
 # 目录参数自动展开为目录下的图片文件（按名排序），上限 300 张。
 OSC=1731
 emit() { printf '\033]%s;%s\007' "$OSC" "$1"; }
 b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
 
-# 收集图片路径到 _paths（绝对路径，每行一个）
+_with_shell=0
 _paths=""
 _count=0
 add_path() {
@@ -331,6 +333,9 @@ add_path() {
 }
 
 for _arg in "$@"; do
+  case "$_arg" in
+    -w|--with-shell) _with_shell=1; continue ;;
+  esac
   # 转绝对路径
   _abs=$(readlink -f "$_arg" 2>/dev/null) || _abs="$_arg"
   if [ -d "$_abs" ]; then
@@ -359,9 +364,8 @@ if [ $_count -eq 0 ]; then
   exit 1
 fi
 
-# 构造 OSC 载荷：tok=<b64>;paths=<b64 path1>\n<b64 path2>...
-# 路径列表整体 base64 编码（内含换行符，解码后 split 即可）
-_payload="tok=$(b64 "${HSSH_TOKEN:-}");paths=$(printf '%s' "$_paths" | base64 | tr -d '\n')"
+# 构造 OSC 载荷：tok=<b64>;paths=<b64>;w=<0|1>
+_payload="tok=$(b64 "${HSSH_TOKEN:-}");paths=$(printf '%s' "$_paths" | base64 | tr -d '\n');w=$_with_shell"
 emit "$_payload"
 "#;
 

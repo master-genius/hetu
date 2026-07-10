@@ -437,7 +437,13 @@ export function showSettingsDialog() {
             <span>光标样式</span>
             <div class="cursor-picker"></div>
           </div>
-          <label>光标颜色 <input name="cursorColor" type="color" class="color-input"><button type="button" class="btn cursor-reset" title="重置为跟随主题">重置</button></label>
+          <div class="settings-field cursor-color-field">
+            <span>光标颜色</span>
+            <div class="cursor-color-row">
+              <input name="cursorColor" type="color" class="color-input">
+              <button type="button" class="btn cursor-reset" title="重置为跟随主题">重置</button>
+            </div>
+          </div>
         </section>
         <section>
           <h4>标签页</h4>
