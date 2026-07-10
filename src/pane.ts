@@ -170,10 +170,10 @@ export class Pane {
       })(),
       allowTransparency: true,
       // 深色背景下按前景/背景对比自动微提亮细字，让 canvas 灰度 AA 的文字更"实"
-      // 暗色 1.6（高透明度时 1.1 避免白边）；亮色 1.1（极温和微提亮，避免细字发虚，
+      // 暗色 1.57（中透明 1.3，高透明 1.1 避免白边）；亮色 1.1（极温和微提亮，避免细字发虚，
       // 1.1 只对最暗的颜色做微调，不会误调浅色 ANSI）
       minimumContrastRatio: activeTheme().base === "dark"
-        ? (s.opacity < 0.4 ? 1.1 : 1.6)
+        ? (s.opacity < 0.4 ? 1.1 : s.opacity < 0.6 ? 1.3 : 1.57)
         : 1.1,
     });
     this.fit = new FitAddon();

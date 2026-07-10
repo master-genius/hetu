@@ -1143,9 +1143,9 @@ async function bootstrap() {
     const theme = activeTheme();
     const themeChanged = theme.id !== lastThemeId;
     const baseChanged = theme.base !== lastThemeBase;
-    // MCR：暗色 1.6（高透明度时 1.1 避免白边），亮色 1.1（微提亮避免发虚）
+    // MCR：暗色 1.57（中透明 1.3，高透明 1.1 避免白边），亮色 1.1（微提亮避免发虚）
     const mcr = theme.base === "dark"
-      ? (s.opacity < 0.4 ? 1.1 : 1.6)
+      ? (s.opacity < 0.4 ? 1.1 : s.opacity < 0.6 ? 1.3 : 1.57)
       : 1.1;
     const mcrChanged = mcr !== lastMcr;
     // 主题/字号/透明度立即生效（这些不依赖字体加载）
