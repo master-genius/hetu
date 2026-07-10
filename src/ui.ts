@@ -855,13 +855,13 @@ export function showHimageViewer(
     apply();
   });
 
-  // anchor 模式：弹窗居中在终端区域，不使用全屏 overlay（非独占，可多开）
+  // anchor 模式：弹窗占满终端区域，不使用全屏 overlay（非独占，可多开）
   if (anchor) {
     modal.classList.add("iv-anchored", "iv-compact");
-    modal.style.left = `${anchor.left + anchor.width * 0.1}px`;
-    modal.style.top = `${anchor.top + anchor.height * 0.1}px`;
-    modal.style.width = `${anchor.width * 0.8}px`;
-    modal.style.height = `${anchor.height * 0.8}px`;
+    modal.style.left = `${anchor.left}px`;
+    modal.style.top = `${anchor.top}px`;
+    modal.style.width = `${anchor.width}px`;
+    modal.style.height = `${anchor.height}px`;
     modal.style.maxWidth = "none";
     modal.style.maxHeight = "none";
     document.body.appendChild(modal);

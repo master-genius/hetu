@@ -523,14 +523,6 @@ body {
   padding: 4px;
   border-radius: var(--radius);
   position: relative; /* 标识连接浮层的定位基准 */
-  transition: outline-color 0.15s, box-shadow 0.15s;
-  outline: 1px solid transparent;
-  outline-offset: -1px;
-}
-
-/* 聚焦 pane：柔和边框高亮 */
-.pane-focused {
-  outline-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
 /* 「标识连接」浮层：终端中央的连接名 + 地址，淡入淡出 */
@@ -1600,10 +1592,28 @@ input[type="checkbox"] {
   gap: 6px;
 }
 
-.cursor-color-row {
+.cursor-field-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+}
+
+.cursor-field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.cursor-sub-label {
+  font-size: 12px;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
+.cursor-reset {
+  padding: 2px 10px;
+  font-size: 12px;
 }
 
 .color-input {
@@ -1614,11 +1624,6 @@ input[type="checkbox"] {
   border-radius: var(--radius-tab);
   background: transparent;
   cursor: pointer;
-}
-
-.cursor-reset {
-  padding: 2px 10px;
-  font-size: 12px;
 }
 
 .color-grid {
@@ -1928,8 +1933,10 @@ input[type="checkbox"] {
 }
 
 .himage-viewer.iv-anchored .preview-body {
-  height: calc(100% - var(--preview-header-h, 48px));
+  height: auto;
   max-height: none;
+  flex: 1;
+  min-height: 0;
 }
 
 /* compact 模式：-w 跟随终端，按钮缩小、头部更紧凑 */

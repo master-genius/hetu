@@ -36,8 +36,8 @@
     </g>
   </g>
 
-  <!-- 四隅黑点（阴/偶）：中空描边 -->
-  <g fill="#0b0f15" stroke="#587482" stroke-width="9">
+  <!-- 四隅黑点（阴/偶）：空心圆，浅色描边确保深色背景可见 -->
+  <g fill="none" stroke="#a6c5d1" stroke-width="9">
     <circle cx="611" cy="341" r="27"/>
     <circle cx="413" cy="341" r="27"/>
     <circle cx="611" cy="539" r="27"/>

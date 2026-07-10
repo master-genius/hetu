@@ -277,7 +277,7 @@ async function bootstrap() {
     pane.onFocus = () => {
       const prevId = tab.activePaneId;
       const switched = prevId !== pane.id;
-      // 移除同标签页内其他 pane 的聚焦样式
+      // 旧 pane 停止光标闪烁
       if (switched && prevId) {
         const prev = tab.layout.panes().find((p) => p.id === prevId);
         prev?.blur();

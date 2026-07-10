@@ -434,14 +434,15 @@ export function showSettingsDialog() {
             <div class="radius-picker"></div>
           </div>
           <div class="settings-field">
-            <span>光标样式</span>
-            <div class="cursor-picker"></div>
-          </div>
-          <div class="settings-field cursor-color-field">
-            <span>光标颜色</span>
-            <div class="cursor-color-row">
-              <input name="cursorColor" type="color" class="color-input">
+            <div class="cursor-field-header">
+              <span>光标样式</span>
               <button type="button" class="btn cursor-reset" title="重置为跟随主题">重置</button>
+            </div>
+            <div class="cursor-field-row">
+              <span class="cursor-sub-label">形状</span>
+              <div class="cursor-picker"></div>
+              <span class="cursor-sub-label">颜色</span>
+              <input name="cursorColor" type="color" class="color-input">
             </div>
           </div>
         </section>
