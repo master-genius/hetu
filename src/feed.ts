@@ -57,9 +57,9 @@ export async function feedPane(
   // PTY 行结束符为 \r（回车），统一换行
   let feed = content.replace(/\r\n/g, "\n").replace(/\n/g, "\r");
   if (!feed.endsWith("\r")) feed += "\r";
-  await api.paneInput(pane.id, b64encode(feed));
   if (exitAfter) {
-    // mpsc channel 保序：上一条 paneInput 已入队，exit $? 必在所有命令之后被 shell 处理
-    await api.paneInput(pane.id, b64encode("exit $?\r"));
+    // exit $? 与 feed 命令合并为一次 paneInput，避免分两次发送时 shell echo 已就绪导致 exit $? 被回显
+    feed += "exit $?\r";
   }
+  await api.paneInput(pane.id, b64encode(feed));
 }

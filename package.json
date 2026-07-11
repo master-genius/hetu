@@ -1,7 +1,7 @@
 {
   "name": "hetushell",
   "private": true,
-  "version": "2.3.4",
+  "version": "2.3.5",
   "author": "BraveWang",
   "license": "MulanPSL-2.0",
   "repository": "https://github.com/master-genius/hetu",
@@ -13,16 +13,16 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.5.0",
-    "@tauri-apps/plugin-clipboard-manager": "^2.2.0",
-    "@tauri-apps/plugin-dialog": "^2.2.0",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.5.0",
+    "@tauri-apps/cli": "^2.11.4",
     "typescript": "^5.6.0",
     "vite": "^6.0.0"
   }

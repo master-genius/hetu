@@ -129,6 +129,10 @@ export class Pane {
   private lastSelection = "";
   /** hssh --debug 标志：进程退出时输出状态码提示。仅 hssh --prod --debug 场景为 true。 */
   debugExit = false;
+  /** WebGL addon 引用，用于 clearTextureAtlas */
+  private webglAddon: { clearTextureAtlas: () => void; dispose: () => void } | null = null;
+  /** 输出停止后清空 WebGL 纹理 atlas 的 debounce 定时器 */
+  private atlasCleanupTimer: number | null = null;
 
   onFocus: (() => void) | null = null;
   /** 全局快捷键分发：返回 true 表示已处理（不透传给 shell） */
@@ -442,9 +446,11 @@ export class Pane {
       // WebGL 上下文丢失（GPU 驱动重置等）时重建渲染器，否则字符纹理累积损坏导致乱码
       addon.onContextLoss(() => {
         addon.dispose();
+        this.webglAddon = null;
         void this.tryWebgl();
       });
       this.term.loadAddon(addon);
+      this.webglAddon = addon;
     } catch {
       /* WebGL 不可用时回退 canvas 渲染 */
     }
@@ -579,6 +585,16 @@ export class Pane {
   write(dataB64: string) {
     this.lastOutputAt = Date.now();
     this.term.write(b64decode(dataB64));
+    // 输出停止后清空 WebGL 纹理 atlas：vim/less 等 TUI 退出时大量 SGR reset
+    // 会在 atlas 中累积无效纹理，高频操作下导致 glyph 纹理错乱（乱码）。
+    // debounce 800ms：输出停止后才触发，用户无感知。
+    if (this.webglAddon) {
+      if (this.atlasCleanupTimer !== null) clearTimeout(this.atlasCleanupTimer);
+      this.atlasCleanupTimer = window.setTimeout(() => {
+        this.atlasCleanupTimer = null;
+        this.webglAddon?.clearTextureAtlas();
+      }, 800);
+    }
   }
 
   /** 繁忙启发式：最近 1.2s 内仍有输出，视为有程序在运行 */
@@ -591,6 +607,8 @@ export class Pane {
     try {
       this.fit.fit();
       void api.paneResize(this.id, this.term.cols, this.term.rows).catch(() => {});
+      // DOM 移动（分屏/拖动分割线）后 canvas 可能未重绘，强制刷新整个 buffer
+      this.term.refresh(0, this.term.rows - 1);
     } catch {
       /* 布局未就绪 */
     }
@@ -815,6 +833,10 @@ export class Pane {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    if (this.atlasCleanupTimer !== null) {
+      clearTimeout(this.atlasCleanupTimer);
+      this.atlasCleanupTimer = null;
+    }
     if (this.wheelRafId !== null) {
       cancelAnimationFrame(this.wheelRafId);
       this.wheelRafId = null;

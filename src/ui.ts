@@ -354,8 +354,10 @@ export function showImageViewer(name: string, load: Promise<string>): void {
   overlay.querySelector(".preview-title")!.textContent = name;
   const body = overlay.querySelector(".preview-body") as HTMLElement;
   const pct = overlay.querySelector(".iv-pct") as HTMLElement;
-  const on = (act: string, fn: () => void) =>
-    overlay.querySelector(`[data-act="${act}"]`)!.addEventListener("click", fn);
+  const on = (act: string, fn: () => void) => {
+    const el = overlay.querySelector(`[data-act="${act}"]`) as HTMLElement | null;
+    if (el) el.addEventListener("click", () => { el.blur(); fn(); });
+  };
 
   let img: HTMLImageElement | null = null;
   let scale = 1;
@@ -403,12 +405,12 @@ export function showImageViewer(name: string, load: Promise<string>): void {
 
   const close = () => {
     overlay.remove();
-    window.removeEventListener("keydown", onKey);
+    window.removeEventListener("keydown", onKey, true);
   };
   const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") close();
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
   };
-  window.addEventListener("keydown", onKey);
+  window.addEventListener("keydown", onKey, true);
   overlay.addEventListener("mousedown", (e) => {
     if (e.target === overlay) close();
   });
@@ -521,7 +523,7 @@ export function showHimageViewer(
   let thumbsOpen = false;
   const cache: Map<number, string> = new Map();
   const pending: Map<number, Promise<string>> = new Map();
-  const PRECACHE_COUNT = 25;
+  const PRECACHE_COUNT = 10;
   const loadSrc = (i: number): Promise<string> => {
     const cached = cache.get(i);
     if (cached) return Promise.resolve(cached);
@@ -587,8 +589,8 @@ export function showHimageViewer(
   const thumbsEl = overlay.querySelector("[data-thumbs]") as HTMLElement;
   const modal = overlay.querySelector(".modal") as HTMLElement;
   const on = (act: string, fn: () => void) => {
-    const el = overlay.querySelector(`[data-act="${act}"]`);
-    if (el) el.addEventListener("click", fn);
+    const el = overlay.querySelector(`[data-act="${act}"]`) as HTMLElement | null;
+    if (el) el.addEventListener("click", () => { el.blur(); fn(); });
   };
 
   let img: HTMLImageElement | null = null;
@@ -792,7 +794,7 @@ export function showHimageViewer(
     pending.clear();
     // anchor 模式：modal 直接挂在 body 上；非 anchor：modal 在 overlay 内
     (anchor ? modal : overlay).remove();
-    window.removeEventListener("keydown", onKey);
+    window.removeEventListener("keydown", onKey, true);
   };
   const tryClose = () => {
     if (closing) return;
@@ -809,12 +811,12 @@ export function showHimageViewer(
     }
   };
   const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") { e.preventDefault(); tryClose(); }
-    else if (e.key === "ArrowLeft" && items.length > 1) { e.preventDefault(); goPrev(); }
-    else if (e.key === "ArrowRight" && items.length > 1) { e.preventDefault(); goNext(); }
-    else if (e.key === " " && items.length > 1) { e.preventDefault(); togglePlay(); }
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); tryClose(); }
+    else if (e.key === "ArrowLeft" && items.length > 1) { e.preventDefault(); e.stopPropagation(); goPrev(); }
+    else if (e.key === "ArrowRight" && items.length > 1) { e.preventDefault(); e.stopPropagation(); goNext(); }
+    else if (e.key === " " && items.length > 1) { e.preventDefault(); e.stopPropagation(); togglePlay(); }
   };
-  window.addEventListener("keydown", onKey);
+  window.addEventListener("keydown", onKey, true);
   // anchor 模式无全屏 overlay，不需要点击外部关闭
   if (!anchor) {
     overlay.addEventListener("mousedown", (e) => {
