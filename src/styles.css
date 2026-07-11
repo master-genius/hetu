@@ -403,7 +403,7 @@ body {
 .layout-root {
   position: absolute;
   inset: 0;
-  padding: 4px;
+  padding: 4px 4px 2px 4px;
 }
 
 /* 非活动标签：保持尺寸、仅隐藏，切换瞬时无重排/重绘闪烁 */
