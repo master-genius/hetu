@@ -66,8 +66,7 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  /* 底部留 3px 内填充：终端内容不贴死窗口下缘，避免显得紧蹙 */
-  padding-bottom: 3px;
+  /* 底部内填充已由 .layout-root(4px) + .xterm(2px) 提供，不再额外加 */
   /* 磨砂质感层（::before, z-index:-1）的定位与层叠基准 */
   position: relative;
   isolation: isolate;
@@ -564,7 +563,7 @@ body {
   height: 100%;
   /* padding 放在 .xterm 上而非 .pane：FitAddon 读取 .xterm 的 padding 来扣减可用高度，
      若 padding 在 .pane 上则被忽略，终端会多渲染一行溢出到 padding 区域，文本紧贴边缘 */
-  padding: 4px;
+  padding: 4px 4px 2px 4px;
 }
 
 /* Ctrl 悬停在文件/目录上：手形光标，提示可点击下载 / 拖拽到文件管理器 */

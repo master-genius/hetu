@@ -174,6 +174,9 @@ export class Pane {
       cursorStyle: (s.cursorStyle === "bar" ? "bar" : "block") as never,
       cursorWidth: s.cursorStyle === "bar" ? 2 : undefined,
       scrollback: 10000,
+      // FitAddon 在 scrollback>0 时默认预留 14px 滚动条宽度，但我们的自定义滚动条是 2px overlay
+      // 不占布局空间，设为 0 避免右侧多出 ~14px 死空间
+      overviewRuler: { width: 0 } as never,
       theme: (() => {
         const c: Record<string, string> = { ...theme.colors, background: "#00000000" };
         c.selectionBackground = "#8080806B";
