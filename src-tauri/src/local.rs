@@ -197,7 +197,7 @@ prod 模式选项（仅在 --prod 下生效）:
   -h, --help                  显示此帮助
 
 示例:
-  hssh prod
+  hssh myserver
   hssh root@10.0.0.9 -p 2222 -w 'secret'
   hssh --prod claude --exec "ls -la; df -h"
   hssh --prod claude --file deploy.sh --exit
@@ -206,33 +206,23 @@ EOF
 }
 
 [ $# -eq 0 ] && { usage; exit 1; }
-case "$1" in -h|--help) usage; exit 0;; esac
 
-# prod 模式预扫描：--prod 作为首参数时消费它，后续参数同常规解析。
-# --prod 也可出现在选项中（hssh claude --prod --exec "ls"），option loop 会再设一次。
+# 预扫描 --prod：可出现在任意位置，prod 选项（-e/-f/-s/-x）依赖此标志
 prod_mode=0
-if [ "$1" = "--prod" ]; then
-  prod_mode=1
-  shift
-  [ $# -eq 0 ] && { echo "hssh: --prod 需要连接项名称或主机" >&2; exit 1; }
-fi
+for _a in "$@"; do
+  case "$_a" in --prod) prod_mode=1;; esac
+done
 
-first="$1"
-case "$first" in -*) usage; exit 1;; esac
-shift
-
+# 单遍参数解析：连接信息（连接项名或 user@host）可在任意位置出现
 host=""; user=""; port=""; pass=""; ident=""; name=""; adhoc=0
 feed=""; feed_file=""; feed_stdin=0; do_exit=0; quiet=0; debug=0
-case "$first" in
-  *@*) user="${first%@*}"; host="${first#*@}"; adhoc=1;;
-  *)   name="$first";;
-esac
+_first_pos=1
 
-# 选项取值前先确认还有参数，避免「选项作为末位参数缺值」时 shift 2 触发死循环/报错。
 need() { [ "$1" -ge 2 ] || { echo "hssh: 选项 $2 缺少参数" >&2; exit 1; }; }
 while [ $# -gt 0 ]; do
   case "$1" in
-    --prod)        prod_mode=1; shift;;
+    -h|--help)     usage; exit 0;;
+    --prod)        shift;;
     -p|--port)     need $# "$1"; port="$2"; adhoc=1; shift 2;;
     -u|--user)     need $# "$1"; user="$2"; adhoc=1; shift 2;;
     -w|--password) need $# "$1"; pass="$2"; adhoc=1; shift 2;;
@@ -243,15 +233,28 @@ while [ $# -gt 0 ]; do
     -x|--exit)     [ "$prod_mode" = 1 ] || { echo "hssh: --exit 需要 --prod 模式" >&2; exit 1; }; do_exit=1; shift;;
     --quiet)       quiet=1; shift;;
     --debug)       debug=1; shift;;
-    -h|--help)     usage; exit 0;;
     -*)            echo "hssh: 未知选项 $1" >&2; exit 1;;
-    *)             host="$1"; adhoc=1; shift;;
+    *)             if [ "$_first_pos" = 1 ]; then
+                     case "$1" in
+                       *@*) user="${1%@*}"; host="${1#*@}"; adhoc=1;;
+                       *)   name="$1";;
+                     esac
+                     _first_pos=0
+                   else
+                     host="$1"; adhoc=1
+                   fi
+                   shift;;
   esac
 done
 
 # 裸名 + 任一连接选项 → 视为临时连接到该主机（而非连接项名），兑现 `hssh 主机 -p/-w …`。
 if [ "$adhoc" = 1 ] && [ -n "$name" ] && [ -z "$host" ]; then
   host="$name"; name=""
+fi
+
+# 必须有连接目标
+if [ -z "$name" ] && [ -z "$host" ]; then
+  echo "hssh: 需要连接项名称或主机" >&2; exit 1
 fi
 
 # 自动化喂入（仅 prod 模式）：收集命令到临时文件，路径随 OSC 传给前端，连接成功后由前端读回喂入。
@@ -315,13 +318,27 @@ emit "tok=$(b64 "${HSSH_TOKEN:-}")"
 #[cfg(not(windows))]
 const HIMAGE_SCRIPT: &str = r#"#!/bin/sh
 # HetuShell 内建命令：在终端内弹出图片查看器。
-# 用法: himage <图片路径|目录> [<图片路径|目录> ...]
-#       himage -w, --with-shell <图片路径|目录> [...]
+# 用法: himage [选项] <图片路径|目录> [<图片路径|目录> ...]
+#       himage -h, --help
 # -w/--with-shell: 弹窗跟随当前终端分屏大小定位
 # 目录参数自动展开为目录下的图片文件（按名排序），上限 300 张。
 OSC=1731
 emit() { printf '\033]%s;%s\007' "$OSC" "$1"; }
 b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
+
+usage() {
+  cat <<'EOF'
+用法: himage [选项] <图片路径|目录> [<图片路径|目录> ...]
+选项:
+  -w, --with-shell    弹窗跟随当前终端分屏大小定位
+  -h, --help          显示此帮助
+参数可以是图片文件或目录（目录自动扫描图片按名排序，上限 300 张）。
+支持格式: png jpg jpeg gif webp bmp svg ico
+EOF
+}
+
+# 无参数 → 显示帮助
+[ $# -eq 0 ] && { usage; exit 0; }
 
 _with_shell=0
 _paths=""
@@ -334,10 +351,11 @@ add_path() {
 
 for _arg in "$@"; do
   case "$_arg" in
+    -h|--help) usage; exit 0 ;;
     -w|--with-shell) _with_shell=1; continue ;;
   esac
   # 转绝对路径
-  _abs=$(readlink -f "$_arg" 2>/dev/null) || _abs="$_arg"
+  _abs=$(readlink -f -- "$_arg" 2>/dev/null) || _abs="$_arg"
   if [ -d "$_abs" ]; then
     # 扫描目录下的图片（find + while read 安全处理含空格文件名）
     # 管道子 shell 中变量修改不可见，用临时文件传递
