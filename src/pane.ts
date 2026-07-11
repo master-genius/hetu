@@ -18,6 +18,18 @@ const HEXIT_OSC = 1730;
 /** himage 内建命令通过此 OSC 标识符通知前端弹出图片查看器。 */
 const HIMAGE_OSC = 1731;
 
+// FitAddon 在 scrollback>0 时硬编码预留 14px 滚动条宽度，我们的滚动条是 overlay 不占布局空间，patch 掉
+{
+  const o = FitAddon.prototype.proposeDimensions;
+  FitAddon.prototype.proposeDimensions = function () {
+    const t = (this as any)._terminal;
+    if (!t) return o.call(this);
+    const s = t.options.scrollback; t.options.scrollback = 0;
+    const d = o.call(this); t.options.scrollback = s;
+    return d;
+  };
+}
+
 /** hssh 解析出的连接意图（tok 为来源校验令牌）：直连已保存连接项，或临时连接。
  *  feedPath/exitAfter 为自动化喂入字段，旧版 OSC 不携带时为 undefined/false（向后兼容）。 */
 export type HsshSpec =
@@ -174,9 +186,6 @@ export class Pane {
       cursorStyle: (s.cursorStyle === "bar" ? "bar" : "block") as never,
       cursorWidth: s.cursorStyle === "bar" ? 2 : undefined,
       scrollback: 10000,
-      // FitAddon 在 scrollback>0 时默认预留 14px 滚动条宽度，但我们的自定义滚动条是 2px overlay
-      // 不占布局空间，设为 0 避免右侧多出 ~14px 死空间
-      overviewRuler: { width: 0 } as never,
       theme: (() => {
         const c: Record<string, string> = { ...theme.colors, background: "#00000000" };
         c.selectionBackground = "#8080806B";
