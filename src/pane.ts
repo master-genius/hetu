@@ -129,6 +129,10 @@ export class Pane {
   private lastSelection = "";
   /** hssh --debug 标志：进程退出时输出状态码提示。仅 hssh --prod --debug 场景为 true。 */
   debugExit = false;
+  /** WebGL addon 引用，用于 dispose + 重建（Ctrl+Shift+R / onContextLoss） */
+  private webglAddon: { dispose: () => void } | null = null;
+  /** WebGL renderer 原型 patch 是否已应用（全局一次性，所有 pane 共享同一原型） */
+  private static webglPatched = false;
 
   onFocus: (() => void) | null = null;
   /** 全局快捷键分发：返回 true 表示已处理（不透传给 shell） */
@@ -435,6 +439,49 @@ export class Pane {
     this.resizeObserver.observe(this.element);
   }
 
+  /**
+   * 对 xterm.js WebGL addon 的渲染器原型做一次性 patch，修复 texture atlas
+   * page merge 导致的同帧渲染不一致（xterm.js #4480）。
+   *
+   * Bug 时序：_updateModel 增量更新中途触发 page merge → 原地修改 glyph.texturePage
+   * → 前半行用旧索引、后半行用新索引 → 顶点缓冲混合 → 乱码。
+   * _requestClearModel 延迟到下一帧才生效，且原始 beginFrame() 从不重置该标志。
+   *
+   * Patch 1 — beginFrame：读取后重置 _requestClearModel，避免每帧全量重建。
+   * Patch 2 — _updateModel：增量更新后检查 merge 是否触发，若是则立即全量重建，
+   *           保证当前帧 model 与 atlas 状态一致。
+   *
+   * 所有 pane 共享同一原型，只需 patch 一次。
+   */
+  private patchWebglRenderer(renderer: any): void {
+    if (Pane.webglPatched) return;
+    const proto = Object.getPrototypeOf(renderer);
+    const atlas = renderer._charAtlas;
+    if (!atlas) return;
+
+    // Patch 1: beginFrame — 读取后重置，原始代码从不重置导致每帧全量重建
+    const atlasProto = Object.getPrototypeOf(atlas);
+    atlasProto.beginFrame = function (this: any): boolean {
+      const v = this._requestClearModel;
+      this._requestClearModel = false;
+      return v;
+    };
+
+    // Patch 2: _updateModel — 增量更新后若 merge 触发，立即全量重建
+    const origUpdateModel = proto._updateModel;
+    proto._updateModel = function (this: any, start: number, end: number): void {
+      const isIncremental = start !== 0 || end !== this._terminal.rows - 1;
+      origUpdateModel.call(this, start, end);
+      if (isIncremental && this._charAtlas?._requestClearModel) {
+        this._charAtlas._requestClearModel = false;
+        this._clearModel(true);
+        origUpdateModel.call(this, 0, this._terminal.rows - 1);
+      }
+    };
+
+    Pane.webglPatched = true;
+  }
+
   private async tryWebgl() {
     try {
       const { WebglAddon } = await import("@xterm/addon-webgl");
@@ -442,12 +489,33 @@ export class Pane {
       // WebGL 上下文丢失（GPU 驱动重置等）时重建渲染器，否则字符纹理累积损坏导致乱码
       addon.onContextLoss(() => {
         addon.dispose();
+        this.webglAddon = null;
         void this.tryWebgl();
       });
       this.term.loadAddon(addon);
+      this.webglAddon = addon;
+      // addon.activate 后 _renderer 才存在；下一帧取实例做原型 patch
+      requestAnimationFrame(() => {
+        const renderer = (addon as any)._renderer;
+        if (renderer) this.patchWebglRenderer(renderer);
+      });
     } catch {
       /* WebGL 不可用时回退 canvas 渲染 */
     }
+  }
+
+  /**
+   * 重建 WebGL 渲染缓存（Ctrl+Shift+R）：dispose 当前 WebGL addon 并重新创建，
+   * 获得全新的空 texture atlas + cache map，从现有 buffer 重建渲染。
+   * TUI 应用不退出、对话记录不丢失，与 onContextLoss 走同一路径。
+   */
+  rebuildRenderer(): void {
+    if (this.webglAddon) {
+      this.webglAddon.dispose();
+      this.webglAddon = null;
+    }
+    void this.tryWebgl();
+    this.term.refresh(0, this.term.rows - 1);
   }
 
   /** 本地终端 pane（无 SSH/SFTP 能力） */
@@ -599,13 +667,12 @@ export class Pane {
   }
 
   focus() {
-    this.term.options.cursorBlink = true;
     this.term.focus();
   }
 
-  /** 标记失去焦点：停止光标闪烁 */
+  /** 失去焦点：交给 xterm 原生 handleBlur（暂停光标闪烁 + 重绘选区色） */
   blur() {
-    this.term.options.cursorBlink = false;
+    this.term.blur();
   }
 
   /** 当前选中文本；若无（如鼠标模式下右键清除了选区），回退到最近非空选区或 DOM 选区 */

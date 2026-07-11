@@ -20,7 +20,8 @@ export type Action =
   | "resizeUp"
   | "resizeDown"
   | "copy"
-  | "paste";
+  | "paste"
+  | "rebuildRenderer";
 
 /** 动作的展示名（设置界面用），顺序即展示顺序 */
 export const ACTIONS: Array<{ action: Action; label: string }> = [
@@ -41,6 +42,7 @@ export const ACTIONS: Array<{ action: Action; label: string }> = [
   { action: "resizeDown", label: "调整下方分割线（下移）" },
   { action: "copy", label: "复制" },
   { action: "paste", label: "粘贴" },
+  { action: "rebuildRenderer", label: "重建渲染缓存" },
 ];
 
 export const DEFAULT_KEYBINDINGS: Record<Action, string> = {
@@ -61,6 +63,7 @@ export const DEFAULT_KEYBINDINGS: Record<Action, string> = {
   resizeDown: "Ctrl+Shift+ArrowDown",
   copy: "Ctrl+Shift+KeyC",
   paste: "Ctrl+Shift+KeyV",
+  rebuildRenderer: "Ctrl+Shift+KeyR",
 };
 
 /** 键盘事件 → 组合键字符串（修饰键固定顺序） */

@@ -1300,6 +1300,7 @@ async function bootstrap() {
         break;
       }
       case "paste": void p?.pasteFromClipboard(); break;
+      case "rebuildRenderer": p?.rebuildRenderer(); break;
     }
   };
 
