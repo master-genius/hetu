@@ -288,7 +288,7 @@ async function bootstrap() {
   };
 
   // hfile：在终端内打开文件管理器面板
-  const handleHfile = (spec: HfileSpec, pane: Pane) => {
+  const handleHfile = async (spec: HfileSpec, pane: Pane) => {
     // -w 模式：浮动覆盖层（独立 DOM，非独占，ESC 关闭）
     if (spec.withShell) {
       const rect = pane.element.getBoundingClientRect();
@@ -303,11 +303,8 @@ async function bootstrap() {
       let uploadConnId: string | null = null;
 
       if (spec.remote) {
-        const found = findConnByName(spec.remote);
-        if (!found) {
-          toast(`hfile：连接「${spec.remote}」未激活`, true);
-          return;
-        }
+        const found = await ensureRemoteConn(spec.remote);
+        if (!found) return;
         uploadConnId = found;
         const info = connMeta.get(found);
         backend = {
@@ -380,11 +377,8 @@ async function bootstrap() {
 
     // 非 -w 模式：切换现有侧边面板
     if (spec.remote) {
-      const connId = findConnByName(spec.remote);
-      if (!connId) {
-        toast(`hfile：连接「${spec.remote}」未激活`, true);
-        return;
-      }
+      const connId = await ensureRemoteConn(spec.remote);
+      if (!connId) return;
       const tab = tabs.active;
       if (!tab) return;
       tab.remoteOpen = true;
@@ -1101,6 +1095,32 @@ async function bootstrap() {
       if (!info.local && info.name === name) return connId;
     }
     return null;
+  };
+
+  /** 按 name 查找已保存的连接项，密钥认证则自动连接并记录到 connMeta。
+   *  密码认证/未找到连接项时返回 null 并 toast 提示。 */
+  const ensureRemoteConn = async (name: string): Promise<string | null> => {
+    const existing = findConnByName(name);
+    if (existing) return existing;
+    const profiles = await api.profilesList().catch(() => [] as Profile[]);
+    const p = profiles.find((x) => x.name === name);
+    if (!p) {
+      toast(`hfile：未找到连接项「${name}」`, true);
+      return null;
+    }
+    if (p.auth !== "key" || !(p.keyData || p.keyPath)) {
+      toast(`hfile：连接「${name}」需密码认证，请先通过 hssh 连接`, true);
+      return null;
+    }
+    try {
+      const params = profileToParams(p);
+      const connId = await api.sshConnect(params);
+      recordConn(connId, params, p.id);
+      return connId;
+    } catch (err) {
+      toast(`hfile：连接「${name}」失败：${err}`, true);
+      return null;
+    }
   };
 
   /** revealDir=true（用户显式点击打开）时，定位到聚焦终端的实时 cwd；
