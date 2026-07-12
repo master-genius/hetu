@@ -561,7 +561,7 @@ export function showHimageViewer(
           <span class="iv-index"></span>
           <button class="btn iv-nav" data-act="next" title="下一张 (→)"${items.length < 2 ? " disabled" : ""}>▶</button>
           ${items.length > 1 ? '<button class="btn iv-thumbs-toggle" data-act="thumbs" title="缩略图列表">▤</button>' : ""}
-          ${items.length > 1 ? '<button class="btn iv-play-toggle" data-act="play" title="幻灯片播放 (空格)">⏯</button>' : ""}
+          ${items.length > 1 ? '<button class="btn iv-play-toggle" data-act="play" title="幻灯片播放">⏯</button>' : ""}
         </div>
         <span class="preview-title"></span>
         <div class="iv-tools">
@@ -775,7 +775,7 @@ export function showHimageViewer(
     playing = !playing;
     if (playToggle) {
       playToggle.textContent = playing ? "⏸" : "⏵";
-      playToggle.title = playing ? "暂停 (空格)" : "幻灯片播放 (空格)";
+      playToggle.title = playing ? "暂停" : "幻灯片播放";
     }
     if (playing) {
       playTimer = setInterval(() => goNext(), SLIDE_INTERVAL);
@@ -815,7 +815,6 @@ export function showHimageViewer(
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); tryClose(); }
     else if (e.key === "ArrowLeft" && items.length > 1) { e.preventDefault(); e.stopPropagation(); goPrev(); }
     else if (e.key === "ArrowRight" && items.length > 1) { e.preventDefault(); e.stopPropagation(); goNext(); }
-    else if (e.key === " " && items.length > 1) { e.preventDefault(); e.stopPropagation(); togglePlay(); }
   };
   window.addEventListener("keydown", onKey, true);
   // anchor 模式无全屏 overlay，不需要点击外部关闭
