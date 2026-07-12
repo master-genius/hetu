@@ -194,6 +194,7 @@ prod 模式选项（仅在 --prod 下生效）:
   -x, --exit                  命令执行完后退出，退出码跟随最后一条命令
   --quiet                     静默模式：不输出连接提示和退出状态码
   --debug                     详细模式：输出连接提示和退出状态码（与 --quiet 相反）
+  -l, --list                  列出已保存的连接项（名称/主机/备注）
   -h, --help                  显示此帮助
 
 示例:
@@ -202,6 +203,7 @@ prod 模式选项（仅在 --prod 下生效）:
   hssh --prod claude --exec "ls -la; df -h"
   hssh --prod claude --file deploy.sh --exit
   echo "uptime; free -m" | hsshprod claude --stdin --exit
+  hssh -l
 EOF
 }
 
@@ -215,7 +217,7 @@ done
 
 # 单遍参数解析：连接信息（连接项名或 user@host）可在任意位置出现
 host=""; user=""; port=""; pass=""; ident=""; name=""; adhoc=0
-feed=""; feed_file=""; feed_stdin=0; do_exit=0; quiet=0; debug=0
+feed=""; feed_file=""; feed_stdin=0; do_exit=0; quiet=0; debug=0; list_mode=0
 _first_pos=1
 
 need() { [ "$1" -ge 2 ] || { echo "hssh: 选项 $2 缺少参数" >&2; exit 1; }; }
@@ -233,6 +235,7 @@ while [ $# -gt 0 ]; do
     -x|--exit)     [ "$prod_mode" = 1 ] || { echo "hssh: --exit 需要 --prod 模式" >&2; exit 1; }; do_exit=1; shift;;
     --quiet)       quiet=1; shift;;
     --debug)       debug=1; shift;;
+    -l|--list)     list_mode=1; shift;;
     -*)            echo "hssh: 未知选项 $1" >&2; exit 1;;
     *)             if [ "$_first_pos" = 1 ]; then
                      case "$1" in
@@ -250,6 +253,16 @@ done
 # 裸名 + 任一连接选项 → 视为临时连接到该主机（而非连接项名），兑现 `hssh 主机 -p/-w …`。
 if [ "$adhoc" = 1 ] && [ -n "$name" ] && [ -z "$host" ]; then
   host="$name"; name=""
+fi
+
+# -l/--list：列出已保存的连接项（名称/主机/备注），由前端读取 profiles 后格式化输出。
+# emit OSC 后阻塞等待前端信号（换行符），确保列表内容在 shell prompt 之前写入终端。
+# 时序：emit → 前端 term.write(列表) → 前端 paneInput(\n) → read 返回 → exit → shell prompt。
+if [ "$list_mode" = 1 ]; then
+  tok=$(b64 "${HSSH_TOKEN:-}")
+  emit "v=1;tok=$tok;mode=list"
+  read _hssh_list_done
+  exit 0
 fi
 
 # 必须有连接目标
@@ -387,12 +400,66 @@ _payload="tok=$(b64 "${HSSH_TOKEN:-}");paths=$(printf '%s' "$_paths" | base64 | 
 emit "$_payload"
 "#;
 
+/// hfile 文件面板命令：仅本地终端有效，发出 OSC 1732 通知前端打开文件管理器面板。
+/// - 不带选项 → 切换本地面板（等同点击图标）；-d 指定初始目录
+/// - -w/--with-shell → 在当前终端分屏上创建浮动覆盖层（非独占，ESC 关闭）
+/// - -r/--remote <连接名> → 打开远程面板（连接须已激活）；-d 指定远程目录
+/// 复用 $HSSH_TOKEN 来源校验。
+#[cfg(not(windows))]
+const HFILE_SCRIPT: &str = r#"#!/bin/sh
+# HetuShell 内建命令：在终端内打开文件管理器面板。
+# 用法: hfile [选项] [-d <目录>]
+#       hfile -r <连接名> [选项] [-d <远程目录>]
+#       hfile -h, --help
+# -w/--with-shell: 浮动覆盖层跟随当前终端分屏大小定位
+# -d/--dir <路径>: 指定打开目录（默认：本地→终端cwd，远程→主目录）
+# -r/--remote <连接名>: 打开远程文件面板（连接须已在 HetuShell 中激活）
+OSC=1732
+emit() { printf '\033]%s;%s\007' "$OSC" "$1"; }
+b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
+
+usage() {
+  cat <<'EOF'
+用法: hfile [选项] [-d <目录>]
+       hfile -r <连接名> [选项] [-d <远程目录>]
+
+选项:
+  -w, --with-shell    浮动覆盖层跟随当前终端分屏大小定位
+  -d, --dir <路径>    指定打开目录（默认：本地→终端cwd，远程→主目录）
+  -r, --remote <名称> 打开远程文件面板（连接须已激活）
+  -h, --help          显示此帮助
+
+不带 -r 时打开本地文件面板；-w 在当前终端上创建浮动覆盖层而非切换侧边面板。
+EOF
+}
+
+[ $# -eq 0 ] && { emit "tok=$(b64 "${HSSH_TOKEN:-}");w=0;d=;r="; exit 0; }
+
+_with_shell=0
+_dir=""
+_remote=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help)        usage; exit 0;;
+    -w|--with-shell)  _with_shell=1; shift;;
+    -d|--dir)         [ $# -ge 2 ] || { echo "hfile: 选项 $1 缺少参数" >&2; exit 1; }; _dir="$2"; shift 2;;
+    -r|--remote)      [ $# -ge 2 ] || { echo "hfile: 选项 $1 缺少参数" >&2; exit 1; }; _remote="$2"; shift 2;;
+    -*)               echo "hfile: 未知选项 $1" >&2; exit 1;;
+    *)                echo "hfile: 多余参数 $1" >&2; exit 1;;
+  esac
+done
+
+_payload="tok=$(b64 "${HSSH_TOKEN:-}");w=$_with_shell;d=$(b64 "$_dir");r=$(b64 "$_remote")"
+emit "$_payload"
+"#;
+
 /// 把 hssh / hsshprod 脚本落地到 bin 目录并置可执行位，返回该目录用于前置 PATH。
 /// 内容一致则不重写（避免每次 spawn 写盘）；任何失败都返回 None（不影响终端启动）。
 #[cfg(not(windows))]
 fn install_hssh() -> Option<std::path::PathBuf> {
     let dir = crate::settings::bin_dir().ok()?;
-    for (name, content) in [("hssh", HSSH_SCRIPT), ("hsshprod", HSSHPROD_SCRIPT), ("hexit", HEXIT_SCRIPT), ("himage", HIMAGE_SCRIPT)] {
+    for (name, content) in [("hssh", HSSH_SCRIPT), ("hsshprod", HSSHPROD_SCRIPT), ("hexit", HEXIT_SCRIPT), ("himage", HIMAGE_SCRIPT), ("hfile", HFILE_SCRIPT)] {
         let path = dir.join(name);
         let need = std::fs::read_to_string(&path)
             .map(|c| c != content)

@@ -1,106 +1,77 @@
 # hfile — 终端模式文件管理器设计文档
 
-> 状态：设计阶段，仅本地实现优先
+> 状态：已实现
 
 ## 定位
 
-在终端中输入 `hfile` 即可在当前 pane 上方渲染一个 TUI 风格的文件管理器覆盖层。
-利用 HetuShell 的 WebView 本质，以 HTML/CSS 渲染完整 UI（图标、预览、图片），
-同时保持终端操作的键盘交互习惯（vim 风格）。
+在终端中输入 `hfile` 即可打开文件管理器面板，复用现有 Explorer 组件（与工具栏图标打开的侧边面板相同）。
+支持本地与远程（已激活的 SSH 连接），支持浮动覆盖层模式（`-w`）跟随终端分屏定位。
 
 ## 与现有架构的关系
 
 ```
 hfile 脚本（POSIX sh，随 hssh 一起安装到 bin/）
-  → OSC 1731;tok=...;path=<base64 cwd>
-  → 前端 OSC handler（pane.ts）
-  → FileManager 覆盖层组件（src/filemanager.ts）
-     ├── 文件列表：复用 local_list 后端
-     ├── 文件操作：复用 local API + 文件系统
-     ├── 图片预览：复用 image_preview（base64 → <img>，WebView 原生渲染）
-     ├── 文本预览：复用 sftp_preview 逻辑或直接读文件
-     └── 键盘导航：vim 风格快捷键
-  → q/ESC 关闭覆盖层，焦点归还 pane
+  → OSC 1732;tok=...;w=<0|1>;d=<b64>;r=<b64>
+  → 前端 OSC handler（pane.ts，isLocal + hsshToken 双重门控）
+  → main.ts handleHfile()
+     ├── 无 -w：切换现有侧边面板（syncExplorerPanel / syncRemotePanel）
+     └── -w：创建浮动覆盖层 div，挂载 Explorer 实例（非独占，ESC 关闭）
 ```
 
-## 交互设计
-
-### 布局
+## 用法
 
 ```
-┌──────────────────────────────────────────┐
-│ 📁 ..                                     │  ← 上级目录
-│ 📁 src/              4096  Jul 9 14:30   │
-│ 📄 main.ts          12580  Jul 9 14:28   │  ← 高亮选中行
-│ 🖼️ logo.png          8192  Jul 8 10:00   │
-│ 📄 README.md         4520  Jul 7 09:15   │
-│                                          │
-├──────────────────────────────────────────┤
-│ 预览区（选中文件实时展示）                  │
-│  1  import { Terminal } from ...          │
-│  2  import { FitAddon } from ...          │
-│  3  ...                                   │
-└──────────────────────────────────────────┘
+hfile                              切换本地文件面板（等同点击图标）
+hfile -d <路径>                    打开本地面板并跳转到指定目录
+hfile -w                           在当前终端上创建浮动覆盖层
+hfile -w -d <路径>                 浮动覆盖层 + 指定目录
+hfile -r <连接名>                  打开远程文件面板（连接须已激活）
+hfile -r <连接名> -d <远程目录>    远程面板 + 指定远程目录
+hfile -r <连接名> -w               远程浮动覆盖层
+hfile -h, --help                   显示帮助
 ```
 
-### 快捷键
+## 设计要点
 
-| 键 | 功能 |
-|----|------|
-| ↑/k | 上移 |
-| ↓/j | 下移 |
-| Enter/l | 进入目录 / 打开文件 |
- | Backspace/h | 返回上级目录 |
-| Space | 切换预览 |
-| d | 删除（确认） |
-| r | 重命名 |
-| y | 复制（标记） |
-| p | 粘贴 |
-| m | 移动（标记 + 粘贴时移动而非复制） |
-| u | 上传到当前目录（从系统选文件） |
-| / | 搜索过滤 |
-| g | 跳到顶部 |
-| G | 跳到底部 |
-| q/ESC | 退出，焦点归还终端 |
+### 1. OSC 1732（hfile 专用通道）
 
-### 图片预览
+- 与 hssh(1729)/hexit(1730)/himage(1731) 同安全模型：`isLocal` 门控 + `hsshToken` 校验
+- 载荷字段：`tok`(令牌) / `w`(浮动模式) / `d`(目录) / `r`(远程连接名)
+- 不干扰任何现有 OSC handler
 
-WebView 原生能力：`image_preview` 返回 base64 → `<img src="data:image/png;base64,...">`
-直接在预览区渲染。支持 PNG/JPG/GIF/WEBP/BMP/SVG。
+### 2. 非 -w 模式：复用现有面板逻辑
 
-## 技术要点
+- 本地：`tab.explorerOpen = !tab.explorerOpen; syncExplorerPanel(revealDir)`
+- 远程：`tab.remoteOpen = true; syncRemotePanel(true, overrideConnId)`
+- `syncRemotePanel` 新增可选 `overrideConnId` 参数，不影响现有调用者（默认 `undefined` → `focusedConnId()`）
+- `-d` 指定目录时：用 `syncExplorerPanel(false)` 打开面板（被动同步），然后 `inst.reveal(spec.dir)` 跳转
+  - `init()` 的 `if (this.initialized) return` 守卫保证幂等，无竞态
 
-### 1. 覆盖层渲染
+### 3. -w 模式：浮动覆盖层
 
-- 覆盖层是 `position: absolute` 的 HTML div，覆盖在 xterm canvas 之上
-- 不走 PTY，纯 IPC 通信：文件列表/操作直接调后端 command
-- 关闭时 `display: none`，不销毁 xterm 实例
+- 取 `pane.element.getBoundingClientRect()` 定位，`position: fixed` 直接挂 `document.body`
+- 创建独立 Explorer 实例，装配上传/下载回调（与侧边面板同款逻辑）
+- ESC 关闭（capture-phase `window` listener，防止 xterm 截获），关闭时 `removeEventListener`
+- 无 overlay 遮罩层，不阻止底层交互；非独占，可多开
+- 无最大化/最小化（与 himage -w 一致的紧凑模式）
 
-### 2. 安全
+### 4. 远程模式
 
-- hfile 脚本复用 `$HSSH_TOKEN` 令牌校验（与 hssh 同机制）
-- OSC 1731 仅在本地终端受理（与 OSC 1729 同安全策略）
-- 文件操作经现有后端 command，已有路径校验
+- `hfile -r <连接名>`：通过 `findConnByName(name)` 遍历 `connMeta` 查找已激活的连接
+- 未找到 → toast 提示，不尝试自动连接
+- 远程 backend 构造与 `syncRemotePanel` 中的 `remoteBackend(connId)` 相同
 
-### 3. 性能
+### 5. -d 目录指定
 
-- 大目录分页/虚拟列表（>500 条时只渲染视口内条目）
-- 图片预览缓存（复用 cache.rs 已有机制）
-- 目录列表缓存 + 手动刷新（r 键）
+- 本地：`pane.resolveLocalCwd()` → `inst.reveal(dir)` 跳转
+- 远程：`api.remoteHome(connId)` → `inst.reveal(dir)` 跳转
+- `init()` 幂等守卫确保 `syncExplorerPanel` 异步 resolveLocalCwd 与同步 `reveal(spec.dir)` 无竞态
 
-### 4. 本地优先，远程后行
+## 涉及文件
 
-- 一期仅支持 `connId === "local"`（local_list / local API）
-- 二期扩展远程：复用 sftp_list / sftp_upload / sftp_download / sftp_copy_remote
-- 远程图片预览复用 cache.rs 的磁盘缓存机制
-
-## 实现清单（一期：本地）
-
-- [ ] `hfile` 脚本（OSC 1731 + token）
-- [ ] `src/filemanager.ts` 覆盖层组件
-- [ ] pane.ts OSC 1731 handler
-- [ ] 文件列表渲染 + vim 导航
-- [ ] 文本/图片预览
-- [ ] 基础文件操作（删除/重命名/复制/粘贴）
-- [ ] 上传（系统文件选择对话框）
-- [ ] 集成到 pane.ts 生命周期（打开/关闭/resize 联动）
+| 文件 | 改动 |
+|------|------|
+| `src-tauri/src/local.rs` | HSSH_SCRIPT 增加 `-l/--list`；新增 HFILE_SCRIPT；install_hssh 增加 hfile 落地 |
+| `src/pane.ts` | HsshSpec 加 `mode: "list"`；新增 HfileSpec、HFILE_OSC=1732、onHfile 回调 |
+| `src/main.ts` | handleHssh list 分支；handleHfile；findConnByName；syncRemotePanel 可选 connId |
+| `src/styles.css` | `.hfile-overlay` 浮动覆盖层样式 |

@@ -457,6 +457,7 @@ export function showSettingsDialog() {
           <label class="check"><input name="autoReconnect" type="checkbox"> 连接断开后自动重连</label>
           <label class="check"><input name="copyOnSelect" type="checkbox"> 选中文本即复制到剪贴板</label>
           <label class="check"><input name="showScrollbar" type="checkbox"> 显示终端滚动条</label>
+          <label class="check"><input name="webgl" type="checkbox"> WebGL 硬件加速渲染（关闭后回退 Canvas，可解决部分 GPU 驱动导致的乱码；乱码时按 Ctrl+Shift+R 重建）</label>
           <label class="check"><input name="confirmOverwrite" type="checkbox"> 上传遇同名文件时提示确认（默认直接覆盖）</label>
           <label class="check"><input name="restoreSession" type="checkbox"> 记住最后的会话（下次启动自动重开并连接）</label>
           <label class="check"><input name="trackRemoteCwd" type="checkbox"> 追踪远程工作目录（连接时注入隐形标记，经 /proc 读实时目录）</label>
@@ -506,6 +507,7 @@ export function showSettingsDialog() {
   input("autoReconnect").checked = s.autoReconnect;
   input("copyOnSelect").checked = s.copyOnSelect;
   input("showScrollbar").checked = s.showScrollbar;
+  input("webgl").checked = s.webgl;
   input("confirmOverwrite").checked = s.confirmOverwrite;
   input("restoreSession").checked = s.restoreSession;
   input("tabFontFamily").value = s.tabFontFamily;
@@ -822,6 +824,7 @@ export function showSettingsDialog() {
       autoReconnect: input("autoReconnect").checked,
       copyOnSelect: input("copyOnSelect").checked,
       showScrollbar: input("showScrollbar").checked,
+      webgl: input("webgl").checked,
       confirmOverwrite: input("confirmOverwrite").checked,
       restoreSession: input("restoreSession").checked,
       cornerRadius,

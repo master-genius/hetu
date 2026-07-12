@@ -294,7 +294,7 @@ export function applyThemeToUI(
   let panelAlpha: number;
   if (opacity <= 0.42) {
     panelAlpha = Math.min(1, opacity + 0.04);
-  } else if (opacity > 0.82) {
+  } else if (opacity > 0.81) {
     panelAlpha = Math.max(0, opacity - 0.04);
   } else {
     panelAlpha = opacity;

@@ -6,10 +6,10 @@ import "./styles.css";
 
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, events } from "./ipc";
+import { api, events, b64encode } from "./ipc";
 import { loadSettings, getSettings, onSettingsChange, activeTheme, fontStack } from "./settings";
 import { TabManager, type Tab } from "./tabs";
-import { Pane, type HsshSpec } from "./pane";
+import { Pane, type HsshSpec, type HfileSpec } from "./pane";
 import {
   DND_MIME,
   DL_MIME,
@@ -150,6 +150,31 @@ async function bootstrap() {
    */
   const handleHssh = async (spec: HsshSpec, pane: Pane) => {
     try {
+      // -l/--list：读取已保存连接项，格式化输出到终端
+      // 脚本 emit OSC 后阻塞在 read 等待信号，前端写完列表后发换行符解锁脚本，
+      // 脚本 exit → shell 输出 prompt。时序严格有序，列表不会被 prompt 覆盖。
+      if (spec.mode === "list") {
+        const profiles = await api.profilesList().catch(() => [] as Profile[]);
+        if (profiles.length === 0) {
+          pane.term.write("\r\n\x1b[90m（暂无已保存的连接项）\x1b[0m\r\n");
+        } else {
+          // 动态列宽：取各列最大宽度，最小留 2 格间距
+          const wName = Math.max(4, ...profiles.map((p) => p.name.length)) + 2;
+          const wHost = Math.max(4, ...profiles.map((p) => p.host.length)) + 2;
+          const wNote = Math.max(4, ...profiles.map((p) => (p.note ?? "").length)) + 2;
+          const pad = (s: string, w: number) => s + " ".repeat(Math.max(1, w - s.length));
+          let out = "\r\n";
+          out += `\x1b[1m${pad("名称", wName)}${pad("主机", wHost)}备注\x1b[0m\r\n`;
+          out += "\x1b[90m" + "─".repeat(wName + wHost + wNote + 2) + "\x1b[0m\r\n";
+          for (const p of profiles) {
+            out += `${pad(p.name, wName)}${pad(p.host, wHost)}${p.note ?? ""}\r\n`;
+          }
+          pane.term.write(out);
+        }
+        // 解锁 hssh 脚本的 read，PTY echo 的 \r\n 自然分隔列表和 prompt
+        void api.paneInput(pane.id, b64encode("\n")).catch(() => {});
+        return;
+      }
       const found = tabs.findPane(pane.id);
       if (!found) {
         toast("hssh：当前终端已关闭", true);
@@ -260,6 +285,127 @@ async function bootstrap() {
     showHimageViewer(items, anchor);
   };
 
+  // hfile：在终端内打开文件管理器面板
+  const handleHfile = (spec: HfileSpec, pane: Pane) => {
+    // -w 模式：浮动覆盖层（独立 DOM，非独占，ESC 关闭）
+    if (spec.withShell) {
+      const rect = pane.element.getBoundingClientRect();
+      const overlay = document.createElement("div");
+      overlay.className = "hfile-overlay";
+      overlay.style.left = `${rect.left}px`;
+      overlay.style.top = `${rect.top}px`;
+      overlay.style.width = `${rect.width}px`;
+      overlay.style.height = `${rect.height}px`;
+
+      let backend: ExplorerBackend;
+      let uploadConnId: string | null = null;
+
+      if (spec.remote) {
+        const found = findConnByName(spec.remote);
+        if (!found) {
+          toast(`hfile：连接「${spec.remote}」未激活`, true);
+          return;
+        }
+        uploadConnId = found;
+        const info = connMeta.get(found);
+        backend = {
+          kind: "remote",
+          connId: found,
+          label: info ? `${info.name} · ${info.host}` : "远程",
+          list: (dir) => api.remoteList(found, dir),
+          home: () => api.remoteHome(found),
+        };
+      } else {
+        backend = localBackend();
+      }
+
+      const ex = new Explorer(backend);
+
+      // ESC 关闭（capture 阶段，防止 xterm 截获）
+      const closeOverlay = () => {
+        overlay.remove();
+        window.removeEventListener("keydown", onEsc, true);
+      };
+      const onEsc = (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          closeOverlay();
+        }
+      };
+      window.addEventListener("keydown", onEsc, true);
+      ex.onClose = () => closeOverlay();
+
+      // 装配上传/下载回调（与侧边面板同款逻辑）
+      if (backend.kind === "local") {
+        ex.onUploadRequest = (paths) => void uploadFiles(paths);
+        ex.onDownloadRequest = (cid, path, targetDir, srcPaneId) => {
+          const src = (srcPaneId && tabs.findPane(srcPaneId)?.pane) || tabs.panesByConn(cid)[0]?.pane;
+          if (src) void downloadFile(src, path, targetDir);
+          else toast("该连接已无终端，无法下载", true);
+        };
+      } else {
+        ex.onDownloadRequest = (cid, path, targetDir) => {
+          const found = tabs.panesByConn(cid)[0];
+          if (found) void downloadFile(found.pane, path, targetDir || undefined);
+          else toast("该连接已无终端，无法下载", true);
+        };
+        ex.onUploadHere = (localPaths, remoteDir) => {
+          const found = tabs.panesByConn(uploadConnId!)[0];
+          if (!found) {
+            toast("连接已断开", true);
+            return;
+          }
+          void uploadFiles(localPaths, found.pane, remoteDir).then(() => ex.load().catch(() => {}));
+        };
+      }
+
+      overlay.appendChild(ex.element);
+      document.body.appendChild(overlay);
+
+      // 初始目录：-d > 本地 cwd / 远程 home
+      if (spec.dir) {
+        void ex.init(spec.dir);
+      } else if (spec.remote) {
+        void ex.init();
+      } else {
+        void pane.resolveLocalCwd().catch(() => null).then((dir) => ex.init(dir ?? undefined));
+      }
+      return;
+    }
+
+    // 非 -w 模式：切换现有侧边面板
+    if (spec.remote) {
+      const connId = findConnByName(spec.remote);
+      if (!connId) {
+        toast(`hfile：连接「${spec.remote}」未激活`, true);
+        return;
+      }
+      const tab = tabs.active;
+      if (!tab) return;
+      tab.remoteOpen = true;
+      if (spec.dir) {
+        syncRemotePanel(false, connId);
+        const ex = remoteExplorers.get(connId);
+        if (ex) void ex.reveal(spec.dir);
+      } else {
+        syncRemotePanel(true, connId);
+      }
+      updateRemoteBtn();
+    } else {
+      const tab = tabs.active;
+      if (!tab) return;
+      if (spec.dir) {
+        tab.explorerOpen = true;
+        syncExplorerPanel(false);
+        const inst = tab.explorer;
+        if (inst) void inst.reveal(spec.dir);
+      } else {
+        tab.explorerOpen = !tab.explorerOpen;
+        syncExplorerPanel(tab.explorerOpen);
+      }
+    }
+  };
+
   const requestCloseTab = async (tab: Tab) => {
     if (tabs.hasBusyPane(tab)) {
       const ok = await confirmDialog(
@@ -306,6 +452,8 @@ async function bootstrap() {
     pane.onHexit = () => void performHexit();
     // 内建 himage 命令：弹出图片查看器
     pane.onHimage = (paths, withShell, p) => handleHimage(paths, withShell, p);
+    // 内建 hfile 命令：打开文件管理器面板
+    pane.onHfile = (spec, p) => handleHfile(spec, p);
     pane.onTooltip = showFileTooltip;
     // Ctrl+单击文件/目录 → 下载（默认 Downloads / 每次询问，按设置）
     pane.onCtrlClick = (path) => void downloadFile(pane, path);
@@ -942,11 +1090,20 @@ async function bootstrap() {
     return pane && !pane.isLocal ? pane.connId : null;
   };
 
+  /** 按连接项名称查找已激活的 SSH 连接 id（遍历 connMeta，未找到返回 null） */
+  const findConnByName = (name: string): string | null => {
+    for (const [connId, info] of connMeta) {
+      if (!info.local && info.name === name) return connId;
+    }
+    return null;
+  };
+
   /** revealDir=true（用户显式点击打开）时，定位到聚焦终端的实时 cwd；
-   *  被动同步（切焦点/切标签）不打断用户正在浏览的目录 */
-  const syncRemotePanel = (revealDir = false) => {
+   *  被动同步（切焦点/切标签）不打断用户正在浏览的目录。
+   *  overrideConnId 由 hfile -r 传入，跳过 focusedConnId 直接指定连接 */
+  const syncRemotePanel = (revealDir = false, overrideConnId?: string) => {
     const tab = tabs.active;
-    const connId = focusedConnId();
+    const connId = overrideConnId ?? focusedConnId();
     if (!tab || !tab.remoteOpen || !connId) {
       remotePanel.classList.remove("open");
       return;
@@ -1166,6 +1323,7 @@ async function bootstrap() {
   let lastFontFamily = "";
   let lastCjkFontFamily = "";
   let lastFontSize = 0;
+  let lastWebgl = true;
 
   onSettingsChange(() => {
     const s = getSettings();
@@ -1235,6 +1393,16 @@ async function bootstrap() {
           }
         }
       });
+    }
+
+    // WebGL 开关变更：对所有 pane 重建渲染器（dispose 旧的 → tryWebgl 按新设置决定是否创建）
+    if (s.webgl !== lastWebgl) {
+      lastWebgl = s.webgl;
+      for (const tab of tabs.tabs) {
+        for (const pane of tab.layout.panes()) {
+          pane.rebuildRenderer();
+        }
+      }
     }
   });
 

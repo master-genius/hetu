@@ -403,7 +403,7 @@ body {
 .layout-root {
   position: absolute;
   inset: 0;
-  padding: 4px 4px 2px 4px;
+  padding: 4px 0 2px 4px;
 }
 
 /* 非活动标签：保持尺寸、仅隐藏，切换瞬时无重排/重绘闪烁 */
@@ -562,8 +562,9 @@ body {
 .pane .xterm {
   height: 100%;
   /* padding 放在 .xterm 上而非 .pane：FitAddon 读取 .xterm 的 padding 来扣减可用高度，
-     若 padding 在 .pane 上则被忽略，终端会多渲染一行溢出到 padding 区域，文本紧贴边缘 */
-  padding: 4px 4px 2px 4px;
+     若 padding 在 .pane 上则被忽略，终端会多渲染一行溢出到 padding 区域，文本紧贴边缘。
+     右侧 padding 0：FitAddon 已预留 14px 滚动条宽度，无需额外右侧间距 */
+  padding: 4px 0 2px 4px;
 }
 
 /* Ctrl 悬停在文件/目录上：手形光标，提示可点击下载 / 拖拽到文件管理器 */
@@ -2222,4 +2223,20 @@ input[type="checkbox"] {
 :root[data-base="light"] .ctx-menu,
 :root[data-base="light"] .modal {
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+}
+
+/* ---------- hfile 浮动覆盖层（-w 模式，跟随终端分屏定位） ---------- */
+
+.hfile-overlay {
+  position: fixed;
+  z-index: 200;
+  background: var(--panel-rgba);
+  backdrop-filter: blur(35px) saturate(1.4);
+  -webkit-backdrop-filter: blur(35px) saturate(1.4);
+  border: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }

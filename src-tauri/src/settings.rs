@@ -104,6 +104,8 @@ pub struct Settings {
     pub tab_font_size: u16,
     /// 显示终端滚动条（默认显示）
     pub show_scrollbar: bool,
+    /// WebGL 硬件加速渲染（默认开启；关闭后回退 Canvas，可解决部分 GPU 驱动导致的乱码）
+    pub webgl: bool,
     /// 新建标签页行为："local"（直接本地终端）| "dialog"（弹出连接选择）
     pub new_tab_mode: String,
     /// 断线自动重连（默认开启）
@@ -161,6 +163,7 @@ impl Default for Settings {
             tab_font_family: String::new(),
             tab_font_size: 12,
             show_scrollbar: true,
+            webgl: true,
             new_tab_mode: "local".into(),
             auto_reconnect: true,
             copy_on_select: true,

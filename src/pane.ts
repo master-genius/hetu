@@ -17,24 +17,27 @@ const HSSH_OSC = 1729;
 const HEXIT_OSC = 1730;
 /** himage 内建命令通过此 OSC 标识符通知前端弹出图片查看器。 */
 const HIMAGE_OSC = 1731;
+/** hfile 内建命令通过此 OSC 标识符通知前端打开文件管理器面板。 */
+const HFILE_OSC = 1732;
 
-// FitAddon 在 scrollback>0 时硬编码预留 14px 滚动条宽度，我们的滚动条是 overlay 不占布局空间，patch 掉
-{
-  const o = FitAddon.prototype.proposeDimensions;
-  FitAddon.prototype.proposeDimensions = function () {
-    const t = (this as any)._terminal;
-    if (!t) return o.call(this);
-    const s = t.options.scrollback; t.options.scrollback = 0;
-    const d = o.call(this); t.options.scrollback = s;
-    return d;
-  };
-}
+// FitAddon 在 scrollback>0 时预留 14px 滚动条宽度。我们的滚动条是 2px overlay 不占布局空间，
+// 理论上应消除这 14px。但任何临时修改 xterm 选项（scrollback/overviewRuler）都会触发
+// 选项变更监听器（BufferSet.resize / OverviewRulerRenderer 创建），破坏 buffer 和滚动状态。
+// 接受 14px 预留——与 2.3.8 行为一致，终端右侧少 14px 可用宽度但不影响功能。
 
 /** hssh 解析出的连接意图（tok 为来源校验令牌）：直连已保存连接项，或临时连接。
  *  feedPath/exitAfter 为自动化喂入字段，旧版 OSC 不携带时为 undefined/false（向后兼容）。 */
 export type HsshSpec =
+  | { tok: string; mode: "list" }
   | { tok: string; mode: "profile"; name: string; feedPath?: string; exitAfter?: boolean; quiet?: boolean; debug?: boolean }
   | { tok: string; mode: "adhoc"; host: string; user: string; port: string; password: string; identity: string; feedPath?: string; exitAfter?: boolean; quiet?: boolean; debug?: boolean };
+
+/** hfile 命令解析结果（tok 为来源校验令牌） */
+export type HfileSpec = {
+  withShell: boolean;
+  dir: string | null;
+  remote: string | null;
+};
 
 /** base64 → UTF-8 字符串（hssh 各字段单独 base64，避免分隔符冲突）。失败返回空串。 */
 function b64utf8(s: string): string {
@@ -58,6 +61,9 @@ export function parseHssh(data: string): HsshSpec | null {
   const exitAfter = b64utf8(f.exit) === "1";
   const quiet = b64utf8(f.quiet) === "1";
   const debug = b64utf8(f.debug) === "1";
+  if (f.mode === "list") {
+    return { tok, mode: "list" };
+  }
   if (f.mode === "profile") {
     const name = b64utf8(f.name);
     return name ? { tok, mode: "profile", name, feedPath, exitAfter, quiet, debug } : null;
@@ -162,6 +168,8 @@ export class Pane {
   onHexit: (() => void) | null = null;
   /** 内建 himage 命令：仅本地终端触发，paths 为图片绝对路径数组 */
   onHimage: ((paths: string[], withShell: boolean, pane: Pane) => void) | null = null;
+  /** 内建 hfile 命令：仅本地终端触发，打开文件管理器面板 */
+  onHfile: ((spec: HfileSpec, pane: Pane) => void) | null = null;
   /** hssh 来源校验令牌：随本地 shell 注入 $HSSH_TOKEN，OSC 载荷须回带一致值才受理，
    *  杜绝终端里被渲染的不可信内容伪造 hssh 序列诱导建连。每 pane 一枚随机值。 */
   private readonly hsshToken = crypto.randomUUID();
@@ -267,6 +275,33 @@ export class Pane {
             const raw = b64utf8(f.paths ?? "");
             const paths = raw.split("\n").map((s) => s.trim()).filter(Boolean);
             if (paths.length > 0) this.onHimage?.(paths, (f.w ?? "0") === "1", this);
+          }
+        }
+      } catch {
+        /* 忽略 */
+      }
+      return true;
+    });
+
+    // hfile 内建命令（OSC 1732）：仅本地终端接受，安全模型同 hssh。
+    this.term.parser.registerOscHandler(HFILE_OSC, (data) => {
+      try {
+        if (this.isLocal) {
+          const f: Record<string, string> = {};
+          for (const kv of data.split(";")) {
+            const i = kv.indexOf("=");
+            if (i > 0) f[kv.slice(0, i)] = kv.slice(i + 1);
+          }
+          const tok = b64utf8(f.tok ?? "");
+          if (tok && tok === this.hsshToken) {
+            this.onHfile?.(
+              {
+                withShell: (f.w ?? "0") === "1",
+                dir: b64utf8(f.d ?? "") || null,
+                remote: b64utf8(f.r ?? "") || null,
+              },
+              this,
+            );
           }
         }
       } catch {
@@ -495,6 +530,7 @@ export class Pane {
   }
 
   private async tryWebgl() {
+    if (!getSettings().webgl) return;
     try {
       const { WebglAddon } = await import("@xterm/addon-webgl");
       const addon = new WebglAddon();
