@@ -301,18 +301,20 @@ async function bootstrap() {
 
       let backend: ExplorerBackend;
       let uploadConnId: string | null = null;
+      let connCreated = false;
 
       if (spec.remote) {
-        const found = await ensureRemoteConn(spec.remote);
-        if (!found) return;
-        uploadConnId = found;
-        const info = connMeta.get(found);
+        const result = await ensureRemoteConn(spec.remote);
+        if (!result) return;
+        uploadConnId = result.connId;
+        connCreated = result.created;
+        const info = connMeta.get(result.connId);
         backend = {
           kind: "remote",
-          connId: found,
+          connId: result.connId,
           label: info ? `${info.name} · ${info.host}` : "远程",
-          list: (dir) => api.remoteList(found, dir),
-          home: () => api.remoteHome(found),
+          list: (dir) => api.remoteList(result.connId, dir),
+          home: () => api.remoteHome(result.connId),
         };
       } else {
         backend = localBackend();
@@ -324,6 +326,11 @@ async function bootstrap() {
       const closeOverlay = () => {
         overlay.remove();
         window.removeEventListener("keydown", onEsc, true);
+        // hfile -r 自动创建的连接，关闭时若无 pane 在用则断开回收
+        if (connCreated && uploadConnId && tabs.panesByConn(uploadConnId).length === 0) {
+          void api.sshDisconnect(uploadConnId).catch(() => {});
+          connMeta.delete(uploadConnId);
+        }
       };
       const onEsc = (e: KeyboardEvent) => {
         if (e.key === "Escape") {
@@ -377,17 +384,17 @@ async function bootstrap() {
 
     // 非 -w 模式：切换现有侧边面板
     if (spec.remote) {
-      const connId = await ensureRemoteConn(spec.remote);
-      if (!connId) return;
+      const result = await ensureRemoteConn(spec.remote);
+      if (!result) return;
       const tab = tabs.active;
       if (!tab) return;
       tab.remoteOpen = true;
       if (spec.dir) {
-        syncRemotePanel(false, connId);
-        const ex = remoteExplorers.get(connId);
+        syncRemotePanel(false, result.connId);
+        const ex = remoteExplorers.get(result.connId);
         if (ex) void ex.reveal(spec.dir);
       } else {
-        syncRemotePanel(true, connId);
+        syncRemotePanel(true, result.connId);
       }
       updateRemoteBtn();
     } else {
@@ -1098,10 +1105,10 @@ async function bootstrap() {
   };
 
   /** 按 name 查找已保存的连接项，密钥认证则自动连接并记录到 connMeta。
-   *  密码认证/未找到连接项时返回 null 并 toast 提示。 */
-  const ensureRemoteConn = async (name: string): Promise<string | null> => {
+   *  返回 connId 与是否为本次新建。密码认证/未找到时返回 null 并 toast 提示。 */
+  const ensureRemoteConn = async (name: string): Promise<{ connId: string; created: boolean } | null> => {
     const existing = findConnByName(name);
-    if (existing) return existing;
+    if (existing) return { connId: existing, created: false };
     const profiles = await api.profilesList().catch(() => [] as Profile[]);
     const p = profiles.find((x) => x.name === name);
     if (!p) {
@@ -1116,7 +1123,7 @@ async function bootstrap() {
       const params = profileToParams(p);
       const connId = await api.sshConnect(params);
       recordConn(connId, params, p.id);
-      return connId;
+      return { connId, created: true };
     } catch (err) {
       toast(`hfile：连接「${name}」失败：${err}`, true);
       return null;
