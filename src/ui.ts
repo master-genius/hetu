@@ -516,6 +516,7 @@ function hasTransparency(img: HTMLImageElement): boolean {
 export function showHimageViewer(
   items: { name: string; load: () => Promise<string> }[],
   anchor: DOMRect | null = null,
+  mountTarget?: HTMLElement,
 ): void {
   if (items.length === 0) return;
   let idx = 0;
@@ -866,7 +867,7 @@ export function showHimageViewer(
     modal.style.height = `${anchor.height}px`;
     modal.style.maxWidth = "none";
     modal.style.maxHeight = "none";
-    document.body.appendChild(modal);
+    (mountTarget ?? document.body).appendChild(modal);
   } else {
     overlay.appendChild(modal);
     document.body.appendChild(overlay);

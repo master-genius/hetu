@@ -1777,6 +1777,8 @@ input[type="checkbox"] {
 
 .modal.image-viewer {
   width: min(1100px, 94vw);
+  padding: 0;
+  overflow: hidden;
 }
 
 .image-viewer .preview-body {
@@ -1921,10 +1923,12 @@ input[type="checkbox"] {
   height: 100vh;
   max-height: 100vh;
   border-radius: 0;
+  padding: 2px;
+  overflow: hidden;
 }
 
 .himage-viewer.iv-maximized .preview-body {
-  height: calc(100vh - var(--preview-header-h, 48px));
+  height: calc(100vh - 51px);
   max-height: none;
 }
 

@@ -282,7 +282,9 @@ async function bootstrap() {
       };
     });
     const anchor = withShell ? pane.element.getBoundingClientRect() : null;
-    showHimageViewer(items, anchor);
+    // -w 模式：挂到所属 tab 的 layout-root，切 tab 时 visibility:hidden 自动隐藏
+    const mount = withShell ? tabs.findPane(pane.id)?.tab.layout.container : undefined;
+    showHimageViewer(items, anchor, mount);
   };
 
   // hfile：在终端内打开文件管理器面板
@@ -360,7 +362,10 @@ async function bootstrap() {
       }
 
       overlay.appendChild(ex.element);
-      document.body.appendChild(overlay);
+      // 挂到所属 tab 的 layout-root：切 tab 时 visibility:hidden 自动继承隐藏，关 tab 时随 DOM 销毁
+      const found = tabs.findPane(pane.id);
+      if (!found) return;
+      found.tab.layout.container.appendChild(overlay);
 
       // 初始目录：-d > 本地 cwd / 远程 home
       if (spec.dir) {
