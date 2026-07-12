@@ -1163,22 +1163,30 @@ async function bootstrap() {
   let lastMcr = 0;
   let lastCursorStyle = "";
   let lastCursorColor = "";
+  let lastFontFamily = "";
+  let lastCjkFontFamily = "";
+  let lastFontSize = 0;
 
   onSettingsChange(() => {
     const s = getSettings();
     const theme = activeTheme();
     const themeChanged = theme.id !== lastThemeId;
     const baseChanged = theme.base !== lastThemeBase;
-    // 暗色：高不透明(>=0.85) 1.61，中(>=0.6) 1.57，中透明(>=0.4) 1.3，高透明 1.1 避免白边
+    // 暗色：高不透明(>=0.85) 1.6，中(>=0.6) 1.56，中透明(>=0.4) 1.3，高透明 1.1 避免白边
     const mcr = theme.base === "dark"
-      ? (s.opacity < 0.4 ? 1.1 : s.opacity < 0.6 ? 1.3 : s.opacity < 0.85 ? 1.57 : 1.61)
+      ? (s.opacity < 0.4 ? 1.1 : s.opacity < 0.6 ? 1.3 : s.opacity < 0.85 ? 1.56 : 1.6)
       : 1.1;
     const mcrChanged = mcr !== lastMcr;
+    const fontChanged = s.fontFamily !== lastFontFamily
+      || s.cjkFontFamily !== lastCjkFontFamily
+      || s.fontSize !== lastFontSize;
     // 主题/字号/透明度立即生效（这些不依赖字体加载）
     for (const tab of tabs.tabs) {
       for (const pane of tab.layout.panes()) {
-        pane.term.options.fontSize = s.fontSize;
-        pane.term.options.fontWeight = "normal" as never;
+        if (fontChanged) {
+          pane.term.options.fontSize = s.fontSize;
+          pane.term.options.fontWeight = "normal" as never;
+        }
         // 光标样式：非法值回退 block
         const cStyle = s.cursorStyle === "bar" ? "bar" : "block";
         if (cStyle !== lastCursorStyle) {
@@ -1207,20 +1215,27 @@ async function bootstrap() {
     lastCursorColor = s.cursorColor ?? "";
     // 字体单独处理：先确保所选字重（含各自 bold）就绪，再设 fontFamily 触发 xterm
     // 以正确字体重测单元格。否则切到未加载的字体（如 Light）时会用回退字体测量，首帧偏细/错位。
-    const px = s.fontSize;
-    void Promise.allSettled([
-      document.fonts.load(`normal ${px}px "${s.fontFamily}"`),
-      document.fonts.load(`bold ${px}px "${s.fontFamily}"`),
-      document.fonts.load(`normal ${px}px "${s.cjkFontFamily}"`),
-      document.fonts.load(`bold ${px}px "${s.cjkFontFamily}"`),
-    ]).then(() => {
-      for (const tab of tabs.tabs) {
-        for (const pane of tab.layout.panes()) {
-          pane.term.options.fontFamily = fontStack();
-          pane.refit();
+    // 仅字体变更时才走加载+refit——其他变更（透明度/模糊/MCR）不需要 refit，
+    // 冗余 refit 会触发 SIGWINCH 打扰 TUI 程序。
+    if (fontChanged) {
+      lastFontFamily = s.fontFamily;
+      lastCjkFontFamily = s.cjkFontFamily;
+      lastFontSize = s.fontSize;
+      const px = s.fontSize;
+      void Promise.allSettled([
+        document.fonts.load(`normal ${px}px "${s.fontFamily}"`),
+        document.fonts.load(`bold ${px}px "${s.fontFamily}"`),
+        document.fonts.load(`normal ${px}px "${s.cjkFontFamily}"`),
+        document.fonts.load(`bold ${px}px "${s.cjkFontFamily}"`),
+      ]).then(() => {
+        for (const tab of tabs.tabs) {
+          for (const pane of tab.layout.panes()) {
+            pane.term.options.fontFamily = fontStack();
+            pane.refit();
+          }
         }
-      }
-    });
+      });
+    }
   });
 
   // ---------- 分屏焦点导航（Alt+方向键）----------

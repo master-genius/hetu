@@ -196,10 +196,10 @@ export class Pane {
       })(),
       allowTransparency: true,
       // 深色背景下按前景/背景对比自动微提亮细字，让 canvas 灰度 AA 的文字更"实"
-      // 暗色：高不透明(>=0.85) 1.61，中(>=0.6) 1.57，中透明(>=0.4) 1.3，高透明 1.1 避免白边；
+      // 暗色：高不透明(>=0.85) 1.6，中(>=0.6) 1.56，中透明(>=0.4) 1.3，高透明 1.1 避免白边；
       // 亮色 1.1（极温和微提亮，不会误调浅色 ANSI）
       minimumContrastRatio: theme.base === "dark"
-        ? (s.opacity < 0.4 ? 1.1 : s.opacity < 0.6 ? 1.3 : s.opacity < 0.85 ? 1.57 : 1.61)
+        ? (s.opacity < 0.4 ? 1.1 : s.opacity < 0.6 ? 1.3 : s.opacity < 0.85 ? 1.56 : 1.6)
         : 1.1,
     });
     this.fit = new FitAddon();
@@ -668,14 +668,18 @@ export class Pane {
 
   refit() {
     if (this.disposed || !this.element.isConnected) return;
+    const prevCols = this.term.cols, prevRows = this.term.rows;
     try {
       this.fit.fit();
-      void api.paneResize(this.id, this.term.cols, this.term.rows).catch(() => {});
-      // DOM 移动（分屏/拖动分割线）后 canvas 可能未重绘，强制刷新整个 buffer
-      this.term.refresh(0, this.term.rows - 1);
     } catch {
       /* 布局未就绪 */
     }
+    // 仅实际 resize 时才通知 PTY——冗余 SIGWINCH 会打扰 TUI 程序
+    if (this.term.cols !== prevCols || this.term.rows !== prevRows) {
+      void api.paneResize(this.id, this.term.cols, this.term.rows).catch(() => {});
+    }
+    // 始终刷新：DOM 移动或设置变更后 canvas 可能未重绘
+    this.term.refresh(0, this.term.rows - 1);
   }
 
   focus() {
