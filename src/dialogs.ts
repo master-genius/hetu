@@ -458,7 +458,7 @@ export function showSettingsDialog() {
           <label class="check"><input name="copyOnSelect" type="checkbox"> 选中文本即复制到剪贴板</label>
           <label class="check"><input name="showScrollbar" type="checkbox"> 显示终端滚动条</label>
           <label class="check"><input name="webgl" type="checkbox"> WebGL 硬件加速渲染（关闭后回退 Canvas，可解决部分 GPU 驱动导致的乱码；乱码时按 Ctrl+Shift+R 重建）</label>
-          <label class="check"><input name="mcrEnabled" type="checkbox"> 最小对比度提亮（MCR）<input name="mcrMax" type="number" min="1.1" max="2" step="0.01" placeholder="1.6" style="width:56px;margin-left:8px"></label>
+          <label class="check"><input name="mcrEnabled" type="checkbox"> 最小对比度提亮（MCR）<input name="mcrMax" type="number" min="1.1" max="2" step="0.01" placeholder="1.6" style="width:120px;margin-left:8px"></label>
           <p class="section-desc">按透明度自适应提亮前景色对比度，值越高文字越清晰但颜色偏移也越大（1.1–2.0）。</p>
           <label class="check"><input name="confirmOverwrite" type="checkbox"> 上传遇同名文件时提示确认（默认直接覆盖）</label>
           <label class="check"><input name="restoreSession" type="checkbox"> 记住最后的会话（下次启动自动重开并连接）</label>
