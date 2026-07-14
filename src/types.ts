@@ -82,6 +82,12 @@ export interface Settings {
   cursorColor: string | null;
   /** 自定义快捷键：动作 → 组合键（仅存覆盖项） */
   keybindings: Record<string, string>;
+  /** 是否启用最小对比度提亮（MCR） */
+  mcrEnabled: boolean;
+  /** MCR 最大值（1.1–2.0，默认 1.6） */
+  mcrMax: number;
+  /** 本地终端 shell：空/"default"/"默认" 表示自动推断 */
+  shell: string;
 }
 
 /** 分屏布局快照：结构 + 比例 + 每个 leaf 的连接来源，随会话持久化。

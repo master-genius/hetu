@@ -69,3 +69,15 @@ function applySettings() {
   }
   for (const fn of listeners) fn(s);
 }
+
+/** 计算当前 MCR 值。
+ *  关闭 → 1.0；亮色 → 1.1；暗色高透明(<0.4) → 1.1；暗色中透明 → round(max×0.975, 2)；暗色高不透明 → max。
+ *  max 非法时回退 1.6。 */
+export function computeMcr(s: Settings, themeBase: "dark" | "light"): number {
+  if (!s.mcrEnabled) return 1.0;
+  if (themeBase !== "dark") return 1.1;
+  const max = (s.mcrMax >= 1.1 && s.mcrMax <= 2.0) ? s.mcrMax : 1.6;
+  if (s.opacity < 0.4) return 1.1;
+  if (s.opacity < 0.85) return Math.round(max * 0.975 * 100) / 100;
+  return max;
+}

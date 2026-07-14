@@ -135,7 +135,6 @@ fn size(cols: u32, rows: u32) -> PtySize {
 }
 
 /// 某可执行文件是否能在 PATH 中找到
-#[cfg(windows)]
 fn on_path(exe: &str) -> bool {
     let Some(paths) = std::env::var_os("PATH") else {
         return false;
@@ -143,7 +142,33 @@ fn on_path(exe: &str) -> bool {
     std::env::split_paths(&paths).any(|dir| dir.join(exe).is_file())
 }
 
-/// 本机默认 shell：
+/// 解析用户设置的 shell：空/"default"/"默认" → None（自动推断）；否则 Some(命令)
+fn parse_user_shell(s: &str) -> Option<&str> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("default") || trimmed == "默认" {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+/// 尝试用指定 shell 启动 PTY，失败时 fallback 到 default_shell
+fn resolve_shell(user_shell: Option<&str>) -> String {
+    if let Some(shell) = user_shell {
+        // 验证命令存在：要么是绝对路径且文件存在，要么在 PATH 中可找到
+        let found = if std::path::Path::new(shell).is_absolute() {
+            std::path::Path::new(shell).is_file()
+        } else {
+            on_path(shell)
+        };
+        if found {
+            return shell.into();
+        }
+        // 用户设置的 shell 不存在，fallback
+        eprintln!(" HetuShell: shell '{shell}' 不存在，回退到默认");
+    }
+    default_shell()
+}
 /// - Windows：优先 PowerShell 7（pwsh.exe），否则系统自带 Windows PowerShell（powershell.exe）
 /// - macOS / Linux：系统默认 shell（$SHELL），兜底 /bin/bash
 #[cfg(windows)]
@@ -490,6 +515,7 @@ pub fn open(
     rows: u32,
     initial_cwd: Option<String>,
     hssh_token: String,
+    shell_setting: String,
     mut rx: mpsc::UnboundedReceiver<PaneCmd>,
 ) -> Result<Option<u32>> {
     let pty = native_pty_system();
@@ -497,7 +523,7 @@ pub fn open(
         .openpty(size(cols, rows))
         .map_err(|e| Error::msg(format!("创建本地 PTY 失败: {e}")))?;
 
-    let shell = default_shell();
+    let shell = resolve_shell(parse_user_shell(&shell_setting));
     let mut cmd = CommandBuilder::new(&shell);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");

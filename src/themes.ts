@@ -217,15 +217,43 @@ const LIGHT: ThemeDef[] = [
 
 export const BUILTIN_THEMES: ThemeDef[] = [...DARK, ...LIGHT];
 
-/** 按 id 解析主题：先查自定义，再查内置；自定义主题继承其 base 内置主题的缺省色 */
+/** 将 hex 颜色向黑色混合（factor=0.2 → 80%原色+20%黑），用于浅色主题提对比度 */
+function darken(hex: string, factor: number): string {
+  const m = hex.replace("#", "");
+  if (m.length !== 6) return hex;
+  const r = Math.round(parseInt(m.slice(0, 2), 16) * (1 - factor));
+  const g = Math.round(parseInt(m.slice(2, 4), 16) * (1 - factor));
+  const b = Math.round(parseInt(m.slice(4, 6), 16) * (1 - factor));
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+}
+
+/** 浅色主题对比度增强：前景色和 ANSI 色统一加深（不动背景/选区/光标） */
+function boostLightContrast(theme: ThemeDef): ThemeDef {
+  if (theme.base !== "light") return theme;
+  const c = { ...theme.colors };
+  const FG = 0.18;  // 前景色加深幅度
+  const ANSI = 0.15; // ANSI 色加深幅度
+  if (c.foreground) c.foreground = darken(c.foreground, FG);
+  const names = ["black","red","green","yellow","blue","magenta","cyan","white"];
+  for (const n of names) {
+    if (c[n]) c[n] = darken(c[n], ANSI);
+    const bright = `bright${n[0].toUpperCase()}${n.slice(1)}`;
+    if (c[bright]) c[bright] = darken(c[bright], ANSI);
+  }
+  return { ...theme, colors: c };
+}
+
 export function resolveTheme(id: string, custom: ThemeDef[]): ThemeDef {
   const c = custom.find((th) => th.id === id);
+  let result: ThemeDef;
   if (c) {
     // base 允许指向任意内置主题 id；归一化出 dark/light 基调供 UI 使用
     const base = BUILTIN_THEMES.find((th) => th.id === c.base) ?? BUILTIN_THEMES[0];
-    return { ...c, base: base.base, colors: { ...base.colors, ...c.colors } };
+    result = { ...c, base: base.base, colors: { ...base.colors, ...c.colors } };
+  } else {
+    result = BUILTIN_THEMES.find((th) => th.id === id) ?? BUILTIN_THEMES[0];
   }
-  return BUILTIN_THEMES.find((th) => th.id === id) ?? BUILTIN_THEMES[0];
+  return boostLightContrast(result);
 }
 
 export function allThemes(custom: ThemeDef[]): ThemeDef[] {

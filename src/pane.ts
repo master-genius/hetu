@@ -8,7 +8,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { api, b64decode, b64encode } from "./ipc";
 import { installImeGuard } from "./imeGuard";
-import { getSettings, activeTheme, fontStack } from "./settings";
+import { getSettings, activeTheme, fontStack, computeMcr } from "./settings";
 import type { FileMeta } from "./types";
 
 /** hssh 内建命令通过此 OSC 标识符通知前端（见 local.rs 注入的 hssh 脚本）。 */
@@ -203,12 +203,7 @@ export class Pane {
         return c as never;
       })(),
       allowTransparency: true,
-      // 深色背景下按前景/背景对比自动微提亮细字，让 canvas 灰度 AA 的文字更"实"
-      // 暗色：高不透明(>=0.85) 1.6，中(>=0.6) 1.56，中透明(>=0.4) 1.3，高透明 1.1 避免白边；
-      // 亮色 1.1（极温和微提亮，不会误调浅色 ANSI）
-      minimumContrastRatio: theme.base === "dark"
-        ? (s.opacity < 0.4 ? 1.1 : s.opacity < 0.6 ? 1.3 : s.opacity < 0.85 ? 1.56 : 1.6)
-        : 1.1,
+      minimumContrastRatio: computeMcr(s, theme.base),
     });
     this.fit = new FitAddon();
     this.term.loadAddon(this.fit);

@@ -136,6 +136,22 @@ pub struct Settings {
     /// 自定义快捷键：动作 → 组合键（仅存与默认不同的覆盖项）
     #[serde(default)]
     pub keybindings: std::collections::HashMap<String, String>,
+    /// 是否启用最小对比度提亮（MCR）
+    #[serde(default = "default_mcr_enabled")]
+    pub mcr_enabled: bool,
+    /// MCR 最大值（1.1–2.0，默认 1.6），暗色高不透明度段使用
+    #[serde(default = "default_mcr_max")]
+    pub mcr_max: f64,
+    /// 本地终端 shell：空/"default"/"默认" 表示自动推断；否则为命令名或路径
+    #[serde(default)]
+    pub shell: String,
+}
+
+fn default_mcr_enabled() -> bool {
+    true
+}
+fn default_mcr_max() -> f64 {
+    1.6
 }
 
 impl Default for Settings {
@@ -177,6 +193,9 @@ impl Default for Settings {
             cursor_style: "block".into(),
             cursor_color: None,
             keybindings: std::collections::HashMap::new(),
+            mcr_enabled: true,
+            mcr_max: 1.6,
+            shell: String::new(),
         }
     }
 }

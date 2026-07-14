@@ -7,7 +7,7 @@ import "./styles.css";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, events, b64encode } from "./ipc";
-import { loadSettings, getSettings, onSettingsChange, activeTheme, fontStack } from "./settings";
+import { loadSettings, getSettings, onSettingsChange, activeTheme, fontStack, computeMcr } from "./settings";
 import { TabManager, type Tab } from "./tabs";
 import { Pane, type HsshSpec, type HfileSpec } from "./pane";
 import {
@@ -1362,10 +1362,7 @@ async function bootstrap() {
     const theme = activeTheme();
     const themeChanged = theme.id !== lastThemeId;
     const baseChanged = theme.base !== lastThemeBase;
-    // 暗色：高不透明(>=0.85) 1.6，中(>=0.6) 1.56，中透明(>=0.4) 1.3，高透明 1.1 避免白边
-    const mcr = theme.base === "dark"
-      ? (s.opacity < 0.4 ? 1.1 : s.opacity < 0.6 ? 1.3 : s.opacity < 0.85 ? 1.56 : 1.6)
-      : 1.1;
+    const mcr = computeMcr(s, theme.base);
     const mcrChanged = mcr !== lastMcr;
     const fontChanged = s.fontFamily !== lastFontFamily
       || s.cjkFontFamily !== lastCjkFontFamily

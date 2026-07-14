@@ -75,10 +75,12 @@ function ensurePanel(): HTMLElement {
     panel.innerHTML = `
       <div class="tp-head">
         <span class="tp-title">传输</span>
+        <button class="tp-clear" title="清空所有传输记录">清空</button>
         <button class="tp-close" title="隐藏（可从顶部下载图标重新打开）">${ICON.close}</button>
       </div>
       <div class="tp-list"></div>`;
     panel.querySelector(".tp-close")!.addEventListener("click", () => hidePanel());
+    panel.querySelector(".tp-clear")!.addEventListener("click", () => clearAll());
     document.body.appendChild(panel);
     listEl = panel.querySelector(".tp-list");
   }
@@ -231,6 +233,18 @@ function requestCancel(row: Row): void {
 function removeRow(row: Row): void {
   row.el.remove();
   rows.delete(row.id);
+  refreshVisibility();
+}
+
+/** 清空所有传输记录：进行中的先取消再移除，终态直接移除 */
+function clearAll(): void {
+  for (const row of [...rows.values()]) {
+    if (row.state === "active" || row.state === "paused") {
+      void api.transferCancel(row.id);
+    }
+    row.el.remove();
+    rows.delete(row.id);
+  }
   refreshVisibility();
 }
 

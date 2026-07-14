@@ -2065,6 +2065,25 @@ input[type="checkbox"] {
   opacity: 0.85;
 }
 
+.tp-clear {
+  margin-left: auto;
+  margin-right: 6px;
+  padding: 2px 8px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #f5683f;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+.tp-clear:hover {
+  opacity: 1;
+  background: color-mix(in srgb, #f5683f 15%, transparent);
+}
+
 .tp-close {
   display: flex;
   align-items: center;

@@ -268,7 +268,7 @@ async fn pane_open_local(
     ) {
         let _ = old.tx.send(PaneCmd::Close);
     }
-    match local::open(app, pane_id.clone(), cols, rows, cwd, hssh_token, rx) {
+    match local::open(app, pane_id.clone(), cols, rows, cwd, hssh_token, state.settings.lock().await.shell.clone(), rx) {
         // 启动成功后回填 shell PID，供 local_cwd 读实时工作目录
         Ok(pid) => {
             if let Some(ctl) = state.panes.lock().await.get_mut(&pane_id) {

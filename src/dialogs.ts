@@ -458,9 +458,18 @@ export function showSettingsDialog() {
           <label class="check"><input name="copyOnSelect" type="checkbox"> 选中文本即复制到剪贴板</label>
           <label class="check"><input name="showScrollbar" type="checkbox"> 显示终端滚动条</label>
           <label class="check"><input name="webgl" type="checkbox"> WebGL 硬件加速渲染（关闭后回退 Canvas，可解决部分 GPU 驱动导致的乱码；乱码时按 Ctrl+Shift+R 重建）</label>
+          <label class="check"><input name="mcrEnabled" type="checkbox"> 最小对比度提亮（MCR）<input name="mcrMax" type="number" min="1.1" max="2" step="0.01" placeholder="1.6" style="width:56px;margin-left:8px"></label>
+          <p class="section-desc">按透明度自适应提亮前景色对比度，值越高文字越清晰但颜色偏移也越大（1.1–2.0）。</p>
           <label class="check"><input name="confirmOverwrite" type="checkbox"> 上传遇同名文件时提示确认（默认直接覆盖）</label>
           <label class="check"><input name="restoreSession" type="checkbox"> 记住最后的会话（下次启动自动重开并连接）</label>
           <label class="check"><input name="trackRemoteCwd" type="checkbox"> 追踪远程工作目录（连接时注入隐形标记，经 /proc 读实时目录）</label>
+          <label>本地终端 Shell
+            <div class="row">
+              <input name="shell" class="grow" spellcheck="false" placeholder="默认（自动推断）">
+              <button type="button" class="btn browse-shell">浏览</button>
+            </div>
+          </label>
+          <p class="section-desc">空或"默认"按平台自动选择（Linux/macOS 用 $SHELL，Windows 用 PowerShell）；可填命令名（如 zsh）或绝对路径。启动失败时自动回退到默认。</p>
         </section>
         <section>
           <h4>下载</h4>
@@ -508,12 +517,15 @@ export function showSettingsDialog() {
   input("copyOnSelect").checked = s.copyOnSelect;
   input("showScrollbar").checked = s.showScrollbar;
   input("webgl").checked = s.webgl;
+  input("mcrEnabled").checked = s.mcrEnabled;
+  input("mcrMax").value = String(s.mcrMax ?? 1.6);
   input("confirmOverwrite").checked = s.confirmOverwrite;
   input("restoreSession").checked = s.restoreSession;
   input("tabFontFamily").value = s.tabFontFamily;
   input("tabFontSize").value = s.tabFontSize ? String(s.tabFontSize) : "";
   input("tabBarFill").checked = s.tabBarFill;
   input("trackRemoteCwd").checked = s.trackRemoteCwd;
+  input("shell").value = s.shell ?? "";
   input("downloadDir").value = s.downloadDir;
   input("askDownloadLocation").checked = s.askDownloadLocation;
   overlay.querySelector(".browse-dl")!.addEventListener("click", async () => {
@@ -521,6 +533,14 @@ export function showSettingsDialog() {
     const picked = await open({ directory: true, title: "选择默认下载目录" });
     if (typeof picked === "string") {
       input("downloadDir").value = picked;
+      commit();
+    }
+  });
+  overlay.querySelector(".browse-shell")!.addEventListener("click", async () => {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const picked = await open({ title: "选择终端 Shell 可执行文件" });
+    if (typeof picked === "string") {
+      input("shell").value = picked;
       commit();
     }
   });
@@ -825,6 +845,8 @@ export function showSettingsDialog() {
       copyOnSelect: input("copyOnSelect").checked,
       showScrollbar: input("showScrollbar").checked,
       webgl: input("webgl").checked,
+      mcrEnabled: input("mcrEnabled").checked,
+      mcrMax: Math.max(1.1, Math.min(2, parseFloat(input("mcrMax").value) || 1.6)),
       confirmOverwrite: input("confirmOverwrite").checked,
       restoreSession: input("restoreSession").checked,
       cornerRadius,
@@ -832,6 +854,7 @@ export function showSettingsDialog() {
       tabFontFamily: input("tabFontFamily").value,
       tabFontSize: parseInt(input("tabFontSize").value, 10) || 0,
       trackRemoteCwd: input("trackRemoteCwd").checked,
+      shell: input("shell").value.trim(),
       downloadDir: input("downloadDir").value.trim(),
       askDownloadLocation: input("askDownloadLocation").checked,
     });
