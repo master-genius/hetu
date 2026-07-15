@@ -403,7 +403,7 @@ body {
 .layout-root {
   position: absolute;
   inset: 0;
-  padding: 4px 0 2px 4px;
+  padding: 4px 2px 2px 4px;
 }
 
 /* 非活动标签：保持尺寸、仅隐藏，切换瞬时无重排/重绘闪烁 */
@@ -563,7 +563,7 @@ body {
   height: 100%;
   /* padding 放在 .xterm 上而非 .pane：FitAddon 读取 .xterm 的 padding 来扣减可用高度，
      若 padding 在 .pane 上则被忽略，终端会多渲染一行溢出到 padding 区域，文本紧贴边缘。
-     右侧 padding 0：FitAddon 已预留 14px 滚动条宽度，无需额外右侧间距 */
+     右侧 padding 0：overviewRuler.width=10 已被 FitAddon 计入预留，无需额外右侧间距 */
   padding: 4px 0 2px 4px;
 }
 

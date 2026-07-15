@@ -371,12 +371,13 @@ export class TabManager {
   /**
    * 切分指定 tab 中的某个 pane（交互切分与会话恢复共用）。
    * 超出最大层级返回 null；ratio 供会话恢复还原分割比例。
+   * overrideCwd 仅会话恢复时传入：用快照中保存的 cwd 替代实时 resolveLocalCwd。
    */
-  async splitPane(tab: Tab, target: Pane, dir: "row" | "col", ratio?: number): Promise<Pane | null> {
+  async splitPane(tab: Tab, target: Pane, dir: "row" | "col", ratio?: number, overrideCwd?: string | null): Promise<Pane | null> {
     if (tab.layout.depthOf(target) > TabManager.MAX_SPLIT_DEPTH) return null;
     // 分屏继承被切分终端的实时 cwd（本地终端）：resolveLocalCwd 对远程/取不到返回 null，
-    // 后端据此回退 home（见 local::open）
-    const initialCwd = await target.resolveLocalCwd();
+    // 后端据此回退 home（见 local::open）。会话恢复时用快照保存的 cwd 覆盖。
+    const initialCwd = overrideCwd ?? await target.resolveLocalCwd();
     // 复用被切分 pane 的连接（可能已就地切换过，未必等于 tab.connId）
     const pane = new Pane(crypto.randomUUID(), target.connId, initialCwd);
     this.onPaneCreated?.(pane, tab);

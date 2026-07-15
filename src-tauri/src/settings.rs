@@ -215,6 +215,9 @@ pub struct SessionTab {
     /// 缺省 = 单 pane。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout: Option<serde_json::Value>,
+    /// 本地终端首个 pane 的起始工作目录，恢复时传给 shell 启动
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
 }
 
 pub(crate) fn config_dir() -> Result<PathBuf> {

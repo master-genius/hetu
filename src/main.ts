@@ -1211,6 +1211,7 @@ async function bootstrap() {
         local: !info || info.local,
         name: info?.name ?? "本地终端",
         profileId: info?.profileId ?? null,
+        cwd: n.pane.cwd ?? null,
       };
     }
     return {
@@ -1229,7 +1230,9 @@ async function bootstrap() {
       const info = first ? connMeta.get(first.connId) : undefined;
       // 分屏结构仅在确有切分时记录（单 pane 省略，保持 session.json 精简）
       const layout = tab.layout.root.type === "split" ? snapLayout(tab.layout.root) : undefined;
-      if (!info || info.local) return { local: true, name: info?.name ?? "本地终端", layout };
+      // 本地终端保存首个 pane 的 OSC7 cwd，恢复时传给 shell 启动
+      const cwd = (!info || info.local) ? (first?.cwd ?? null) : null;
+      if (!info || info.local) return { local: true, name: info?.name ?? "本地终端", layout, cwd };
       return { local: false, name: info.name, profileId: info.profileId ?? null, layout };
     });
     return api.sessionSet(snap).catch(() => {});
@@ -1575,7 +1578,10 @@ async function bootstrap() {
     const rebuild = async (node: SessionLayout, pane: Pane): Promise<void> => {
       if (node?.type !== "split" || (node.dir !== "row" && node.dir !== "col")) return;
       const ratio = typeof node.ratio === "number" ? node.ratio : 0.5;
-      const created = await tabs.splitPane(tab, pane, node.dir, ratio).catch(() => null);
+      // 新建 pane（node.b 侧）用快照中保存的 cwd 启动；深层递归时各 split 逐层提取首个 leaf cwd
+      const leafCwd = (n: SessionLayout): string | null | undefined =>
+        n.type === "leaf" ? n.cwd : (leafCwd(n.a) ?? leafCwd(n.b));
+      const created = await tabs.splitPane(tab, pane, node.dir, ratio, leafCwd(node.b)).catch(() => null);
       if (!created) return;
       await rebuild(node.a, pane);
       await rebuild(node.b, created);
@@ -1673,7 +1679,7 @@ async function bootstrap() {
     // order = 会话中的原始序号：后台并行连接完成顺序不定，最后按 order 归位
     capped.forEach((st, order) => {
       if (st.local) {
-        pending.push(openLocalTab(order).then((tab) => applySessionLayout(tab, st.layout)));
+        pending.push(openLocalTab(order, st.cwd ?? null).then((tab) => applySessionLayout(tab, st.layout)));
         return;
       }
       if (!st.profileId) return; // 临时/手输连接，未保存为连接项 → 不恢复

@@ -26,6 +26,8 @@ pub struct AppState {
     conns: Mutex<HashMap<String, Arc<Connection>>>,
     panes: Mutex<HashMap<String, PaneCtl>>,
     settings: Mutex<Settings>,
+    /// settings.json 上次加载时的 mtime；settings_get 对比它判断是否被其他实例改过
+    settings_mtime: Mutex<Option<std::time::SystemTime>>,
     /// 连接项存于独立文件 profiles.json，与 settings 分离
     profiles: Mutex<Vec<Profile>>,
     /// 进行中的传输：transfer_id → 控制句柄（暂停/继续/取消），传输结束即移除
@@ -52,6 +54,21 @@ async fn get_conn(state: &AppState, conn_id: &str) -> Result<Arc<Connection>> {
 
 #[tauri::command]
 async fn settings_get(state: State<'_>) -> Result<Settings> {
+    // 多实例共享同一份 settings.json：对比文件 mtime，若被其他实例改过则重新加载
+    let stale = {
+        let mtime = state.settings_mtime.lock().await;
+        match settings::settings_path().ok().and_then(|p| std::fs::metadata(&p).ok().and_then(|m| m.modified().ok())) {
+            Some(current) => mtime.map_or(true, |last| current != last),
+            None => false,
+        }
+    };
+    if stale {
+        let s = settings::load();
+        let m = settings::settings_path().ok().and_then(|p| std::fs::metadata(&p).ok().and_then(|m| m.modified().ok()));
+        *state.settings.lock().await = s.clone();
+        *state.settings_mtime.lock().await = m;
+        return Ok(s);
+    }
     Ok(state.settings.lock().await.clone())
 }
 
@@ -66,6 +83,9 @@ async fn settings_set(state: State<'_>, settings: Settings) -> Result<()> {
         Ok(())
     })?;
     *state.settings.lock().await = settings;
+    // 记录本次写入后的 mtime，避免下次 settings_get 误判为被其他实例改过
+    *state.settings_mtime.lock().await =
+        settings::settings_path().ok().and_then(|p| std::fs::metadata(&p).ok().and_then(|m| m.modified().ok()));
     // 自动重连开关改动后同步到所有存活连接（否则仅对新建连接生效）
     for conn in state.conns.lock().await.values() {
         conn.auto_reconnect.store(auto, Ordering::SeqCst);
@@ -661,6 +681,9 @@ pub fn run() {
             conns: Mutex::new(HashMap::new()),
             panes: Mutex::new(HashMap::new()),
             settings: Mutex::new(settings::load()),
+            settings_mtime: Mutex::new(
+                settings::settings_path().ok().and_then(|p| std::fs::metadata(&p).ok().and_then(|m| m.modified().ok()))
+            ),
             profiles: Mutex::new(settings::load_profiles()),
             transfers: Mutex::new(HashMap::new()),
             slot: Mutex::new(None),

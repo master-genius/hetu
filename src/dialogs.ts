@@ -1,7 +1,7 @@
 /** 连接对话框（新建标签页选择连接项）、设置对话框与关于弹窗 */
 
 import { api } from "./ipc";
-import { getSettings, updateSettings } from "./settings";
+import { getSettings, loadSettings, updateSettings } from "./settings";
 import { allThemes, BUILTIN_THEMES, resolveTheme } from "./themes";
 import { customSelect, toast, type CSOption } from "./ui";
 import {
@@ -365,7 +365,6 @@ const THEME_COLOR_KEYS = [
 ];
 
 export function showSettingsDialog() {
-  const s = getSettings();
   const overlay = document.createElement("div");
   // peek：设置弹窗遮罩更淡，方便实时预览主题/透明度/模糊改动
   overlay.className = "modal-overlay peek";
@@ -380,6 +379,7 @@ export function showSettingsDialog() {
   document.body.appendChild(overlay);
 
   const fillContent = () => {
+    const s = getSettings();
     const modal = overlay.querySelector(".modal")!;
     modal.innerHTML = `
       <h3>设置</h3>
@@ -924,7 +924,8 @@ export function showSettingsDialog() {
   });
   };
 
-  requestAnimationFrame(fillContent);
+  // 先展示骨架，下一帧拉取最新设置（多实例共享时检测磁盘变更）再填充内容
+  requestAnimationFrame(() => { void loadSettings().then(fillContent); });
 }
 
 /** 主题配色示例卡片：背景 + 前景示意文字 + 一排 ANSI 色板；自定义主题带删除按钮 */

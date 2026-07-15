@@ -94,7 +94,7 @@ export interface Settings {
  *  local/profileId/name 为可选字段：旧版 session.json 的 leaf 不携带这些字段，
  *  恢复时回退到 tab 级信息（向后兼容）。 */
 export type SessionLayout =
-  | { type: "leaf"; local?: boolean; profileId?: string | null; name?: string }
+  | { type: "leaf"; local?: boolean; profileId?: string | null; name?: string; cwd?: string | null }
   | { type: "split"; dir: "row" | "col"; ratio: number; a: SessionLayout; b: SessionLayout };
 
 /** 会话中一个标签页的可持久化描述（不含任何机密） */
@@ -105,6 +105,8 @@ export interface SessionTab {
   profileId?: string | null;
   /** 分屏结构快照；缺省/叶子 = 单 pane，不切分 */
   layout?: SessionLayout | null;
+  /** 本地终端首个 pane 的起始工作目录（OSC7 上报），恢复时传给 shell 启动 */
+  cwd?: string | null;
 }
 
 export interface ConnParams {

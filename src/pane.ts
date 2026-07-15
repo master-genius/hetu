@@ -20,10 +20,9 @@ const HIMAGE_OSC = 1731;
 /** hfile 内建命令通过此 OSC 标识符通知前端打开文件管理器面板。 */
 const HFILE_OSC = 1732;
 
-// FitAddon 在 scrollback>0 时预留 14px 滚动条宽度。我们的滚动条是 2px overlay 不占布局空间，
-// 理论上应消除这 14px。但任何临时修改 xterm 选项（scrollback/overviewRuler）都会触发
-// 选项变更监听器（BufferSet.resize / OverviewRulerRenderer 创建），破坏 buffer 和滚动状态。
-// 接受 14px 预留——与 2.3.8 行为一致，终端右侧少 14px 可用宽度但不影响功能。
+// FitAddon 在 scrollback>0 时预留滚动条宽度：overviewRuler?.width || 14。
+// 初始化时传 overviewRuler: { width: 10 } 覆盖默认 14，减少 4px 预留。
+// 必须在构造时设置——运行时改 overviewRuler 会触发 OverviewRulerRenderer 重建。
 
 /** hssh 解析出的连接意图（tok 为来源校验令牌）：直连已保存连接项，或临时连接。
  *  feedPath/exitAfter 为自动化喂入字段，旧版 OSC 不携带时为 undefined/false（向后兼容）。 */
@@ -193,7 +192,8 @@ export class Pane {
       cursorBlink: true,
       cursorStyle: (s.cursorStyle === "bar" ? "bar" : "block") as never,
       cursorWidth: s.cursorStyle === "bar" ? 2 : undefined,
-      scrollback: 10000,
+      scrollback: 12345,
+      overviewRuler: { width: 10 },
       theme: (() => {
         const c: Record<string, string> = { ...theme.colors, background: "#00000000" };
         c.selectionBackground = "#8080806B";
