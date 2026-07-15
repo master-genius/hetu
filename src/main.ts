@@ -1203,38 +1203,40 @@ async function bootstrap() {
   // 恢复期间 restoring=true 时跳过，避免在标签页尚未全部重建时把会话写成半截而丢失。
   let restoring = false;
   /** 布局树 → 可持久化快照：每个 leaf 记录自己的连接来源，split 只记结构与比例 */
-  const snapLayout = (n: LayoutNode): SessionLayout => {
+  const snapLayout = async (n: LayoutNode): Promise<SessionLayout> => {
     if (n.type === "leaf") {
       const info = connMeta.get(n.pane.connId);
+      const local = !info || info.local;
       return {
         type: "leaf",
-        local: !info || info.local,
+        local,
         name: info?.name ?? "本地终端",
         profileId: info?.profileId ?? null,
-        cwd: n.pane.cwd ?? null,
+        // 本地终端：OSC7 cwd → /proc 兜底（无需 shell 配置 OSC7）；远程终端：仅 OSC7
+        cwd: local ? await n.pane.resolveLocalCwd() : (n.pane.cwd ?? null),
       };
     }
     return {
       type: "split",
       dir: n.dir,
       ratio: Math.round(n.ratio * 1000) / 1000,
-      a: snapLayout(n.a),
-      b: snapLayout(n.b),
+      a: await snapLayout(n.a),
+      b: await snapLayout(n.b),
     };
   };
-  const snapshotSession = (): Promise<void> => {
+  const snapshotSession = async (): Promise<void> => {
     // 未开启「记住最后的会话」时不写盘：既避免无谓写入，也不覆盖上次保存的会话
-    if (restoring || !getSettings().restoreSession) return Promise.resolve();
-    const snap = tabs.tabs.map((tab) => {
+    if (restoring || !getSettings().restoreSession) return;
+    const snap = await Promise.all(tabs.tabs.map(async (tab) => {
       const first = tab.layout.panes()[0];
       const info = first ? connMeta.get(first.connId) : undefined;
       // 分屏结构仅在确有切分时记录（单 pane 省略，保持 session.json 精简）
-      const layout = tab.layout.root.type === "split" ? snapLayout(tab.layout.root) : undefined;
-      // 本地终端保存首个 pane 的 OSC7 cwd，恢复时传给 shell 启动
-      const cwd = (!info || info.local) ? (first?.cwd ?? null) : null;
+      const layout = tab.layout.root.type === "split" ? await snapLayout(tab.layout.root) : undefined;
+      // 本地终端：resolveLocalCwd 先查 OSC7 再读 /proc/<pid>/cwd，无需 shell 配置 OSC7
+      const cwd = (!info || info.local) ? await first?.resolveLocalCwd() : null;
       if (!info || info.local) return { local: true, name: info?.name ?? "本地终端", layout, cwd };
       return { local: false, name: info.name, profileId: info.profileId ?? null, layout };
-    });
+    }));
     return api.sessionSet(snap).catch(() => {});
   };
   let saveTimer: number | undefined;

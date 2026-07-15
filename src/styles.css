@@ -567,6 +567,12 @@ body {
   padding: 4px 0 2px 4px;
 }
 
+/* overviewRuler 仅用于 FitAddon 宽度预留（10px 替代默认 14px），视觉上不渲染。
+   xterm 在 onBufferActivate 时设内联 display:block，!important 强制覆盖 */
+.pane .xterm-decoration-overview-ruler {
+  display: none !important;
+}
+
 /* Ctrl 悬停在文件/目录上：手形光标，提示可点击下载 / 拖拽到文件管理器 */
 .pane.ctrl-link,
 .pane.ctrl-link .xterm-screen,
