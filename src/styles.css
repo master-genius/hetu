@@ -2269,3 +2269,222 @@ input[type="checkbox"] {
   display: flex;
   flex-direction: column;
 }
+
+/* ---------- Hai Agent Modal ---------- */
+
+.hai-overlay {
+  z-index: 160;
+}
+
+.hai-modal {
+  width: 80vw;
+  height: 80vh;
+  max-width: 1200px;
+  max-height: 800px;
+  min-width: 480px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.hai-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--term-fg) 12%, transparent);
+  flex-shrink: 0;
+}
+
+.hai-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--term-fg);
+}
+
+.hai-header-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hai-mode-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--term-blue) 22%, transparent);
+  color: var(--term-blue);
+  text-transform: capitalize;
+}
+
+.hai-btn-close {
+  font-size: 12px;
+}
+
+.hai-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scroll-behavior: smooth;
+}
+
+.hai-msg {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.hai-msg-user {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--term-blue) 18%, transparent);
+  color: var(--term-fg);
+  border: 1px solid color-mix(in srgb, var(--term-blue) 25%, transparent);
+  white-space: pre-wrap;
+}
+
+.hai-msg-assistant {
+  align-self: flex-start;
+  background: color-mix(in srgb, var(--term-fg) 7%, transparent);
+  color: var(--term-fg);
+  border: 1px solid color-mix(in srgb, var(--term-fg) 10%, transparent);
+}
+
+.hai-msg-assistant .hai-msg-content {
+  overflow-x: auto;
+}
+
+.hai-msg-assistant .hai-msg-content p {
+  margin: 0 0 8px;
+}
+
+.hai-msg-assistant .hai-msg-content p:last-child {
+  margin-bottom: 0;
+}
+
+.hai-msg-assistant .hai-msg-content pre {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--term-bg) 60%, #000);
+  border: 1px solid color-mix(in srgb, var(--term-fg) 10%, transparent);
+  overflow-x: auto;
+}
+
+.hai-msg-assistant .hai-msg-content pre code {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.hai-msg-assistant .hai-msg-content code {
+  font-family: var(--ui-font, "JetBrains Mono NL", monospace);
+}
+
+.hai-msg-assistant .hai-msg-content p code,
+.hai-msg-assistant .hai-msg-content li code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--term-fg) 12%, transparent);
+  font-size: 0.92em;
+}
+
+.hai-msg-assistant .hai-msg-content ul,
+.hai-msg-assistant .hai-msg-content ol {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.hai-msg-assistant .hai-msg-content li {
+  margin: 3px 0;
+}
+
+.hai-msg-assistant .hai-msg-content table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12px;
+}
+
+.hai-msg-assistant .hai-msg-content th,
+.hai-msg-assistant .hai-msg-content td {
+  border: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
+  padding: 4px 8px;
+}
+
+.hai-msg-assistant .hai-msg-content blockquote {
+  margin: 6px 0;
+  padding-left: 12px;
+  border-left: 3px solid color-mix(in srgb, var(--term-blue) 50%, transparent);
+  color: color-mix(in srgb, var(--term-fg) 70%, transparent);
+}
+
+.hai-msg-error {
+  align-self: center;
+  background: color-mix(in srgb, var(--term-red) 15%, transparent);
+  color: var(--term-red);
+  border: 1px solid color-mix(in srgb, var(--term-red) 30%, transparent);
+  font-size: 12px;
+  text-align: center;
+}
+
+.hai-input-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid color-mix(in srgb, var(--term-fg) 12%, transparent);
+  flex-shrink: 0;
+}
+
+.hai-input {
+  flex: 1;
+  resize: none;
+  border: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-family: var(--ui-font, "JetBrains Mono NL", monospace);
+  font-size: 13px;
+  background: color-mix(in srgb, var(--term-bg) 50%, transparent);
+  color: var(--term-fg);
+  outline: none;
+  max-height: 150px;
+  line-height: 1.5;
+}
+
+.hai-input:focus {
+  border-color: color-mix(in srgb, var(--term-blue) 50%, transparent);
+}
+
+.hai-btn-send,
+.hai-btn-abort {
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.hai-btn-abort {
+  background: color-mix(in srgb, var(--term-red) 20%, transparent);
+  border-color: color-mix(in srgb, var(--term-red) 30%, transparent);
+}
+
+.hai-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 16px;
+  border-top: 1px solid color-mix(in srgb, var(--term-fg) 8%, transparent);
+  font-size: 11px;
+  color: color-mix(in srgb, var(--term-fg) 55%, transparent);
+  flex-shrink: 0;
+}
+
+/* 通用隐藏类（用于 hai-modal 等按钮切换） */
+.hidden {
+  display: none !important;
+}

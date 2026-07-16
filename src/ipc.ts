@@ -80,6 +80,17 @@ export const api = {
   openExternal: (url: string) => invoke<void>("open_external", { url }),
   /** 从最大化还原窗口尺寸（后端直接获取屏幕尺寸 + 设置窗口） */
   restoreWindowSize: () => invoke<void>("restore_window_size"),
+
+  // ---------- Agent ----------
+
+  agentSpawn: (tabId: string, mode: string, role: string, initialMessage: string | null, onEvent: Channel<any>) =>
+    invoke<void>("agent_spawn", { tabId, mode, role, initialMessage, onEvent }),
+  agentSendMessage: (tabId: string, message: string) =>
+    invoke<void>("agent_send_message", { tabId, message }),
+  agentAbort: (tabId: string) =>
+    invoke<void>("agent_abort", { tabId }),
+  agentDestroy: (tabId: string) =>
+    invoke<void>("agent_destroy", { tabId }),
 };
 
 export const events = {

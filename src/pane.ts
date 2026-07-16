@@ -11,6 +11,7 @@ import { api, b64decode, b64encode } from "./ipc";
 import { installImeGuard } from "./imeGuard";
 import { getSettings, activeTheme, fontStack, computeMcr } from "./settings";
 import type { FileMeta, PaneEvent } from "./types";
+import { parseHai } from "./ai/hai";
 
 /** hssh 内建命令通过此 OSC 标识符通知前端（见 local.rs 注入的 hssh 脚本）。 */
 const HSSH_OSC = 1729;
@@ -20,6 +21,8 @@ const HEXIT_OSC = 1730;
 const HIMAGE_OSC = 1731;
 /** hfile 内建命令通过此 OSC 标识符通知前端打开文件管理器面板。 */
 const HFILE_OSC = 1732;
+/** hai 内建命令通过此 OSC 标识符通知前端弹出 AI Agent 面板。 */
+const HAI_OSC = 1733;
 
 // FitAddon 在 scrollback>0 时预留滚动条宽度：overviewRuler?.width || 14。
 // 初始化时传 overviewRuler: { width: 10 } 覆盖默认 14，减少 4px 预留。
@@ -170,6 +173,8 @@ export class Pane {
   onHimage: ((paths: string[], withShell: boolean, pane: Pane) => void) | null = null;
   /** 内建 hfile 命令：仅本地终端触发，打开文件管理器面板 */
   onHfile: ((spec: HfileSpec, pane: Pane) => void) | null = null;
+  /** 内建 hai 命令：仅本地终端触发，弹出 AI Agent 面板 */
+  onHai: ((spec: import("./ai/protocol").HaiSpec, pane: Pane) => void) | null = null;
   /** pane channel 关闭回调（shell 退出或连接断开），宿主据此切连接/关 pane */
   onClose: ((exited: boolean) => void) | null = null;
   /** hssh 来源校验令牌：随本地 shell 注入 $HSSH_TOKEN，OSC 载荷须回带一致值才受理，
@@ -305,6 +310,21 @@ export class Pane {
               },
               this,
             );
+          }
+        }
+      } catch {
+        /* 忽略 */
+      }
+      return true;
+    });
+
+    // hai 内建命令（OSC 1733）：仅本地终端接受，安全模型同 hssh。
+    this.term.parser.registerOscHandler(HAI_OSC, (data) => {
+      try {
+        if (this.isLocal) {
+          const spec = parseHai(data);
+          if (spec && spec.tok && spec.tok === this.hsshToken && spec.op === "launch") {
+            this.onHai?.(spec, this);
           }
         }
       } catch {

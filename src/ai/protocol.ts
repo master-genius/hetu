@@ -9,6 +9,7 @@ export type AgentEvent =
 
 /** OSC 1733 载荷解析结果 */
 export interface HaiSpec {
+  tok: string;
   op: string;
   role: string;
   mode: string;

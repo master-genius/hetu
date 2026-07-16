@@ -22,6 +22,8 @@ import { type Action, matchAction, resolveBindings } from "./keybindings";
 import { showAboutDialog, showConnectDialog, showSettingsDialog } from "./dialogs";
 import { feedPane } from "./feed";
 import { initPanelResize } from "./panelResize";
+import { AgentModal } from "./ai/agent-modal";
+import type { HaiSpec } from "./ai/protocol";
 import {
   confirmDialog, confirmOverwriteDialog, formatSize, IMAGE_MIME, showFileTooltip, showHimageViewer, showMenu, showPreview,
   toast,
@@ -412,6 +414,22 @@ async function bootstrap() {
     }
   };
 
+  // hai：在终端内弹出 AI Agent 面板（Tab 级 Session，ESC 隐藏不销毁）
+  const agentModals = new Map<string, AgentModal>();
+  const handleHai = async (spec: HaiSpec, pane: Pane) => {
+    AgentModal.preload();
+    const found = tabs.findPane(pane.id);
+    const tabId = found ? found.tab.id : tabs.active?.id;
+    if (!tabId) return;
+
+    let modal = agentModals.get(tabId);
+    if (!modal) {
+      modal = new AgentModal(tabId);
+      agentModals.set(tabId, modal);
+    }
+    await modal.show(spec);
+  };
+
   const requestCloseTab = async (tab: Tab) => {
     if (tabs.hasBusyPane(tab)) {
       const ok = await confirmDialog(
@@ -419,6 +437,12 @@ async function bootstrap() {
         `“${tab.title}”中可能有程序正在运行，确定要关闭吗？`,
       );
       if (!ok) return;
+    }
+    // 销毁 Agent Modal + 后端 Session
+    const modal = agentModals.get(tab.id);
+    if (modal) {
+      agentModals.delete(tab.id);
+      void modal.destroy();
     }
     await tabs.closeTab(tab);
   };
@@ -460,6 +484,8 @@ async function bootstrap() {
     pane.onHimage = (paths, withShell, p) => handleHimage(paths, withShell, p);
     // 内建 hfile 命令：打开文件管理器面板
     pane.onHfile = (spec, p) => handleHfile(spec, p);
+    // 内建 hai 命令：弹出 AI Agent 面板
+    pane.onHai = (spec, p) => void handleHai(spec, p);
     // pane channel 关闭：shell 正常退出→切回本地/关 pane；连接断开→保留等待重连
     pane.onClose = (exited) => {
       if (!exited) return; // 连接断开（exited=false）→ 保留等待重连
