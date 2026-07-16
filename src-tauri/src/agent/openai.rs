@@ -136,20 +136,11 @@ impl LlmProvider for OpenAiProvider {
             let chunk = chunk_result.map_err(|e| Error::msg(format!("SSE 读取失败: {e}")))?;
             line_buf.push_str(&String::from_utf8_lossy(&chunk));
 
-            // 按行处理
-            let mut lines: VecDeque<&str> = line_buf.lines().collect();
-            // 最后一行可能不完整（无换行结尾），保留到下次
-            if !line_buf.ends_with('\n') {
-                if let Some(last) = lines.pop_back() {
-                    line_buf = last.to_string();
-                } else {
-                    line_buf.clear();
-                }
-            } else {
-                line_buf.clear();
-            }
+            // 按行处理：先分割出完整行，保留最后不完整行
+            let (complete_lines, remaining) = split_lines(&line_buf);
+            line_buf = remaining;
 
-            for line in lines {
+            for line in complete_lines {
                 let line = line.trim();
                 if line.is_empty() || line.starts_with(':') {
                     continue;

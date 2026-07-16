@@ -45,7 +45,7 @@ pub struct RoleBinding {
     pub provider: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExecutionConfig {
     #[serde(default = "default_mode")]
     pub default_mode: String,
