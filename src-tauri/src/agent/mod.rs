@@ -39,7 +39,7 @@ pub async fn agent_spawn(
     app: tauri::AppHandle,
     state: tauri::State<'_, AgentManager>,
     tab_id: String,
-    mode: String,
+    _mode: String,
     role: String,
     initial_message: Option<String>,
     on_event: Channel<AgentEvent>,
