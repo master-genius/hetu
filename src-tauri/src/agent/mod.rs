@@ -36,7 +36,7 @@ impl AgentManager {
 
 /// 创建 Agent Session。若同 tabId 已有 session，先销毁旧的。
 #[tauri::command]
-async fn agent_spawn(
+pub async fn agent_spawn(
     app: tauri::AppHandle,
     state: tauri::State<'_, AgentManager>,
     tab_id: String,
@@ -95,7 +95,7 @@ async fn agent_spawn(
 
 /// 向已有 session 发送消息
 #[tauri::command]
-async fn agent_send_message(
+pub async fn agent_send_message(
     state: tauri::State<'_, AgentManager>,
     tab_id: String,
     message: String,
@@ -117,7 +117,7 @@ async fn agent_send_message(
 
 /// 中止当前 LLM 请求
 #[tauri::command]
-async fn agent_abort(
+pub async fn agent_abort(
     state: tauri::State<'_, AgentManager>,
     tab_id: String,
 ) -> Result<()> {
@@ -130,7 +130,7 @@ async fn agent_abort(
 
 /// 销毁 session（Tab 关闭时调用）
 #[tauri::command]
-async fn agent_destroy(
+pub async fn agent_destroy(
     state: tauri::State<'_, AgentManager>,
     tab_id: String,
 ) -> Result<()> {
