@@ -218,3 +218,18 @@ impl OpenAiProvider {
         ))
     }
 }
+
+/// 将缓冲区按行分割：返回 (完整行列表, 剩余不完整部分)。
+/// 完整行 = 以 \n 结尾的行；最后一行若无 \n 则保留到下次 chunk。
+fn split_lines(buf: &str) -> (Vec<String>, String) {
+    let mut complete = Vec::new();
+    let mut remaining = String::new();
+    for line in buf.split_inclusive('\n') {
+        if line.ends_with('\n') {
+            complete.push(line.trim_end_matches('\n').to_string());
+        } else {
+            remaining = line.to_string();
+        }
+    }
+    (complete, remaining)
+}
