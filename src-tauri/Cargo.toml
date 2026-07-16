@@ -32,6 +32,9 @@ uuid = { version = "1", features = ["v4"] }
 glob = "0.3"
 window-vibrancy = "0.6"
 fs2 = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+async-trait = "0.1"
+futures-util = "0.3"
 
 [profile.release]
 lto = true
