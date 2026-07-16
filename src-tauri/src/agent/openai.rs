@@ -1,8 +1,6 @@
 //! OpenAI 兼容 Provider — 支持 DeepSeek/OpenAI/GLM 等兼容 /v1/chat/completions 的服务。
 //! SSE 流式解析：按行读取 data: {...}，提取 delta.content 推送给前端。
 
-use std::collections::VecDeque;
-
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
