@@ -3,6 +3,7 @@
 > HetuShell 内建 AI Agent，独立模块，单仓库，Web 形态，绑定 Tab，跨分屏。
 > 2026-07-15 初版，2026-07-15 修订（补充 Provider 抽象、上下文管理、安全强制、并发控制、错误重试、Phase 拆分）。
 > 2026-07-16 二次审查修订（Provider trait 重设计、AskUser 工具化、cwd 同步机制、渲染依赖加载策略、安全模型务实化）。
+> 2026-07-16 实现方案定稿（Session 通信架构、Modal 生命周期、Phase 1a 最小闭环边界确认）。
 
 ---
 
@@ -1312,3 +1313,255 @@ LLM 可能通过两种方式产出图片：
 | `run_command` 可绕过文件限制 | Agent 可以 `cd / && cat /etc/passwd`，这是命令执行的灵活性需求——通过 Ask 模式兜底，不做硬阻断 |
 | 操作告知 | Agent 在执行重要操作前应在消息中说明意图 |
 | 路径限制是提示性的 | 文件操作的路径限制是**提示性约束**，不是安全边界。真正的安全层是 Ask 模式确认 + 系统提示词约束 |
+
+---
+
+## 17. 实现方案（2026-07-16 定稿）
+
+### 17.1 确认的设计决策
+
+| 决策 | 选择 | 理由 |
+|------|------|------|
+| Session 标识 | 前端传 tabId，Rust 用 tabId 做 key | 简单直接，Agent 绑定 Tab 符合设计 |
+| Provider | OpenAI 兼容协议，用户自行配置 | DeepSeek/OpenAI/GLM 等均兼容 |
+| UI 技术 | vanilla DOM | 与现有 ui.ts/himage 模式一致，无新依赖 |
+| 流式协议 | Tauri `Channel<AgentEvent>` | 与 v3.0.2 pane Channel 一致，点对点 |
+| 消息串行 | Session 内 mpsc 排队 | 同一 session 不并发请求 LLM |
+| **独立性原则** | **Agent 模块独立实现，不修改 shell 基础功能** | Agent 是上层功能，shell 是基础设施。若遇到必须改 shell 才能实现的场景，需先讨论确认 |
+
+### 17.2 Session 通信架构
+
+```
+前端                              Rust 后端
+                                   │
+invoke("agent_spawn",         ───► AgentManager
+  {tabId, mode, role,              │ ├─ 创建 mpsc::channel<SessionCmd>
+   initialMessage,                 │ ├─ 存入 sessions: HashMap<tabId, SessionHandle>
+   onEvent: Channel<AgentEvent>})  │ └─ tokio::spawn(session_loop)
+                                   │
+                                   │ session_loop:
+                                   │   loop {
+                                   │     match rx.recv().await {
+                                   │       Message(text) => {
+                                   │         history.push(user msg)
+                                   │         provider.chat_stream(
+                                   │           &history, &sys_prompt,
+                                   │           &event_channel
+                                   │         ).await
+                                   │         history.push(assistant msg)
+                                   │         event_channel.send(Done)
+                                   │       }
+                                   │       Abort => break
+                                   │     }
+                                   │   }
+                                   │
+invoke("agent_send_message",  ───► session.tx.send(Message(text))
+  {tabId, message})                │
+                                   │
+invoke("agent_abort",         ───► session.tx.send(Abort)
+  {tabId})                         │
+                                   │
+invoke("agent_destroy",       ───► drop session.tx → task 退出
+  {tabId})                         │
+```
+
+**Channel 生命周期：** `Channel<AgentEvent>` 在 `agent_spawn` 时由前端创建并传入。Rust session task 持有它直到销毁。ESC 关闭 Modal 不销毁 session——Channel 的 onmessage 仍有效，Modal 只是 hidden。再次 `hai` 恢复时复用已有 session，不新建 Channel。
+
+### 17.3 Modal 生命周期
+
+```
+hai 命令 → OSC 1733 → main.ts
+  │
+  ├─ Tab 已有 session？
+  │    → Modal 存在但 hidden → display:flex 恢复，聚焦输入框
+  │    → 不 invoke agent_spawn（session 仍在运行）
+  │
+  └─ Tab 无 session？
+       → 创建 Modal DOM + Channel
+       → invoke("agent_spawn", {tabId, ..., onEvent: channel})
+       → Modal 显示
+       → 若有 initialMessage → 自动发送
+
+ESC → Modal hide（display:none），session 保留
+Tab 关闭 → invoke("agent_destroy", {tabId})，Modal DOM 清除
+```
+
+### 17.4 AgentManager + Tauri Commands
+
+```rust
+// agent/mod.rs
+pub struct AgentManager {
+    sessions: Mutex<HashMap<String, SessionHandle>>,
+}
+
+struct SessionHandle {
+    tx: mpsc::UnboundedSender<SessionCmd>,
+}
+
+enum SessionCmd {
+    Message(String),
+    Abort,
+}
+
+// Tauri commands:
+// agent_spawn(tabId, mode, role, initialMessage, onEvent: Channel<AgentEvent>)
+// agent_send_message(tabId, message)
+// agent_abort(tabId)
+// agent_destroy(tabId)
+```
+
+### 17.5 Provider trait + OpenAI 实装
+
+```rust
+// provider.rs
+#[async_trait]
+trait LlmProvider: Send + Sync {
+    async fn chat_stream(
+        &self,
+        messages: &[Message],
+        system_prompt: &str,
+        tx: &Channel<AgentEvent>,
+    ) -> Result<()>;
+}
+
+struct Message {
+    role: String,      // "user" | "assistant"
+    content: String,
+}
+
+// openai.rs
+struct OpenAiProvider {
+    url: String,
+    key: String,
+    model: String,
+    max_tokens: u32,
+    temperature: f32,
+}
+
+// chat_stream 实装：
+// 1. POST {url}/chat/completions, body: { model, messages, stream: true, max_tokens, temperature }
+// 2. reqwest response.bytes_stream() → 按行分割
+// 3. 解析 data: {...} → delta.content → tx.send(Message{content, done:false})
+// 4. data: [DONE] → 返回 Ok
+// 5. abort 检查在每次读 chunk 前（检查 abort flag）
+```
+
+### 17.6 ai-config.json 读写
+
+```rust
+// config.rs — 文件位于 app_data_dir/ai-config.json，权限 0600
+fn load_config(app: &AppHandle) -> Result<AiConfig> {
+    let path = app.path().app_data_dir()?.join("ai-config.json");
+    if !path.exists() {
+        let template = AiConfig::default();
+        save_config(app, &template)?;
+        return Ok(template);
+    }
+    let data = std::fs::read_to_string(&path)?;
+    Ok(serde_json::from_str(&data)?)
+}
+
+fn save_config(app: &AppHandle, config: &AiConfig) -> Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let path = app.path().app_data_dir()?.join("ai-config.json");
+    let data = serde_json::to_string_pretty(config)?;
+    std::fs::OpenOptions::new()
+        .write(true).create(true).truncate(true)
+        .mode(0o600)
+        .open(&path)?
+        .write_all(data.as_bytes())?;
+    Ok(())
+}
+```
+
+### 17.7 hai shell 脚本（local.rs 注入）
+
+```sh
+#!/bin/sh
+# hai — HetuShell AI Agent
+OSC=1733
+emit() { printf '\033]%s;%s\007' "$OSC" "$1"; }
+
+role="general"
+mode="auto"
+message=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --ask)    mode="ask"; shift;;
+    --plan)   mode="plan"; shift;;
+    --role)   role="$2"; shift 2;;
+    -h|--help) echo "hai [--ask|--plan] [--role <name>] [message]"; exit 0;;
+    *)        message="$*"; break;;
+  esac
+done
+
+tok=$(echo -n "${HSSH_TOKEN:-}" | base64 -w0)
+role64=$(echo -n "$role" | base64 -w0)
+mode64=$(echo -n "$mode" | base64 -w0)
+msg64=$(echo -n "$message" | base64 -w0)
+emit "tok=$tok;op=launch;role=$role64;mode=$mode64;msg=$msg64"
+```
+
+OSC 1733 handler 在 pane.ts 注册，与 hssh/hexit/himage/hfile 同安全模型（`isLocal` + `hsshToken` 校验）。
+
+### 17.8 前端 Modal 与 himage 的复用边界
+
+复用的部分：
+- `modal-overlay` CSS 类名 + backdrop-filter 毛玻璃效果
+- ESC 关闭 + capture-phase keydown 模式（xterm 截获 bubble phase）
+- 80vw × 80vh 居中 + 最大化/还原切换
+
+不复用的部分：
+- himage 的内部 DOM 结构（图片查看器 vs 消息流 + 输入框）
+- himage 的 IntersectionObserver / precache / slideshow 等图片逻辑
+
+Modal 内部全新 DOM：
+```
+div.hai-modal
+  ├─ div.hai-header         （标题 + 模式选择 + 关闭按钮）
+  ├─ div.hai-messages        （消息流滚动区）
+  │   ├─ div.hai-msg-user    （用户消息）
+  │   └─ div.hai-msg-assistant（AI 消息，内含 StreamingMarkdown）
+  ├─ div.hai-input-bar       （输入框 + 发送按钮 + 中止按钮）
+  └─ div.hai-status-bar      （模型名 + 状态指示）
+```
+
+### 17.9 Phase 1a 最小闭环边界
+
+| 包含 | 不包含 |
+|------|--------|
+| `hai` 命令 + OSC 1733 | 工具调用（ReAct） |
+| Rust 后端：config + provider + session | Ask/Plan 模式 |
+| 单轮对话（用户发消息 → LLM 流式回复） | 上下文截断 |
+| 多轮对话（history 累积） | 设置面板 |
+| 前端 Modal：消息区 + 输入框 | 角色选择 |
+| StreamingMarkdown 冻结块渲染 | 玻璃模式 |
+| Channel 推送 AgentEvent | 主题独立切换 |
+| 中止机制（abort） | 工具可视化 |
+| 错误处理（API 错误显示） | 重试机制 |
+
+### 17.10 实现顺序
+
+```
+Rust 后端（纯逻辑，无 UI 依赖）：
+  1. Cargo.toml 添加 reqwest
+  2. agent/protocol.rs   — AgentEvent serde 类型
+  3. agent/config.rs     — AiConfig + ai-config.json 读写（0600）
+  4. agent/provider.rs   — LlmProvider trait + Message 类型
+  5. agent/openai.rs     — OpenAI SSE 流式实装
+  6. agent/session.rs    — AgentSession 消息历史 + 请求循环
+  7. agent/mod.rs        — AgentManager + Tauri commands
+  8. lib.rs              — 模块注册 + invoke_handler
+  9. local.rs            — hai shell 脚本注入
+
+前端（UI 集成）：
+  10. ai/protocol.ts     — AgentEvent 类型镜像
+  11. ai/renderer.ts     — StreamingMarkdown 冻结块方案
+  12. ai/agent-modal.ts  — Modal DOM + 消息展示 + 输入
+  13. ai/hai.ts          — OSC 1733 解析 + 入口
+  14. pane.ts/main.ts/ipc.ts — 集成接线
+
+验证：
+  15. tsc + cargo check
+```
