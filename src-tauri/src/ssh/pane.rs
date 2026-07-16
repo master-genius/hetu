@@ -1,16 +1,31 @@
 //! 终端 pane：在既有连接上开一个 PTY channel + shell。
 //! 每个 pane 一个 tokio 任务独占 channel，通过 mpsc 接收输入/resize/关闭指令，
-//! 输出以 base64 事件推送给前端 xterm。
+//! 输出以 Channel 事件推送给前端 xterm（点对点，无全局广播）。
 
 use std::sync::Arc;
 
 use base64::Engine;
 use russh::ChannelMsg;
-use tauri::{AppHandle, Emitter};
+use serde::Serialize;
+use tauri::{AppHandle, ipc::Channel};
 use tokio::sync::mpsc;
 
 use crate::error::{Error, Result};
 use crate::ssh::conn::Connection;
+
+/// 前端 per-pane 事件：通过 Tauri Channel 点对点推送，取代全局 app.emit 广播。
+/// Channel 在 pane_open 命令调用时由前端创建并传入，天然绑定到特定 pane，
+/// 无需 paneId 路由，重连时旧 Channel 自动失效（旧任务残余输出不会混入新 pane）。
+#[derive(Serialize, Clone)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum PaneEvent {
+    /// PTY 数据输出（base64 编码）
+    Output { data: String },
+    /// 远程 shell 退出状态码
+    Exit { status: i32 },
+    /// channel 关闭：exited=true 表示 shell 自行退出，false 表示连接断开
+    Closed { exited: bool },
+}
 
 pub enum PaneCmd {
     Data(Vec<u8>),
@@ -32,13 +47,14 @@ fn b64(data: &[u8]) -> String {
 
 /// 打开 pane：请求 PTY(xterm-256color) + shell，随后进入事件循环。
 /// 返回后 channel 已就绪；循环任务在后台运行。
+/// `on_event` 是 Tauri Channel，点对点推送 PaneEvent 到前端对应 pane。
 pub async fn open(
     app: AppHandle,
     conn: Arc<Connection>,
-    pane_id: String,
     cols: u32,
     rows: u32,
     mut rx: mpsc::UnboundedReceiver<PaneCmd>,
+    on_event: Channel<PaneEvent>,
 ) -> Result<()> {
     let mut channel = {
         let guard = conn.handle.lock().await;
@@ -56,20 +72,14 @@ pub async fn open(
             tokio::select! {
                 msg = channel.wait() => match msg {
                     Some(ChannelMsg::Data { data }) => {
-                        let _ = app.emit("pane-output", serde_json::json!({
-                            "paneId": pane_id, "data": b64(&data),
-                        }));
+                        let _ = on_event.send(PaneEvent::Output { data: b64(&data) });
                     }
                     Some(ChannelMsg::ExtendedData { data, .. }) => {
-                        let _ = app.emit("pane-output", serde_json::json!({
-                            "paneId": pane_id, "data": b64(&data),
-                        }));
+                        let _ = on_event.send(PaneEvent::Output { data: b64(&data) });
                     }
                     Some(ChannelMsg::ExitStatus { exit_status }) => {
                         exited = true;
-                        let _ = app.emit("pane-exit", serde_json::json!({
-                            "paneId": pane_id, "status": exit_status,
-                        }));
+                        let _ = on_event.send(PaneEvent::Exit { status: exit_status as i32 });
                     }
                     Some(_) => {}
                     None => {
@@ -77,9 +87,7 @@ pub async fn open(
                         if !exited && !conn.is_alive().await {
                             conn.clone().trigger_reconnect(app.clone());
                         }
-                        let _ = app.emit("pane-closed", serde_json::json!({
-                            "paneId": pane_id, "exited": exited,
-                        }));
+                        let _ = on_event.send(PaneEvent::Closed { exited });
                         break;
                     }
                 },

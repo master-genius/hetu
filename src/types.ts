@@ -143,10 +143,11 @@ export interface Preview {
   kind: "text" | "image" | "binary";
 }
 
-export interface PaneOutputEvent {
-  paneId: string;
-  data: string;
-}
+/** per-pane 事件：通过 Tauri Channel 点对点推送，取代全局 pane-output/exit/closed 事件 */
+export type PaneEvent =
+  | { type: "output"; data: string }
+  | { type: "exit"; status: number }
+  | { type: "closed"; exited: boolean };
 
 export interface ConnStateEvent {
   connId: string;

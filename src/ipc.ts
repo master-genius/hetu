@@ -1,6 +1,6 @@
 /** 后端 command 的类型化封装 */
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, Channel } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   ConnParams,
@@ -8,7 +8,7 @@ import type {
   FileMeta,
   LocalEntry,
   RemoteEntry,
-  PaneOutputEvent,
+  PaneEvent,
   Preview,
   Profile,
   SessionTab,
@@ -34,10 +34,10 @@ export const api = {
   /** 查询连接是否有进行中的传输（gcConnections 判断是否可安全断开） */
   connHasTransfers: (connId: string) => invoke<boolean>("conn_has_transfers", { connId }),
 
-  paneOpen: (connId: string, paneId: string, cols: number, rows: number) =>
-    invoke<void>("pane_open", { connId, paneId, cols, rows }),
-  paneOpenLocal: (paneId: string, cols: number, rows: number, cwd: string | null, hsshToken: string) =>
-    invoke<void>("pane_open_local", { paneId, cols, rows, cwd: cwd ?? null, hsshToken }),
+  paneOpen: (connId: string, paneId: string, cols: number, rows: number, onEvent: Channel<PaneEvent>) =>
+    invoke<void>("pane_open", { connId, paneId, cols, rows, onEvent }),
+  paneOpenLocal: (paneId: string, cols: number, rows: number, cwd: string | null, hsshToken: string, onEvent: Channel<PaneEvent>) =>
+    invoke<void>("pane_open_local", { paneId, cols, rows, cwd: cwd ?? null, hsshToken, onEvent }),
   paneInput: (paneId: string, data: string) => invoke<void>("pane_input", { paneId, data }),
   paneResize: (paneId: string, cols: number, rows: number) =>
     invoke<void>("pane_resize", { paneId, cols, rows }),
@@ -83,12 +83,6 @@ export const api = {
 };
 
 export const events = {
-  onPaneOutput: (fn: (e: PaneOutputEvent) => void): Promise<UnlistenFn> =>
-    listen<PaneOutputEvent>("pane-output", (e) => fn(e.payload)),
-  onPaneExit: (fn: (e: { paneId: string; status: number }) => void): Promise<UnlistenFn> =>
-    listen("pane-exit", (e) => fn(e.payload as { paneId: string; status: number })),
-  onPaneClosed: (fn: (e: { paneId: string; exited: boolean }) => void): Promise<UnlistenFn> =>
-    listen("pane-closed", (e) => fn(e.payload as { paneId: string; exited: boolean })),
   onConnState: (fn: (e: ConnStateEvent) => void): Promise<UnlistenFn> =>
     listen<ConnStateEvent>("conn-state", (e) => fn(e.payload)),
   onTransferProgress: (fn: (e: TransferProgressEvent) => void): Promise<UnlistenFn> =>

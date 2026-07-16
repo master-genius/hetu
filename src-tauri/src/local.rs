@@ -7,11 +7,11 @@ use serde::Serialize;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::ipc::Channel;
 use tokio::sync::mpsc;
 
 use crate::error::{Error, Result};
-use crate::ssh::pane::PaneCmd;
+use crate::ssh::pane::{PaneCmd, PaneEvent};
 
 // ---------- 本地文件系统（文件管理器面板用） ----------
 
@@ -509,14 +509,13 @@ fn install_hssh() -> Option<std::path::PathBuf> {
 /// 打开本地 PTY pane。控制线程处理输入/resize/关闭，读线程转发输出。
 /// 返回本地 shell 的进程号（用于 /proc/<pid>/cwd 读实时工作目录）；取不到则 None。
 pub fn open(
-    app: AppHandle,
-    pane_id: String,
     cols: u32,
     rows: u32,
     initial_cwd: Option<String>,
     hssh_token: String,
     shell_setting: String,
     mut rx: mpsc::UnboundedReceiver<PaneCmd>,
+    on_event: Channel<PaneEvent>,
 ) -> Result<Option<u32>> {
     let pty = native_pty_system();
     let pair = pty
@@ -578,8 +577,7 @@ pub fn open(
     let deliberate = Arc::new(AtomicBool::new(false));
 
     // 读线程：PTY 输出 → 前端。EOF 时通知前端；exited 仅在 shell 自行退出时为 true。
-    let app_out = app.clone();
-    let pane_out = pane_id.clone();
+    let on_event_r = on_event.clone();
     let deliberate_r = deliberate.clone();
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
@@ -587,21 +585,14 @@ pub fn open(
             match reader.read(&mut buf) {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
-                    let _ = app_out.emit(
-                        "pane-output",
-                        serde_json::json!({
-                            "paneId": pane_out,
-                            "data": base64::engine::general_purpose::STANDARD.encode(&buf[..n]),
-                        }),
-                    );
+                    let _ = on_event_r.send(PaneEvent::Output {
+                        data: base64::engine::general_purpose::STANDARD.encode(&buf[..n]),
+                    });
                 }
             }
         }
         let exited = !deliberate_r.load(Ordering::SeqCst);
-        let _ = app_out.emit(
-            "pane-closed",
-            serde_json::json!({ "paneId": pane_out, "exited": exited }),
-        );
+        let _ = on_event_r.send(PaneEvent::Closed { exited });
     });
 
     // 控制线程：持有 master 与 child，串行处理指令（blocking_recv 不能在 async 上下文调用）

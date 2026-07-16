@@ -6,10 +6,11 @@
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { Channel } from "@tauri-apps/api/core";
 import { api, b64decode, b64encode } from "./ipc";
 import { installImeGuard } from "./imeGuard";
 import { getSettings, activeTheme, fontStack, computeMcr } from "./settings";
-import type { FileMeta } from "./types";
+import type { FileMeta, PaneEvent } from "./types";
 
 /** hssh 内建命令通过此 OSC 标识符通知前端（见 local.rs 注入的 hssh 脚本）。 */
 const HSSH_OSC = 1729;
@@ -169,9 +170,16 @@ export class Pane {
   onHimage: ((paths: string[], withShell: boolean, pane: Pane) => void) | null = null;
   /** 内建 hfile 命令：仅本地终端触发，打开文件管理器面板 */
   onHfile: ((spec: HfileSpec, pane: Pane) => void) | null = null;
+  /** pane channel 关闭回调（shell 退出或连接断开），宿主据此切连接/关 pane */
+  onClose: ((exited: boolean) => void) | null = null;
   /** hssh 来源校验令牌：随本地 shell 注入 $HSSH_TOKEN，OSC 载荷须回带一致值才受理，
    *  杜绝终端里被渲染的不可信内容伪造 hssh 序列诱导建连。每 pane 一枚随机值。 */
   private readonly hsshToken = crypto.randomUUID();
+
+  /** shell 首次输出就绪 Promise（feed.ts 等待 shell ready 用）；每次 open() 重置 */
+  private _readyResolve: (() => void) | null = null;
+  readyPromise: Promise<void> = Promise.resolve();
+  private firstOutput = false;
 
   constructor(id: string, connId: string, initialCwd?: string | null) {
     this.id = id;
@@ -572,20 +580,30 @@ export class Pane {
     // PTY 先以当前 cols/rows 启动，下一帧 fit 后经 paneResize 校正（SIGWINCH），观感无损；
     // 重连场景终端已保留上次尺寸，cols/rows 本就正确，延后一帧亦无副作用。
     requestAnimationFrame(() => this.refit());
+
+    // 每次（重）打开都重置 ready 状态：新 shell 需重新等待首次输出
+    this.firstOutput = false;
+    this.readyPromise = new Promise<void>((r) => { this._readyResolve = r; });
+
+    // per-pane Channel：点对点推送 PaneEvent，取代全局 app.emit 广播。
+    // Channel 在 invoke 前创建并绑定 onmessage，确保首个事件不丢失。
+    const ch = new Channel<PaneEvent>();
+    ch.onmessage = (e) => this.handlePaneEvent(e);
+
     if (this.isLocal) {
       // 起始目录一次性消费：首开继承源终端 cwd，之后重开（切换连接等）回默认 home
       const startCwd = this.initialCwd;
       this.initialCwd = null;
-      await api.paneOpenLocal(this.id, this.term.cols, this.term.rows, startCwd, this.hsshToken);
+      await api.paneOpenLocal(this.id, this.term.cols, this.term.rows, startCwd, this.hsshToken, ch);
       return;
     }
     // 每次（重）打开远端 shell 都是新进程：PID 变、cwd 回到 home，需重新捕获追踪
     this.shellPid = null;
     this.cwd = null;
-    await api.paneOpen(this.connId, this.id, this.term.cols, this.term.rows);
+    await api.paneOpen(this.connId, this.id, this.term.cols, this.term.rows, ch);
     if (!this.homeDir) {
       // 仅记录 home 作为兜底；不写入 cwd——cwd 只反映真实上报的工作目录，
-      // 以便上传等操作能区分“已知目录”与“home 猜测”，避免静默传错位置。
+      // 以便上传等操作能区分"已知目录"与"home 猜测"，避免静默传错位置。
       api.remoteHome(this.connId).then((h) => {
         this.homeDir = h;
       }).catch(() => {});
@@ -685,6 +703,29 @@ export class Pane {
     const { dir } = await this.currentDir();
     if (!dir) return null;
     return `${dir.replace(/\/$/, "")}/${word.replace(/^\.\//, "")}`;
+  }
+
+  /** Channel 事件入口：取代全局 listen 的 pane-output/exit/closed 路由 */
+  private handlePaneEvent(e: PaneEvent) {
+    if (this.disposed) return;
+    switch (e.type) {
+      case "output":
+        if (!this.firstOutput) {
+          this.firstOutput = true;
+          this._readyResolve?.();
+        }
+        this.write(e.data);
+        break;
+      case "exit":
+        if (this.debugExit) {
+          this.term.write(`\r\n\x1b[90m[退出，状态码 ${e.status}]\x1b[0m\r\n`);
+          this.debugExit = false;
+        }
+        break;
+      case "closed":
+        this.onClose?.(e.exited);
+        break;
+    }
   }
 
   write(dataB64: string) {

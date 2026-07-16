@@ -237,6 +237,7 @@ async fn pane_open(
     pane_id: String,
     cols: u32,
     rows: u32,
+    on_event: tauri::ipc::Channel<ssh::pane::PaneEvent>,
 ) -> Result<()> {
     let conn = get_conn(&state, &conn_id).await?;
     let (tx, rx) = mpsc::unbounded_channel();
@@ -257,7 +258,7 @@ async fn pane_open(
     {
         let _ = old.tx.send(PaneCmd::Close);
     }
-    if let Err(e) = ssh::pane::open(app, conn, pane_id.clone(), cols, rows, rx).await {
+    if let Err(e) = ssh::pane::open(app, conn, cols, rows, rx, on_event).await {
         state.panes.lock().await.remove(&pane_id); // 打开失败，回收占位
         return Err(e);
     }
@@ -268,13 +269,13 @@ async fn pane_open(
 /// conn_id 记为 "local"，输入/resize/关闭与 SSH pane 共用同一套 command。
 #[tauri::command]
 async fn pane_open_local(
-    app: tauri::AppHandle,
     state: State<'_>,
     pane_id: String,
     cols: u32,
     rows: u32,
     cwd: Option<String>,
     hssh_token: String,
+    on_event: tauri::ipc::Channel<ssh::pane::PaneEvent>,
 ) -> Result<()> {
     let (tx, rx) = mpsc::unbounded_channel();
     // 同 pane_open：先登记占位（必要时关闭旧任务），再启动本地 PTY
@@ -288,7 +289,7 @@ async fn pane_open_local(
     ) {
         let _ = old.tx.send(PaneCmd::Close);
     }
-    match local::open(app, pane_id.clone(), cols, rows, cwd, hssh_token, state.settings.lock().await.shell.clone(), rx) {
+    match local::open(cols, rows, cwd, hssh_token, state.settings.lock().await.shell.clone(), rx, on_event) {
         // 启动成功后回填 shell PID，供 local_cwd 读实时工作目录
         Ok(pid) => {
             if let Some(ctl) = state.panes.lock().await.get_mut(&pane_id) {

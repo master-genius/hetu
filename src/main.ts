@@ -460,6 +460,18 @@ async function bootstrap() {
     pane.onHimage = (paths, withShell, p) => handleHimage(paths, withShell, p);
     // 内建 hfile 命令：打开文件管理器面板
     pane.onHfile = (spec, p) => handleHfile(spec, p);
+    // pane channel 关闭：shell 正常退出→切回本地/关 pane；连接断开→保留等待重连
+    pane.onClose = (exited) => {
+      if (!exited) return; // 连接断开（exited=false）→ 保留等待重连
+      if (!pane.isLocal) {
+        // 远程 shell 正常退出（用户 exit / hsshprod --exit）→ 退回本地终端，不关闭 pane。
+        // preserve=true 保留远程输出不清屏，用户可查看命令执行结果。
+        pane.switchConnection("local", true).catch(() => {});
+      } else {
+        // 本地终端退出 → 收起该分屏
+        void tabs.closePane(tab, pane);
+      }
+    };
     pane.onTooltip = showFileTooltip;
     // Ctrl+单击文件/目录 → 下载（默认 Downloads / 每次询问，按设置）
     pane.onCtrlClick = (path) => void downloadFile(pane, path);
@@ -560,34 +572,6 @@ async function bootstrap() {
   };
 
   // ---------- 后端事件路由 ----------
-
-  void events.onPaneOutput((e) => {
-    tabs.findPane(e.paneId)?.pane.write(e.data);
-  });
-
-  void events.onPaneExit((e) => {
-    const found = tabs.findPane(e.paneId);
-    if (found?.pane.debugExit) {
-      found.pane.term.write(`\r\n\x1b[90m[退出，状态码 ${e.status}]\x1b[0m\r\n`);
-      found.pane.debugExit = false;
-    }
-  });
-
-  void events.onPaneClosed((e) => {
-    const found = tabs.findPane(e.paneId);
-    if (!found) return;
-    if (e.exited) {
-      // 远程 shell 正常退出（用户 exit / hsshprod --exit）→ 退回本地终端，不关闭 pane。
-      // preserve=true 保留远程输出不清屏，用户可查看命令执行结果。
-      if (!found.pane.isLocal) {
-        found.pane.switchConnection("local", true).catch(() => {});
-      } else {
-        // 本地终端退出 → 收起该分屏
-        void tabs.closePane(found.tab, found.pane);
-      }
-    }
-    // 连接断开（exited=false）→ 保留等待重连
-  });
 
   void events.onConnState((e) => {
     // 按 pane 自身 connId 定位受影响的分屏（而非 tab.connId）：多 pane 标签页里被就地
