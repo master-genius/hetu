@@ -1,8 +1,6 @@
 //! AgentSession — per-tab Agent 会话：消息历史 + 请求循环。
 //! Session 内消息串行处理：正在请求 LLM 时新消息排队，abort 在检查点退出。
 
-use std::sync::Arc;
-
 use tauri::ipc::Channel;
 use tokio::sync::{mpsc, watch};
 
@@ -10,7 +8,6 @@ use crate::agent::config::{AiConfig, Endpoint};
 use crate::agent::openai::OpenAiProvider;
 use crate::agent::protocol::{emit, AgentEvent};
 use crate::agent::provider::{LlmProvider, Message};
-use crate::error::Result;
 
 /// Session 控制命令（从 Tauri command → session task）
 pub enum SessionCmd {

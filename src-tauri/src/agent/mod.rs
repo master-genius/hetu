@@ -8,7 +8,6 @@ mod protocol;
 mod session;
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use tauri::ipc::Channel;
 use tokio::sync::{mpsc, Mutex};
