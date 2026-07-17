@@ -300,7 +300,7 @@ async fn search(args: &Value, cwd: &str) -> ToolResult {
     let lines: Vec<&str> = stdout.lines().collect();
     let total = lines.len();
     if total == 0 {
-        return success("无匹配结果".into(), false);
+        return success("无匹配结果".to_string(), false);
     }
 
     if total <= SEARCH_MAX_MATCHES {
