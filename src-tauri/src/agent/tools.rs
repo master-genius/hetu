@@ -8,9 +8,11 @@ use tokio::process::Command;
 use crate::agent::protocol::ToolResult;
 use crate::agent::provider::{ToolDef, ToolFunction};
 
-/// 返回所有内建工具的定义（传递给 LLM 的 function calling schema）
+/// 返回所有内建工具的定义（传递给 LLM 的 function calling schema）。
+/// 文件/命令类工具自动附带 target_pane 参数；特殊工具（ask_user/list_panes/read_terminal）
+/// 由 session.rs 特殊处理，不在此返回。
 pub fn definitions() -> Vec<ToolDef> {
-    vec![
+    let mut defs = vec![
         ToolDef {
             def_type: "function".into(),
             function: ToolFunction {
@@ -22,6 +24,11 @@ pub fn definitions() -> Vec<ToolDef> {
                         "path": {
                             "type": "string",
                             "description": "文件路径（绝对路径或相对于工作目录的相对路径）"
+                        },
+                        "target_pane": {
+                            "type": "integer",
+                            "description": "目标 Pane 索引（默认 0，使用 list_panes 查看）",
+                            "default": 0
                         }
                     },
                     "required": ["path"]
@@ -37,7 +44,8 @@ pub fn definitions() -> Vec<ToolDef> {
                     "type": "object",
                     "properties": {
                         "path": { "type": "string", "description": "文件路径" },
-                        "content": { "type": "string", "description": "要写入的完整内容" }
+                        "content": { "type": "string", "description": "要写入的完整内容" },
+                        "target_pane": { "type": "integer", "description": "目标 Pane 索引", "default": 0 }
                     },
                     "required": ["path", "content"]
                 }),
@@ -51,7 +59,8 @@ pub fn definitions() -> Vec<ToolDef> {
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "path": { "type": "string", "description": "目录路径（默认为工作目录）" }
+                        "path": { "type": "string", "description": "目录路径（默认为工作目录）" },
+                        "target_pane": { "type": "integer", "description": "目标 Pane 索引", "default": 0 }
                     },
                     "required": []
                 }),
@@ -66,7 +75,8 @@ pub fn definitions() -> Vec<ToolDef> {
                     "type": "object",
                     "properties": {
                         "command": { "type": "string", "description": "要执行的命令" },
-                        "cwd": { "type": "string", "description": "工作目录（默认为当前工作目录）" }
+                        "cwd": { "type": "string", "description": "工作目录（默认为当前工作目录）" },
+                        "target_pane": { "type": "integer", "description": "目标 Pane 索引", "default": 0 }
                     },
                     "required": ["command"]
                 }),
@@ -81,7 +91,8 @@ pub fn definitions() -> Vec<ToolDef> {
                     "type": "object",
                     "properties": {
                         "pattern": { "type": "string", "description": "搜索模式（正则表达式）" },
-                        "path": { "type": "string", "description": "搜索路径（默认为工作目录）" }
+                        "path": { "type": "string", "description": "搜索路径（默认为工作目录）" },
+                        "target_pane": { "type": "integer", "description": "目标 Pane 索引", "default": 0 }
                     },
                     "required": ["pattern"]
                 }),
@@ -95,13 +106,67 @@ pub fn definitions() -> Vec<ToolDef> {
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "path": { "type": "string", "description": "文件路径" }
+                        "path": { "type": "string", "description": "文件路径" },
+                        "target_pane": { "type": "integer", "description": "目标 Pane 索引", "default": 0 }
                     },
                     "required": ["path"]
                 }),
             },
         },
-    ]
+        // 特殊工具：session.rs 中特殊处理，不实际走 execute()
+        ToolDef {
+            def_type: "function".into(),
+            function: ToolFunction {
+                name: "list_panes".into(),
+                description: "列出当前 Tab 内所有 Pane 及连接信息（类型、主机、当前目录、操作系统）。".into(),
+                parameters: json!({ "type": "object", "properties": {} }),
+            },
+        },
+        ToolDef {
+            def_type: "function".into(),
+            function: ToolFunction {
+                name: "read_terminal".into(),
+                description: "读取终端可见内容（xterm buffer viewport）。默认 100 行，最大 200 行。".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "lines": { "type": "integer", "description": "读取行数（默认 100）" },
+                        "target_pane": { "type": "integer", "description": "目标 Pane 索引", "default": 0 }
+                    },
+                    "required": []
+                }),
+            },
+        },
+        ToolDef {
+            def_type: "function".into(),
+            function: ToolFunction {
+                name: "ask_user".into(),
+                description: "向用户提问（当遇到方向性歧义、需要用户决策时使用）。用户可选择提供的选项或自由输入。".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "question": { "type": "string", "description": "要问的问题" },
+                        "choices": {
+                            "type": "array",
+                            "description": "可选项（可为空，让用户自由输入）",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "label": { "type": "string", "description": "选项标签" },
+                                    "description": { "type": "string", "description": "选项说明" },
+                                    "action": { "type": "string", "description": "内部标识" }
+                                },
+                                "required": ["label"]
+                            }
+                        }
+                    },
+                    "required": ["question"]
+                }),
+            },
+        },
+    ];
+    let _ = &mut defs;
+    defs
 }
 
 /// 执行工具调用。返回 ToolResult。

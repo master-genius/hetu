@@ -83,8 +83,8 @@ export const api = {
 
   // ---------- Agent ----------
 
-  agentSpawn: (tabId: string, mode: string, role: string, initialMessage: string | null, cwd: string, onEvent: Channel<any>) =>
-    invoke<void>("agent_spawn", { tabId, mode, role, initialMessage, cwd, onEvent }),
+  agentSpawn: (tabId: string, mode: string, role: string, initialMessage: string | null, cwd: string, panes: any[], onEvent: Channel<any>) =>
+    invoke<void>("agent_spawn", { tabId, mode, role, initialMessage, cwd, panes, onEvent }),
   agentSendMessage: (tabId: string, message: string) =>
     invoke<void>("agent_send_message", { tabId, message }),
   agentAbort: (tabId: string) =>
@@ -95,6 +95,16 @@ export const api = {
     invoke<any>("agent_load_config"),
   agentSaveConfig: (config: any) =>
     invoke<void>("agent_save_config", { config }),
+  agentApproveTool: (tabId: string, approved: boolean) =>
+    invoke<void>("agent_approve_tool", { tabId, approved }),
+  agentAnswerQuestion: (tabId: string, answer: string) =>
+    invoke<void>("agent_answer_question", { tabId, answer }),
+  agentTerminalData: (tabId: string, requestId: string, data: string) =>
+    invoke<void>("agent_terminal_data", { tabId, requestId, data }),
+  agentUpdatePanes: (tabId: string, panes: any[]) =>
+    invoke<void>("agent_update_panes", { tabId, panes }),
+  paneSetCwd: (paneId: string, cwd: string) =>
+    invoke<void>("pane_set_cwd", { paneId, cwd }),
 };
 
 export const events = {

@@ -6,6 +6,10 @@ export type AgentEvent =
   | { type: "toolStart"; tool: string; args: any; targetPane: number }
   | { type: "toolOutput"; output: string }
   | { type: "toolEnd"; result: ToolResult }
+  | { type: "askApproval"; tool: string; args: any; targetPane: number; reason: string }
+  | { type: "proposedPlan"; steps: PlanStep[]; summary: string }
+  | { type: "userQuestion"; question: string; choices: UserChoice[] }
+  | { type: "readTerminalRequest"; requestId: string; paneId: string; lines: number }
   | { type: "error"; message: string }
   | { type: "aborted" }
   | { type: "done" }
@@ -15,7 +19,31 @@ export type AgentEvent =
 /** 工具执行结果 */
 export type ToolResult =
   | { status: "success"; output: string; truncated: boolean }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string }
+  | { status: "userRejected" };
+
+/** 计划步骤 */
+export interface PlanStep {
+  tool: string;
+  args: any;
+  targetPane: number;
+}
+
+/** 用户选择项 */
+export interface UserChoice {
+  label: string;
+  description: string;
+  action: string;
+}
+
+/** Pane 信息 */
+export interface PaneInfo {
+  id: string;
+  isLocal: boolean;
+  host: string;
+  cwd: string;
+  os: string;
+}
 
 /** OSC 1733 载荷解析结果 */
 export interface HaiSpec {

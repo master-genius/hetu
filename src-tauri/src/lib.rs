@@ -776,6 +776,10 @@ pub fn run() {
             agent::agent_destroy,
             agent::agent_load_config,
             agent::agent_save_config,
+            agent::agent_approve_tool,
+            agent::agent_answer_question,
+            agent::agent_terminal_data,
+            agent::agent_update_panes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
