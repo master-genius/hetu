@@ -9,7 +9,6 @@
 //! - target_pane 路由：根据 pane 类型选择本地/远程执行（Phase 3 实装远程，Phase 2 仅本地）
 
 use serde_json::Value;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use tauri::ipc::Channel;
 use tauri::AppHandle;
 use tokio::sync::{mpsc, oneshot, watch};
