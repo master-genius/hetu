@@ -39,6 +39,8 @@ pub struct PaneCtl {
     /// 本地 PTY shell 的进程号（仅本地 pane 有；SSH pane 为 None）。
     /// 用于经 /proc/<pid>/cwd 读本地终端的实时工作目录（拖拽下载落点）。
     pub local_pid: Option<u32>,
+    /// 远程 pane 的 cwd（前端 OSC 7 同步）。本地 pane 由 /proc/<pid>/cwd 直接读。
+    pub cwd: tokio::sync::Mutex<Option<String>>,
 }
 
 fn b64(data: &[u8]) -> String {

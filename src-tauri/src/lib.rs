@@ -255,6 +255,7 @@ async fn pane_open(
                 tx,
                 conn_id,
                 local_pid: None,
+                cwd: tokio::sync::Mutex::new(None),
             },
         )
     {
@@ -287,6 +288,7 @@ async fn pane_open_local(
             tx,
             conn_id: "local".into(),
             local_pid: None,
+            cwd: tokio::sync::Mutex::new(None),
         },
     ) {
         let _ = old.tx.send(PaneCmd::Close);
@@ -358,6 +360,16 @@ async fn pane_resize(state: State<'_>, pane_id: String, cols: u32, rows: u32) ->
 async fn pane_close(state: State<'_>, pane_id: String) -> Result<()> {
     if let Some(ctl) = state.panes.lock().await.remove(&pane_id) {
         let _ = ctl.tx.send(PaneCmd::Close);
+    }
+    Ok(())
+}
+
+/// 远程 pane 的 cwd 同步（OSC 7 → 前端 → 后端）
+#[tauri::command]
+async fn pane_set_cwd(state: State<'_>, pane_id: String, cwd: String) -> Result<()> {
+    let panes = state.panes.lock().await;
+    if let Some(ctl) = panes.get(&pane_id) {
+        *ctl.cwd.lock().await = Some(cwd);
     }
     Ok(())
 }
@@ -735,6 +747,7 @@ pub fn run() {
             pane_input,
             pane_resize,
             pane_close,
+            pane_set_cwd,
             sftp_stat,
             sftp_list,
             sftp_preview,

@@ -1,8 +1,9 @@
 //! AgentEvent — Agent → 前端的事件类型，通过 Tauri Channel 点对点推送。
 //! Phase 1b：消息流 + 工具调用生命周期 + 错误 + 中止 + 完成。
 //! Phase 1c：重试通知 + 上下文截断通知。
+//! Phase 2：Ask/Plan 模式 + AskUser 提问 + read_terminal + list_panes。
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::ipc::Channel;
 
@@ -27,6 +28,33 @@ pub enum AgentEvent {
     /// 工具调用结束
     ToolEnd { result: ToolResult },
 
+    /// Ask 模式：请求用户确认工具调用
+    AskApproval {
+        tool: String,
+        args: Value,
+        target_pane: usize,
+        reason: String,
+    },
+
+    /// Plan 模式：提出执行计划
+    ProposedPlan {
+        steps: Vec<PlanStep>,
+        summary: String,
+    },
+
+    /// Agent 向用户提问（AskUser 工具触发）
+    UserQuestion {
+        question: String,
+        choices: Vec<UserChoice>,
+    },
+
+    /// 读取终端 buffer 请求（read_terminal 工具触发）
+    ReadTerminalRequest {
+        request_id: String,
+        pane_id: String,
+        lines: usize,
+    },
+
     /// 错误（API 调用失败、配置错误等）。推送后 Session 回到 Idle。
     Error { message: String },
 
@@ -49,6 +77,7 @@ pub enum AgentEvent {
 pub enum ToolResult {
     Success { output: String, truncated: bool },
     Error { message: String },
+    UserRejected,
 }
 
 impl ToolResult {
@@ -57,8 +86,35 @@ impl ToolResult {
         match self {
             ToolResult::Success { output, .. } => output.clone(),
             ToolResult::Error { message } => format!("Error: {message}"),
+            ToolResult::UserRejected => "用户拒绝了此操作".into(),
         }
     }
+}
+
+/// 计划步骤（Plan 模式）
+#[derive(Serialize, Clone)]
+pub struct PlanStep {
+    pub tool: String,
+    pub args: Value,
+    pub target_pane: usize,
+}
+
+/// 用户选择项（AskUser 工具）
+#[derive(Serialize, Clone, Deserialize)]
+pub struct UserChoice {
+    pub label: String,
+    pub description: String,
+    pub action: String,
+}
+
+/// Pane 信息（list_panes 工具 + agent_update_panes 命令）
+#[derive(Serialize, Clone, Deserialize)]
+pub struct PaneInfo {
+    pub id: String,
+    pub is_local: bool,
+    pub host: String,
+    pub cwd: String,
+    pub os: String,
 }
 
 /// 向 Channel 推送事件，忽略发送错误（前端可能已关闭）。
