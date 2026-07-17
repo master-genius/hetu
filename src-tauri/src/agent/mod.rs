@@ -6,6 +6,7 @@ mod openai;
 mod provider;
 mod protocol;
 mod session;
+mod tools;
 
 use std::collections::HashMap;
 
@@ -41,6 +42,7 @@ pub async fn agent_spawn(
     _mode: String,
     role: String,
     initial_message: Option<String>,
+    cwd: String,
     on_event: Channel<AgentEvent>,
 ) -> Result<()> {
     let mut sessions = state.sessions.lock().await;
@@ -58,7 +60,7 @@ pub async fn agent_spawn(
     );
 
     // 启动 session 循环（config 在循环内每次请求前重新加载，这里不需要预加载）
-    tokio::spawn(session_loop(rx, on_event, app.clone(), role));
+    tokio::spawn(session_loop(rx, on_event, app.clone(), role, cwd));
 
     drop(sessions); // 释放锁
 

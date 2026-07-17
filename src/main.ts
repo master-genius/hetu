@@ -427,7 +427,7 @@ async function bootstrap() {
       modal = new AgentModal(tabId);
       agentModals.set(tabId, modal);
     }
-    await modal.show(spec);
+    await modal.show(spec, pane.cwd || "");
   };
 
   const requestCloseTab = async (tab: Tab) => {

@@ -83,8 +83,8 @@ export const api = {
 
   // ---------- Agent ----------
 
-  agentSpawn: (tabId: string, mode: string, role: string, initialMessage: string | null, onEvent: Channel<any>) =>
-    invoke<void>("agent_spawn", { tabId, mode, role, initialMessage, onEvent }),
+  agentSpawn: (tabId: string, mode: string, role: string, initialMessage: string | null, cwd: string, onEvent: Channel<any>) =>
+    invoke<void>("agent_spawn", { tabId, mode, role, initialMessage, cwd, onEvent }),
   agentSendMessage: (tabId: string, message: string) =>
     invoke<void>("agent_send_message", { tabId, message }),
   agentAbort: (tabId: string) =>

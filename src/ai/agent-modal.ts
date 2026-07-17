@@ -10,7 +10,7 @@
 
 import { Channel } from "@tauri-apps/api/core";
 import { api } from "../ipc";
-import type { AgentEvent, HaiSpec } from "./protocol";
+import type { AgentEvent, HaiSpec, ToolResult } from "./protocol";
 import { StreamingMarkdown } from "./renderer";
 
 // ---------- marked + highlight.js 懒初始化 ----------
@@ -235,11 +235,6 @@ export class AgentModal {
       }
     };
 
-    // 点击 overlay 空白处关闭
-    this.overlay.addEventListener("mousedown", (e) => {
-      if (e.target === this.overlay) this.hide();
-    });
-
     this.closeBtn.addEventListener("click", () => this.hide());
     this.sendBtn.addEventListener("click", () => this.send());
     this.abortBtn.addEventListener("click", () => this.abort());
@@ -403,7 +398,7 @@ export class AgentModal {
   // ---------- 显示 / 隐藏 / 销毁 ----------
 
   /** 显示 Modal。若首次则创建 Channel + invoke agent_spawn。 */
-  async show(spec: HaiSpec): Promise<void> {
+  async show(spec: HaiSpec, cwd: string): Promise<void> {
     this.role = spec.role || "general";
     this.mode = spec.mode || "auto";
 
@@ -424,7 +419,7 @@ export class AgentModal {
       this.setStatus("连接中…");
 
       try {
-        await api.agentSpawn(this.tabId, this.mode, this.role, spec.msg || null, this.channel);
+        await api.agentSpawn(this.tabId, this.mode, this.role, spec.msg || null, cwd, this.channel);
       } catch (err: any) {
         this.setStatus("错误");
         this.appendError(String(err?.message ?? err));
@@ -484,6 +479,15 @@ export class AgentModal {
       case "message":
         this.onMessage(event.content, event.done);
         break;
+      case "toolStart":
+        this.onToolStart(event.tool, event.args);
+        break;
+      case "toolOutput":
+        this.onToolOutput(event.output);
+        break;
+      case "toolEnd":
+        this.onToolEnd(event.result);
+        break;
       case "error":
         this.appendError(event.message);
         this.setProcessing(false);
@@ -524,10 +528,11 @@ export class AgentModal {
     }
 
     if (done) {
+      // Message done 仅表示该条消息的文本流结束，不代表整个轮次结束。
+      // 可能 LLM 还要调工具（ReAct 循环）。processing 由 Done 事件关闭。
       this.currentRenderer?.done();
       this.currentRenderer = null;
-      this.setProcessing(false);
-      this.setStatus("就绪");
+      this.setStatus("执行中…");
     }
 
     this.scrollToBottom();
@@ -565,6 +570,77 @@ export class AgentModal {
     this.scrollToBottom();
   }
 
+  // ---------- 工具调用渲染 ----------
+
+  private currentToolEl: HTMLElement | null = null;
+
+  private onToolStart(tool: string, args: any): void {
+    // 若有活跃的消息 renderer，先冻结（文本阶段结束，工具阶段开始）
+    if (this.currentRenderer) {
+      this.currentRenderer.done();
+      this.currentRenderer = null;
+    }
+
+    const el = document.createElement("div");
+    el.className = "hai-tool-call";
+    el.innerHTML = `
+      <div class="hai-tool-header">
+        <span class="hai-tool-icon">🔧</span>
+        <span class="hai-tool-name">${tool}</span>
+        <span class="hai-tool-status">执行中…</span>
+      </div>
+      <div class="hai-tool-args"></div>
+      <div class="hai-tool-output hidden"></div>`;
+
+    const argsEl = el.querySelector(".hai-tool-args")!;
+    argsEl.textContent = formatArgs(args);
+
+    this.messagesEl.appendChild(el);
+    this.currentToolEl = el;
+    this.setStatus("工具执行中…");
+    this.scrollToBottom();
+  }
+
+  private onToolOutput(output: string): void {
+    if (!this.currentToolEl) return;
+    const outEl = this.currentToolEl.querySelector(".hai-tool-output")!;
+    outEl.classList.remove("hidden");
+    outEl.textContent += output;
+    this.scrollToBottom();
+  }
+
+  private onToolEnd(result: ToolResult): void {
+    if (!this.currentToolEl) return;
+
+    const statusEl = this.currentToolEl.querySelector(".hai-tool-status")!;
+    const outEl = this.currentToolEl.querySelector(".hai-tool-output")!;
+
+    if (result.status === "success") {
+      statusEl.textContent = "✓";
+      statusEl.classList.add("hai-tool-ok");
+      if (result.output) {
+        outEl.classList.remove("hidden");
+        outEl.textContent = result.output;
+      }
+      if (result.truncated) {
+        const trunc = document.createElement("div");
+        trunc.className = "hai-tool-truncated";
+        trunc.textContent = "（输出已截断）";
+        this.currentToolEl.appendChild(trunc);
+      }
+    } else {
+      statusEl.textContent = "✘";
+      statusEl.classList.add("hai-tool-fail");
+      outEl.classList.remove("hidden");
+      outEl.textContent = result.message;
+    }
+
+    this.currentToolEl.classList.add("hai-tool-done");
+    this.currentToolEl = null;
+    this.setStatus("思考中…");
+    this.scrollToBottom();
+  }
+
   // ---------- UI 辅助 ----------
 
   private setProcessing(processing: boolean): void {
@@ -588,4 +664,11 @@ export class AgentModal {
     ensureMarked().catch(() => {});
     ensureHljs().catch(() => {});
   }
+}
+
+// ---------- 辅助函数 ----------
+
+function formatArgs(args: any): string {
+  if (!args || typeof args !== "object") return String(args ?? "");
+  return JSON.stringify(args, null, 2);
 }
