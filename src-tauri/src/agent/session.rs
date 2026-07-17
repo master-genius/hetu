@@ -374,7 +374,7 @@ pub async fn session_loop(
                     let result: StreamResult = match chat_with_retry(
                         endpoints,
                         model,
-                        &rr_counter,
+                        &mut wrr,
                         &history,
                         &system_prompt,
                         &tool_defs,
