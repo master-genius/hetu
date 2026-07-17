@@ -156,7 +156,7 @@ impl WeightedRR {
 async fn chat_with_retry(
     endpoints: &[Endpoint],
     model: &str,
-    rr_counter: &AtomicUsize,
+    wrr: &mut WeightedRR,
     messages: &[Message],
     system_prompt: &str,
     tool_defs: &[crate::agent::provider::ToolDef],
@@ -168,7 +168,7 @@ async fn chat_with_retry(
     let max_endpoint_switches = endpoint_count;
 
     let mut attempt = 0usize;
-    let mut endpoint_idx = rr_counter.fetch_add(1, Ordering::Relaxed) % endpoint_count;
+    let mut endpoint_idx = wrr.next(endpoints);
 
     loop {
         if *abort.borrow() {
@@ -191,7 +191,8 @@ async fn chat_with_retry(
                 if err_str.contains("429") {
                     if attempt < max_endpoint_switches {
                         attempt += 1;
-                        endpoint_idx = (endpoint_idx + 1) % endpoint_count;
+                        wrr.force_rotate(endpoints);
+                        endpoint_idx = wrr.idx;
                         emit(tx, AgentEvent::Retrying {
                             reason: "429 限流，切换 API Key".into(),
                             attempt,
@@ -308,7 +309,7 @@ pub async fn session_loop(
 ) {
     let mut history: Vec<Message> = Vec::new();
     let tool_defs = tools::definitions();
-    let rr_counter = AtomicUsize::new(0);
+    let mut wrr = WeightedRR::new();
 
     loop {
         match rx.recv().await {
