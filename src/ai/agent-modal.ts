@@ -245,9 +245,9 @@ export class AgentModal {
     this.abortBtn.addEventListener("click", () => this.abort());
 
     // 标签切换
-    this.overlay.querySelectorAll(".hai-tab").forEach((tab) => {
+    this.overlay.querySelectorAll<HTMLElement>(".hai-tab").forEach((tab) => {
       tab.addEventListener("click", () => {
-        const view = (tab as HTMLElement).dataset.view;
+        const view = tab.dataset.view;
         if (view) this.switchView(view as "chat" | "settings");
       });
     });
