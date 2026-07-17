@@ -277,8 +277,8 @@ export class AgentModal {
   private switchView(view: "chat" | "settings"): void {
     this.chatView.classList.toggle("active", view === "chat");
     this.settingsView.classList.toggle("active", view === "settings");
-    this.overlay.querySelectorAll(".hai-tab").forEach((tab) => {
-      (tab as HTMLElement).classList.toggle("active", tab.dataset.view === view);
+    this.overlay.querySelectorAll<HTMLElement>(".hai-tab").forEach((tab) => {
+      tab.classList.toggle("active", tab.dataset.view === view);
     });
     if (view === "settings" && !this.configLoaded) {
       void this.loadSettings();
