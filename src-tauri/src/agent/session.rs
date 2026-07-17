@@ -102,6 +102,55 @@ fn trim_history(history: &mut Vec<Message>, max_tokens: usize, tx: &Channel<Agen
     }
 }
 
+// ---------- 加权轮转 ----------
+
+/// 加权 round-robin：weight=N 的 endpoint 连续用 N 次，然后轮转到下一个。
+/// weight=0 的 endpoint 跳过（禁用）。默认 weight=1。
+struct WeightedRR {
+    idx: usize,
+    remaining: u32,
+}
+
+impl WeightedRR {
+    fn new() -> Self {
+        Self { idx: 0, remaining: 0 }
+    }
+
+    /// 选出下一个 endpoint 索引。连续用 weight 次后轮转。
+    fn next(&mut self, endpoints: &[Endpoint]) -> usize {
+        let len = endpoints.len();
+        if len == 0 {
+            return 0;
+        }
+        // 当前 endpoint 还有剩余配额 → 继续用它
+        if self.remaining > 0 {
+            self.remaining -= 1;
+            return self.idx;
+        }
+        // 配额用完（或初始），找下一个 weight>0 的 endpoint
+        for i in 0..len {
+            let idx = (self.idx + 1 + i) % len;
+            let w = endpoints[idx].weight.unwrap_or(1);
+            if w > 0 {
+                self.idx = idx;
+                self.remaining = w - 1; // 本次用掉 1 次
+                return idx;
+            }
+        }
+        // 全部 weight=0 → fallback 到第一个
+        self.idx = 0;
+        self.remaining = 0;
+        0
+    }
+
+    /// 强制轮转到下一个（429 限流时调用）
+    fn force_rotate(&mut self, endpoints: &[Endpoint]) {
+        self.remaining = 0;
+        // next() 会自动找下一个 weight>0 的
+        self.next(endpoints);
+    }
+}
+
 // ---------- 负载均衡 + 错误重试 ----------
 
 async fn chat_with_retry(
