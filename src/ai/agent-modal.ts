@@ -10,7 +10,7 @@
 
 import { Channel } from "@tauri-apps/api/core";
 import { api } from "../ipc";
-import type { AgentEvent, HaiSpec, ToolResult } from "./protocol";
+import type { AgentEvent, HaiSpec, PaneInfo, ToolResult, UserChoice } from "./protocol";
 import { StreamingMarkdown } from "./renderer";
 
 // ---------- marked + highlight.js 懒初始化 ----------
@@ -110,6 +110,9 @@ export class AgentModal {
   private mode: string;
   private glassMode = false;
   private themeMode: "auto" | "light" | "dark" = "auto";
+
+  /** 外部设置的终端读取回调（main.ts 注入，用于 read_terminal 工具） */
+  onReadTerminal: ((paneId: string, lines: number) => Promise<string>) | null = null;
 
   private channel: Channel<AgentEvent> | null = null;
   private spawned = false;
@@ -415,7 +418,7 @@ export class AgentModal {
   // ---------- 显示 / 隐藏 / 销毁 ----------
 
   /** 显示 Modal。若首次则创建 Channel + invoke agent_spawn。 */
-  async show(spec: HaiSpec, cwd: string): Promise<void> {
+  async show(spec: HaiSpec, cwd: string, panes: PaneInfo[]): Promise<void> {
     this.role = spec.role || "general";
     this.mode = spec.mode || "auto";
 
@@ -436,7 +439,7 @@ export class AgentModal {
       this.setStatus("连接中…");
 
       try {
-        await api.agentSpawn(this.tabId, this.mode, this.role, spec.msg || null, cwd, this.channel);
+        await api.agentSpawn(this.tabId, this.mode, this.role, spec.msg || null, cwd, panes, this.channel);
       } catch (err: any) {
         this.setStatus("错误");
         this.appendError(String(err?.message ?? err));
@@ -504,6 +507,15 @@ export class AgentModal {
         break;
       case "toolEnd":
         this.onToolEnd(event.result);
+        break;
+      case "askApproval":
+        this.onAskApproval(event.tool, event.args, event.reason);
+        break;
+      case "userQuestion":
+        this.onUserQuestion(event.question, event.choices);
+        break;
+      case "readTerminalRequest":
+        void this.onReadTerminalRequest(event.requestId, event.paneId, event.lines);
         break;
       case "retrying":
         this.setStatus(`重试中 (${event.attempt}/${event.maxAttempts}): ${event.reason}`);
@@ -651,17 +663,114 @@ export class AgentModal {
         trunc.textContent = "（输出已截断）";
         this.currentToolEl.appendChild(trunc);
       }
-    } else {
+    } else if (result.status === "error") {
       statusEl.textContent = "✘";
       statusEl.classList.add("hai-tool-fail");
       outEl.classList.remove("hidden");
       outEl.textContent = result.message;
+    } else {
+      // userRejected
+      statusEl.textContent = "⊘";
+      statusEl.classList.add("hai-tool-fail");
     }
 
     this.currentToolEl.classList.add("hai-tool-done");
     this.currentToolEl = null;
     this.setStatus("思考中…");
     this.scrollToBottom();
+  }
+
+  // ---------- Ask 确认 / AskUser 提问 / read_terminal ----------
+
+  private onAskApproval(tool: string, args: any, reason: string): void {
+    if (this.currentRenderer) {
+      this.currentRenderer.done();
+      this.currentRenderer = null;
+    }
+
+    const el = document.createElement("div");
+    el.className = "hai-ask-approval";
+    el.innerHTML = `
+      <div class="hai-ask-header">⚠ 工具调用确认</div>
+      <div class="hai-ask-tool">${tool}</div>
+      <div class="hai-ask-args"></div>
+      <div class="hai-ask-reason">${reason}</div>
+      <div class="hai-ask-actions">
+        <button class="btn hai-ask-approve">批准 ✔</button>
+        <button class="btn hai-ask-reject">拒绝 ✘</button>
+      </div>`;
+
+    el.querySelector(".hai-ask-args")!.textContent = formatArgs(args);
+
+    el.querySelector(".hai-ask-approve")!.addEventListener("click", () => {
+      el.remove();
+      api.agentApproveTool(this.tabId, true).catch(() => {});
+    });
+    el.querySelector(".hai-ask-reject")!.addEventListener("click", () => {
+      el.remove();
+      api.agentApproveTool(this.tabId, false).catch(() => {});
+    });
+
+    this.messagesEl.appendChild(el);
+    this.scrollToBottom();
+  }
+
+  private onUserQuestion(question: string, choices: UserChoice[]): void {
+    if (this.currentRenderer) {
+      this.currentRenderer.done();
+      this.currentRenderer = null;
+    }
+
+    const el = document.createElement("div");
+    el.className = "hai-user-question";
+    el.innerHTML = `
+      <div class="hai-uq-header">❓ ${question}</div>
+      <div class="hai-uq-choices"></div>
+      <div class="hai-uq-free">
+        <input type="text" class="hai-uq-input" placeholder="自由输入…" />
+        <button class="btn hai-uq-send">发送</button>
+      </div>`;
+
+    const choicesEl = el.querySelector(".hai-uq-choices")!;
+    for (const choice of choices) {
+      const btn = document.createElement("button");
+      btn.className = "btn hai-uq-choice";
+      btn.innerHTML = `<div class="hai-uq-label">${choice.label}</div>${choice.description ? `<div class="hai-uq-desc">${choice.description}</div>` : ""}`;
+      btn.addEventListener("click", () => {
+        el.remove();
+        api.agentAnswerQuestion(this.tabId, choice.action || choice.label).catch(() => {});
+      });
+      choicesEl.appendChild(btn);
+    }
+
+    // 自由输入
+    const input = el.querySelector(".hai-uq-input") as HTMLInputElement;
+    const sendFree = () => {
+      const val = input.value.trim();
+      if (!val) return;
+      el.remove();
+      api.agentAnswerQuestion(this.tabId, val).catch(() => {});
+    };
+    el.querySelector(".hai-uq-send")!.addEventListener("click", sendFree);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); sendFree(); }
+    });
+
+    this.messagesEl.appendChild(el);
+    this.scrollToBottom();
+  }
+
+  private async onReadTerminalRequest(requestId: string, paneId: string, lines: number): Promise<void> {
+    if (!this.onReadTerminal) {
+      api.agentTerminalData(this.tabId, requestId, "").catch(() => {});
+      return;
+    }
+    try {
+      const data = await this.onReadTerminal(paneId, lines);
+      api.agentTerminalData(this.tabId, requestId, data).catch(() => {});
+    } catch {
+      api.agentTerminalData(this.tabId, requestId, "").catch(() => {});
+    }
   }
 
   // ---------- UI 辅助 ----------

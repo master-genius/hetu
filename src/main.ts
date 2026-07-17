@@ -23,7 +23,7 @@ import { showAboutDialog, showConnectDialog, showSettingsDialog } from "./dialog
 import { feedPane } from "./feed";
 import { initPanelResize } from "./panelResize";
 import { AgentModal } from "./ai/agent-modal";
-import type { HaiSpec } from "./ai/protocol";
+import type { HaiSpec, PaneInfo } from "./ai/protocol";
 import {
   confirmDialog, confirmOverwriteDialog, formatSize, IMAGE_MIME, showFileTooltip, showHimageViewer, showMenu, showPreview,
   toast,
@@ -416,18 +416,49 @@ async function bootstrap() {
 
   // hai：在终端内弹出 AI Agent 面板（Tab 级 Session，ESC 隐藏不销毁）
   const agentModals = new Map<string, AgentModal>();
+
+  /** 收集 Tab 内所有 Pane 信息（方案 B：不改 pane.ts，由 Modal 主动收集） */
+  const collectPanes = (tab: Tab): PaneInfo[] => {
+    return tab.layout.panes().map((p) => ({
+      id: p.id,
+      isLocal: p.isLocal,
+      host: p.isLocal ? "localhost" : (connMeta.get(p.connId)?.name || p.connId),
+      cwd: p.cwd || "",
+      os: "Linux",
+    }));
+  };
+
   const handleHai = async (spec: HaiSpec, pane: Pane) => {
     AgentModal.preload();
     const found = tabs.findPane(pane.id);
-    const tabId = found ? found.tab.id : tabs.active?.id;
-    if (!tabId) return;
+    const tab = found ? found.tab : tabs.active;
+    const tabId = tab?.id;
+    if (!tabId || !tab) return;
+
+    const panes = collectPanes(tab);
 
     let modal = agentModals.get(tabId);
     if (!modal) {
       modal = new AgentModal(tabId);
+      // read_terminal 回调：通过 pane ID 找到 xterm 实例，读取 buffer
+      modal.onReadTerminal = async (paneId: string, lines: number): Promise<string> => {
+        const target = tabs.findPane(paneId)?.pane;
+        if (!target) return "";
+        const buffer = target.term.buffer.active;
+        const start = Math.max(0, buffer.length - lines);
+        let text = "";
+        for (let i = start; i < buffer.length; i++) {
+          const line = buffer.getLine(i);
+          if (line) text += line.translateToString(true) + "\n";
+        }
+        return text;
+      };
       agentModals.set(tabId, modal);
+    } else {
+      // 已有 session：更新 pane 列表
+      api.agentUpdatePanes(tabId, collectPanes(tab)).catch(() => {});
     }
-    await modal.show(spec, pane.cwd || "");
+    await modal.show(spec, pane.cwd || "", panes);
   };
 
   const requestCloseTab = async (tab: Tab) => {
