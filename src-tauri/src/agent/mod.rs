@@ -12,7 +12,6 @@ use std::collections::HashMap;
 use tauri::ipc::Channel;
 use tokio::sync::{mpsc, Mutex};
 
-use crate::agent::config::load_config;
 use crate::agent::protocol::AgentEvent;
 use crate::agent::session::{session_loop, SessionCmd};
 use crate::error::Result;
@@ -58,23 +57,8 @@ pub async fn agent_spawn(
         SessionHandle { tx: tx.clone() },
     );
 
-    // 加载配置
-    let config = match load_config(&app) {
-        Ok(c) => c,
-        Err(e) => {
-            // 配置加载失败：通知前端
-            let _ = on_event.send(AgentEvent::Error {
-                message: e.to_string(),
-            });
-            let _ = on_event.send(AgentEvent::Done);
-            // 清理刚插入的 session
-            sessions.remove(&tab_id);
-            return Ok(());
-        }
-    };
-
-    // 启动 session 循环
-    tokio::spawn(session_loop(rx, on_event, config, role));
+    // 启动 session 循环（config 在循环内每次请求前重新加载，这里不需要预加载）
+    tokio::spawn(session_loop(rx, on_event, app.clone(), role));
 
     drop(sessions); // 释放锁
 
@@ -135,4 +119,16 @@ pub async fn agent_destroy(
 ) -> Result<()> {
     state.sessions.lock().await.remove(&tab_id);
     Ok(())
+}
+
+/// 读取 ai-config.json（供设置面板加载）
+#[tauri::command]
+pub async fn agent_load_config(app: tauri::AppHandle) -> Result<config::AiConfig> {
+    config::load_config(&app)
+}
+
+/// 保存 ai-config.json（供设置面板写入）
+#[tauri::command]
+pub async fn agent_save_config(app: tauri::AppHandle, config: config::AiConfig) -> Result<()> {
+    config::save_config(&app, &config)
 }

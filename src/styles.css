@@ -2292,9 +2292,47 @@ input[type="checkbox"] {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
+  padding: 8px 16px;
   border-bottom: 1px solid color-mix(in srgb, var(--term-fg) 12%, transparent);
   flex-shrink: 0;
+}
+
+.hai-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.hai-tab {
+  background: transparent;
+  border: none;
+  color: color-mix(in srgb, var(--term-fg) 50%, transparent);
+  font-size: 13px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.hai-tab:hover {
+  background: color-mix(in srgb, var(--term-fg) 8%, transparent);
+  color: var(--term-fg);
+}
+
+.hai-tab.active {
+  background: color-mix(in srgb, var(--term-blue) 20%, transparent);
+  color: var(--term-blue);
+}
+
+/* 视图容器：只有 active 的视图显示 */
+.hai-view {
+  display: none;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.hai-view.active {
+  display: flex;
 }
 
 .hai-title {
@@ -2482,6 +2520,77 @@ input[type="checkbox"] {
   font-size: 11px;
   color: color-mix(in srgb, var(--term-fg) 55%, transparent);
   flex-shrink: 0;
+}
+
+/* ---------- 设置面板 ---------- */
+
+.hai-settings-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+.hai-settings-section {
+  margin-bottom: 20px;
+}
+
+.hai-settings-section h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--term-fg) 60%, transparent);
+  margin: 0 0 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.hai-form-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.hai-form-row label {
+  flex-shrink: 0;
+  width: 140px;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--term-fg) 70%, transparent);
+}
+
+.hai-form-row input,
+.hai-form-row select {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: var(--ui-font, "JetBrains Mono NL", monospace);
+  background: color-mix(in srgb, var(--term-bg) 50%, transparent);
+  color: var(--term-fg);
+  border: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
+  border-radius: 6px;
+  outline: none;
+}
+
+.hai-form-row input:focus,
+.hai-form-row select:focus {
+  border-color: color-mix(in srgb, var(--term-blue) 50%, transparent);
+}
+
+.hai-settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  border-top: 1px solid color-mix(in srgb, var(--term-fg) 8%, transparent);
+  flex-shrink: 0;
+}
+
+.hai-btn-save-settings {
+  font-size: 12px;
+}
+
+.hai-settings-hint {
+  font-size: 11px;
+  color: color-mix(in srgb, var(--term-fg) 50%, transparent);
 }
 
 /* 通用隐藏类（用于 hai-modal 等按钮切换） */

@@ -22,6 +22,21 @@ pub struct Endpoint {
     pub max_tokens: u32,
     #[serde(default = "default_temperature")]
     pub temperature: f32,
+    /// 核采样概率（0-1），与 temperature 互补，OpenAI 规定二者只传一个
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+    /// 频率惩罚（-2.0 到 2.0），正值降低已出现 token 的重复概率
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frequency_penalty: Option<f32>,
+    /// 存在惩罚（-2.0 到 2.0），正值鼓励引入新话题
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presence_penalty: Option<f32>,
+    /// 生成停止序列（最多 4 个），命中任一则停止生成
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop: Option<Vec<String>>,
+    /// 随机种子，用于可复现输出（部分模型支持）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u64>,
 }
 
 fn default_max_tokens() -> u32 {

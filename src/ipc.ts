@@ -91,6 +91,10 @@ export const api = {
     invoke<void>("agent_abort", { tabId }),
   agentDestroy: (tabId: string) =>
     invoke<void>("agent_destroy", { tabId }),
+  agentLoadConfig: () =>
+    invoke<any>("agent_load_config"),
+  agentSaveConfig: (config: any) =>
+    invoke<void>("agent_save_config", { config }),
 };
 
 export const events = {

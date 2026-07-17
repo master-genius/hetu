@@ -1,10 +1,12 @@
 //! AgentSession — per-tab Agent 会话：消息历史 + 请求循环。
 //! Session 内消息串行处理：正在请求 LLM 时新消息排队，abort 在检查点退出。
+//! 每次请求前重新加载 ai-config.json，设置面板保存后即时生效。
 
 use tauri::ipc::Channel;
+use tauri::AppHandle;
 use tokio::sync::{mpsc, watch};
 
-use crate::agent::config::{AiConfig, Endpoint};
+use crate::agent::config::{load_config, AiConfig, Endpoint};
 use crate::agent::openai::OpenAiProvider;
 use crate::agent::protocol::{emit, AgentEvent};
 use crate::agent::provider::{LlmProvider, Message};
@@ -26,10 +28,11 @@ fn build_system_prompt() -> String {
 }
 
 /// Session 循环：串行处理用户消息，每次调 LLM 后推送事件。
+/// 每次请求前重新加载 config，设置面板保存后下一条消息即生效。
 pub async fn session_loop(
     mut rx: mpsc::UnboundedReceiver<SessionCmd>,
     event_tx: Channel<AgentEvent>,
-    config: AiConfig,
+    app: AppHandle,
     role: String,
 ) {
     let mut history: Vec<Message> = Vec::new();
@@ -46,6 +49,16 @@ pub async fn session_loop(
                 }
 
                 history.push(Message::user(text));
+
+                // 每次请求前重新加载 config（设置面板保存后即时生效）
+                let config: AiConfig = match load_config(&app) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        emit(&event_tx, AgentEvent::Error { message: e.to_string() });
+                        emit(&event_tx, AgentEvent::Done);
+                        continue;
+                    }
+                };
 
                 // 解析角色 → provider → endpoint
                 let (provider_type, model) = match config.resolve_model(&role) {

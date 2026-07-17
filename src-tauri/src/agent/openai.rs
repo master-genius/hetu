@@ -17,6 +17,11 @@ pub struct OpenAiProvider {
     model: String,
     max_tokens: u32,
     temperature: f32,
+    top_p: Option<f32>,
+    frequency_penalty: Option<f32>,
+    presence_penalty: Option<f32>,
+    stop: Option<Vec<String>>,
+    seed: Option<u64>,
 }
 
 impl OpenAiProvider {
@@ -27,11 +32,17 @@ impl OpenAiProvider {
             model,
             max_tokens,
             temperature,
+            top_p: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+            stop: None,
+            seed: None,
         }
     }
 }
 
-/// OpenAI chat/completions 请求体
+/// OpenAI chat/completions 请求体。
+/// 可选参数省略时用 skip_serializing_if 不发送，让 API 用模型默认值。
 #[derive(Serialize)]
 struct ChatRequest<'a> {
     model: &'a str,
@@ -39,6 +50,16 @@ struct ChatRequest<'a> {
     stream: bool,
     max_tokens: u32,
     temperature: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    frequency_penalty: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    presence_penalty: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stop: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    seed: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -94,6 +115,11 @@ impl LlmProvider for OpenAiProvider {
             stream: true,
             max_tokens: self.max_tokens,
             temperature: self.temperature,
+            top_p: self.top_p,
+            frequency_penalty: self.frequency_penalty,
+            presence_penalty: self.presence_penalty,
+            stop: self.stop.clone(),
+            seed: self.seed,
         };
 
         let endpoint = format!("{}/chat/completions", self.url.trim_end_matches('/'));
@@ -209,13 +235,19 @@ impl OpenAiProvider {
             .url
             .as_deref()
             .ok_or_else(|| Error::msg("OpenAI 兼容 provider 需要配置 url"))?;
-        Ok(OpenAiProvider::new(
+        let mut provider = OpenAiProvider::new(
             url.to_string(),
             endpoint.key.clone(),
             model.to_string(),
             endpoint.max_tokens,
             endpoint.temperature,
-        ))
+        );
+        provider.top_p = endpoint.top_p;
+        provider.frequency_penalty = endpoint.frequency_penalty;
+        provider.presence_penalty = endpoint.presence_penalty;
+        provider.stop = endpoint.stop.clone();
+        provider.seed = endpoint.seed;
+        Ok(provider)
     }
 }
 

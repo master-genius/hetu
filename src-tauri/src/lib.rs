@@ -761,6 +761,8 @@ pub fn run() {
             agent::agent_send_message,
             agent::agent_abort,
             agent::agent_destroy,
+            agent::agent_load_config,
+            agent::agent_save_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
