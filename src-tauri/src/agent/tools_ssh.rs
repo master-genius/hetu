@@ -74,7 +74,7 @@ pub async fn write_file(conn: &Arc<Connection>, path: &str, content: &str) -> To
     if let Some(parent) = std::path::Path::new(path).parent() {
         let parent_str = parent.to_string_lossy();
         if !parent_str.is_empty() {
-            let _ = sftp_sess.create_dir(&parent_str).await;
+            let _ = sftp_sess.create_dir(parent_str.as_ref()).await;
         }
     }
 
