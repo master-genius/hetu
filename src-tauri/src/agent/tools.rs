@@ -2,11 +2,14 @@
 //! Phase 1b：read_file, write_file, list_dir, run_command, search, file_stat
 //! Phase 3 将扩展为 SSH 远程工具（tools_ssh.rs）。
 
+use std::sync::Arc;
+
 use serde_json::{json, Value};
 use tokio::process::Command;
 
 use crate::agent::protocol::ToolResult;
 use crate::agent::provider::{ToolDef, ToolFunction};
+use crate::ssh::conn::Connection;
 
 /// 返回所有内建工具的定义（传递给 LLM 的 function calling schema）。
 /// 文件/命令类工具自动附带 target_pane 参数；特殊工具（ask_user/list_panes/read_terminal）
@@ -169,18 +172,84 @@ pub fn definitions() -> Vec<ToolDef> {
     defs
 }
 
-/// 执行工具调用。返回 ToolResult。
-pub async fn execute(name: &str, args: &Value, cwd: &str) -> ToolResult {
+/// 执行工具调用。conn=None 走本地，conn=Some 走远程。
+pub async fn execute(name: &str, args: &Value, cwd: &str, conn: Option<&Arc<Connection>>) -> ToolResult {
     match name {
-        "read_file" => read_file(args, cwd).await,
-        "write_file" => write_file(args, cwd).await,
-        "list_dir" => list_dir(args, cwd).await,
-        "run_command" => run_command(args, cwd).await,
-        "search" => search(args, cwd).await,
-        "file_stat" => file_stat(args, cwd).await,
-        _ => ToolResult::Error {
-            message: format!("未知工具: {name}"),
-        },
+        "read_file" => {
+            match args.get("path").and_then(|v| v.as_str()) {
+                Some(path) => {
+                    let resolved = resolve_path(path, cwd);
+                    match conn {
+                        Some(c) => crate::agent::tools_ssh::read_file(c, &resolved).await,
+                        None => read_file(&resolved).await,
+                    }
+                }
+                None => err("缺少参数: path"),
+            }
+        }
+        "write_file" => {
+            let path = match args.get("path").and_then(|v| v.as_str()) {
+                Some(p) => resolve_path(p, cwd),
+                None => return err("缺少参数: path"),
+            };
+            let content = match args.get("content").and_then(|v| v.as_str()) {
+                Some(c) => c,
+                None => return err("缺少参数: content"),
+            };
+            match conn {
+                Some(c) => crate::agent::tools_ssh::write_file(c, &path, content).await,
+                None => write_file(&path, content).await,
+            }
+        }
+        "list_dir" => {
+            let path = match args.get("path").and_then(|v| v.as_str()) {
+                Some(p) => resolve_path(p, cwd),
+                None => cwd.to_string(),
+            };
+            match conn {
+                Some(c) => crate::agent::tools_ssh::list_dir(c, &path).await,
+                None => list_dir(&path).await,
+            }
+        }
+        "run_command" => {
+            let command = match args.get("command").and_then(|v| v.as_str()) {
+                Some(c) => c,
+                None => return err("缺少参数: command"),
+            };
+            let work_dir = args.get("cwd")
+                .and_then(|v| v.as_str())
+                .map(|p| resolve_path(p, cwd))
+                .unwrap_or_else(|| cwd.to_string());
+            match conn {
+                Some(c) => crate::agent::tools_ssh::run_command(c, command, Some(&work_dir)).await,
+                None => run_command(command, &work_dir).await,
+            }
+        }
+        "search" => {
+            let pattern = match args.get("pattern").and_then(|v| v.as_str()) {
+                Some(p) => p,
+                None => return err("缺少参数: pattern"),
+            };
+            let path = match args.get("path").and_then(|v| v.as_str()) {
+                Some(p) => resolve_path(p, cwd),
+                None => cwd.to_string(),
+            };
+            match conn {
+                Some(c) => crate::agent::tools_ssh::search(c, pattern, &path).await,
+                None => search(pattern, &path).await,
+            }
+        }
+        "file_stat" => {
+            let path = match args.get("path").and_then(|v| v.as_str()) {
+                Some(p) => resolve_path(p, cwd),
+                None => return err("缺少参数: path"),
+            };
+            match conn {
+                Some(c) => crate::agent::tools_ssh::file_stat(c, &path).await,
+                None => file_stat(&path).await,
+            }
+        }
+        _ => err(format!("未知工具: {name}")),
     }
 }
 
@@ -192,13 +261,8 @@ const LIST_DIR_MAX_ITEMS: usize = 200;
 const RUN_CMD_MAX_LINES: usize = 300;
 const SEARCH_MAX_MATCHES: usize = 100;
 
-async fn read_file(args: &Value, cwd: &str) -> ToolResult {
-    let path = match args.get("path").and_then(|v| v.as_str()) {
-        Some(p) => resolve_path(p, cwd),
-        None => return err("缺少参数: path"),
-    };
-
-    let content = match tokio::fs::read_to_string(&path).await {
+async fn read_file(path: &str) -> ToolResult {
+    let content = match tokio::fs::read_to_string(path).await {
         Ok(c) => c,
         Err(e) => return err(format!("读取文件失败 {path}: {e}")),
     };
@@ -224,33 +288,19 @@ async fn read_file(args: &Value, cwd: &str) -> ToolResult {
     }
 }
 
-async fn write_file(args: &Value, cwd: &str) -> ToolResult {
-    let path = match args.get("path").and_then(|v| v.as_str()) {
-        Some(p) => resolve_path(p, cwd),
-        None => return err("缺少参数: path"),
-    };
-    let content = match args.get("content").and_then(|v| v.as_str()) {
-        Some(c) => c,
-        None => return err("缺少参数: content"),
-    };
-
-    if let Some(parent) = std::path::Path::new(&path).parent() {
+async fn write_file(path: &str, content: &str) -> ToolResult {
+    if let Some(parent) = std::path::Path::new(path).parent() {
         let _ = tokio::fs::create_dir_all(parent).await;
     }
 
-    match tokio::fs::write(&path, content).await {
+    match tokio::fs::write(path, content).await {
         Ok(()) => success(format!("已写入 {path} ({} bytes)", content.len()), false),
         Err(e) => err(format!("写入文件失败 {path}: {e}")),
     }
 }
 
-async fn list_dir(args: &Value, cwd: &str) -> ToolResult {
-    let path = match args.get("path").and_then(|v| v.as_str()) {
-        Some(p) => resolve_path(p, cwd),
-        None => cwd.to_string(),
-    };
-
-    let mut entries = match tokio::fs::read_dir(&path).await {
+async fn list_dir(path: &str) -> ToolResult {
+    let mut entries = match tokio::fs::read_dir(path).await {
         Ok(rd) => rd,
         Err(e) => return err(format!("读取目录失败 {path}: {e}")),
     };
@@ -279,21 +329,11 @@ async fn list_dir(args: &Value, cwd: &str) -> ToolResult {
     success(output, truncated)
 }
 
-async fn run_command(args: &Value, cwd: &str) -> ToolResult {
-    let command = match args.get("command").and_then(|v| v.as_str()) {
-        Some(c) => c,
-        None => return err("缺少参数: command"),
-    };
-    let work_dir = args
-        .get("cwd")
-        .and_then(|v| v.as_str())
-        .map(|p| resolve_path(p, cwd))
-        .unwrap_or_else(|| cwd.to_string());
-
+async fn run_command(command: &str, work_dir: &str) -> ToolResult {
     let output = match Command::new("sh")
         .arg("-c")
         .arg(command)
-        .current_dir(&work_dir)
+        .current_dir(work_dir)
         .output()
         .await
     {
@@ -331,22 +371,13 @@ async fn run_command(args: &Value, cwd: &str) -> ToolResult {
     }
 }
 
-async fn search(args: &Value, cwd: &str) -> ToolResult {
-    let pattern = match args.get("pattern").and_then(|v| v.as_str()) {
-        Some(p) => p,
-        None => return err("缺少参数: pattern"),
-    };
-    let path = match args.get("path").and_then(|v| v.as_str()) {
-        Some(p) => resolve_path(p, cwd),
-        None => cwd.to_string(),
-    };
-
+async fn search(pattern: &str, path: &str) -> ToolResult {
     let out = match Command::new("grep")
         .arg("-rn")
         .arg("--color=never")
         .arg(pattern)
         .arg(&path)
-        .current_dir(cwd)
+        .current_dir("/")
         .output()
         .await
     {
@@ -379,13 +410,8 @@ async fn search(args: &Value, cwd: &str) -> ToolResult {
     }
 }
 
-async fn file_stat(args: &Value, cwd: &str) -> ToolResult {
-    let path = match args.get("path").and_then(|v| v.as_str()) {
-        Some(p) => resolve_path(p, cwd),
-        None => return err("缺少参数: path"),
-    };
-
-    let meta = match tokio::fs::metadata(&path).await {
+async fn file_stat(path: &str) -> ToolResult {
+    let meta = match tokio::fs::metadata(path).await {
         Ok(m) => m,
         Err(e) => return err(format!("获取文件信息失败 {path}: {e}")),
     };

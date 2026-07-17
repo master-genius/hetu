@@ -11,6 +11,7 @@ mod provider;
 mod protocol;
 mod session;
 mod tools;
+mod tools_ssh;
 
 use std::collections::HashMap;
 use std::sync::Arc;

@@ -112,6 +112,7 @@ pub struct UserChoice {
 pub struct PaneInfo {
     pub id: String,
     pub is_local: bool,
+    pub conn_id: String,
     pub host: String,
     pub cwd: String,
     pub os: String,

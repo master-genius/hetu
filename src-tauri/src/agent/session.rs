@@ -10,7 +10,7 @@
 
 use serde_json::Value;
 use tauri::ipc::Channel;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::agent::config::{load_config, AiConfig, Endpoint};
@@ -507,15 +507,34 @@ pub async fn session_loop(
                             }
                         }
 
-                        // 获取目标 pane 的 cwd
+                        // 获取目标 pane 的 cwd + 连接
                         let panes = state.panes.lock().await;
-                        let target_cwd = panes.get(target_pane)
+                        let target_pane_info = panes.get(target_pane).cloned();
+                        let target_cwd = target_pane_info
+                            .as_ref()
                             .map(|p| p.cwd.clone())
                             .filter(|c| !c.is_empty())
                             .unwrap_or_else(|| cwd.clone());
                         drop(panes);
 
-                        let tool_result = tools::execute(&tc.name, &args, &target_cwd).await;
+                        // 本地 pane → conn=None；SSH pane → 通过 conn_id 获取 Connection
+                        let conn = if let Some(ref pi) = target_pane_info {
+                            if pi.is_local || pi.conn_id.is_empty() {
+                                None
+                            } else {
+                                match crate::AppState::get_conn(
+                                    &app.state::<crate::AppState>(),
+                                    &pi.conn_id,
+                                ).await {
+                                    Ok(c) => Some(c),
+                                    Err(_) => None,
+                                }
+                            }
+                        } else {
+                            None
+                        };
+
+                        let tool_result = tools::execute(&tc.name, &args, &target_cwd, conn.as_ref()).await;
 
                         emit(&event_tx, AgentEvent::ToolEnd { result: tool_result.clone() });
                         history.push(Message::tool_result(&tc.id, tool_result.to_llm_text()));

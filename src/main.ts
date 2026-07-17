@@ -422,6 +422,7 @@ async function bootstrap() {
     return tab.layout.panes().map((p) => ({
       id: p.id,
       isLocal: p.isLocal,
+      connId: p.connId,
       host: p.isLocal ? "localhost" : (connMeta.get(p.connId)?.name || p.connId),
       cwd: p.cwd || "",
       os: "Linux",

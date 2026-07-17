@@ -42,14 +42,20 @@ pub struct AppState {
 
 type State<'a> = tauri::State<'a, AppState>;
 
+impl AppState {
+    /// 获取连接（Agent 模块通过 app.state() 访问）
+    pub async fn get_conn(&self, conn_id: &str) -> Result<Arc<Connection>> {
+        self.conns
+            .lock()
+            .await
+            .get(conn_id)
+            .cloned()
+            .ok_or_else(|| Error::msg("连接不存在或已关闭"))
+    }
+}
+
 async fn get_conn(state: &AppState, conn_id: &str) -> Result<Arc<Connection>> {
-    state
-        .conns
-        .lock()
-        .await
-        .get(conn_id)
-        .cloned()
-        .ok_or_else(|| Error::msg("连接不存在或已关闭"))
+    state.get_conn(conn_id).await
 }
 
 // ---------- 设置 ----------

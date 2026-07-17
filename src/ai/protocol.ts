@@ -40,6 +40,7 @@ export interface UserChoice {
 export interface PaneInfo {
   id: string;
   isLocal: boolean;
+  connId: string;
   host: string;
   cwd: string;
   os: string;
