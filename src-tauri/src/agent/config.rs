@@ -124,18 +124,25 @@ impl Default for AiConfig {
 }
 
 impl AiConfig {
-    /// 根据 provider type + model ID 获取第一个 endpoint（round-robin Phase 1c 再做）
-    pub fn get_endpoint(&self, provider: &str, model: &str) -> Result<&Endpoint> {
+    /// 根据 provider type + model ID 获取全部 endpoint（round-robin 池）
+    pub fn get_endpoints(&self, provider: &str, model: &str) -> Result<&[Endpoint]> {
         self.providers
             .get(provider)
             .and_then(|m| m.get(model))
-            .and_then(|v| v.first())
+            .map(|v| v.as_slice())
             .ok_or_else(|| {
                 Error::msg(format!(
                     "未找到模型配置: provider={provider}, model={model}。\n\
                      请编辑 ai-config.json 添加对应条目。"
                 ))
             })
+    }
+
+    /// 便捷方法：获取第一个 endpoint（向后兼容）
+    pub fn get_endpoint(&self, provider: &str, model: &str) -> Result<&Endpoint> {
+        self.get_endpoints(provider, model)?
+            .first()
+            .ok_or_else(|| Error::msg(format!("provider={provider}, model={model} 的 endpoint 列表为空")))
     }
 
     /// 解析角色绑定：优先用 role 配置，回退到 default

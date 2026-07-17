@@ -1,5 +1,6 @@
 //! AgentEvent — Agent → 前端的事件类型，通过 Tauri Channel 点对点推送。
 //! Phase 1b：消息流 + 工具调用生命周期 + 错误 + 中止 + 完成。
+//! Phase 1c：重试通知 + 上下文截断通知。
 
 use serde::Serialize;
 use serde_json::Value;
@@ -34,6 +35,12 @@ pub enum AgentEvent {
 
     /// 整个响应周期结束（LLM 最终回复完毕或错误后）。Session 回到 Idle，可接受新消息。
     Done,
+
+    /// 重试通知（429 切换 endpoint / 5xx 退避 / 超时重试）
+    Retrying { reason: String, attempt: usize, max_attempts: usize },
+
+    /// 上下文截断通知（trim_history 移除了旧工具输出 / 旧消息）
+    ContextTrimmed { removed_tools: usize, removed_messages: usize },
 }
 
 /// 工具执行结果

@@ -102,10 +102,14 @@ export class AgentModal {
   private closeBtn: HTMLElement;
   private chatView: HTMLElement;
   private settingsView: HTMLElement;
+  private glassBtn: HTMLElement;
+  private themeBtn: HTMLElement;
 
   private tabId: string;
   private role: string;
   private mode: string;
+  private glassMode = false;
+  private themeMode: "auto" | "light" | "dark" = "auto";
 
   private channel: Channel<AgentEvent> | null = null;
   private spawned = false;
@@ -131,6 +135,8 @@ export class AgentModal {
             <button class="hai-tab" data-view="settings">设置</button>
           </div>
           <div class="hai-header-tools">
+            <button class="btn hai-btn-glass" title="玻璃模式">🔲</button>
+            <button class="btn hai-btn-theme" title="主题切换">🌓</button>
             <span class="hai-mode-badge">Auto</span>
             <button class="btn hai-btn-close" title="隐藏 (Alt+H)">隐藏</button>
           </div>
@@ -220,6 +226,15 @@ export class AgentModal {
     this.abortBtn = this.overlay.querySelector(".hai-btn-abort")!;
     this.statusEl = this.overlay.querySelector(".hai-status")!;
     this.closeBtn = this.overlay.querySelector(".hai-btn-close")!;
+    this.glassBtn = this.overlay.querySelector(".hai-btn-glass")!;
+    this.themeBtn = this.overlay.querySelector(".hai-btn-theme")!;
+
+    // 从 localStorage 恢复偏好
+    this.glassMode = localStorage.getItem("hai-glass") === "true";
+    const savedTheme = localStorage.getItem("hai-theme") as "auto" | "light" | "dark" | null;
+    if (savedTheme) this.themeMode = savedTheme;
+    this.applyGlass();
+    this.applyTheme();
 
     // ESC：中止对话（capture phase，先于 xterm 拦截）
     // Alt+H：隐藏面板（仅在面板显示时监听）
@@ -236,6 +251,8 @@ export class AgentModal {
     };
 
     this.closeBtn.addEventListener("click", () => this.hide());
+    this.glassBtn.addEventListener("click", () => this.toggleGlass());
+    this.themeBtn.addEventListener("click", () => this.cycleTheme());
     this.sendBtn.addEventListener("click", () => this.send());
     this.abortBtn.addEventListener("click", () => this.abort());
 
@@ -488,6 +505,12 @@ export class AgentModal {
       case "toolEnd":
         this.onToolEnd(event.result);
         break;
+      case "retrying":
+        this.setStatus(`重试中 (${event.attempt}/${event.maxAttempts}): ${event.reason}`);
+        break;
+      case "contextTrimmed":
+        this.setStatus(`上下文截断: 移除 ${event.removedTools} 工具 + ${event.removedMessages} 消息`);
+        break;
       case "error":
         this.appendError(event.message);
         this.setProcessing(false);
@@ -657,6 +680,35 @@ export class AgentModal {
     requestAnimationFrame(() => {
       this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
     });
+  }
+
+  // ---------- 玻璃模式 / 主题 ----------
+
+  private toggleGlass(): void {
+    this.glassMode = !this.glassMode;
+    localStorage.setItem("hai-glass", String(this.glassMode));
+    this.applyGlass();
+  }
+
+  private applyGlass(): void {
+    const modal = this.overlay.querySelector(".hai-modal") as HTMLElement;
+    modal.dataset.glass = String(this.glassMode);
+    this.glassBtn.classList.toggle("active", this.glassMode);
+  }
+
+  private cycleTheme(): void {
+    const order: ("auto" | "light" | "dark")[] = ["auto", "light", "dark"];
+    const idx = order.indexOf(this.themeMode);
+    this.themeMode = order[(idx + 1) % order.length];
+    localStorage.setItem("hai-theme", this.themeMode);
+    this.applyTheme();
+  }
+
+  private applyTheme(): void {
+    const modal = this.overlay.querySelector(".hai-modal") as HTMLElement;
+    modal.dataset.theme = this.themeMode;
+    const labels: Record<string, string> = { auto: "🌓", light: "☀", dark: "🌙" };
+    this.themeBtn.textContent = labels[this.themeMode] ?? "🌓";
   }
 
   /** 懒加载渲染依赖（在 show 前调用）。 */

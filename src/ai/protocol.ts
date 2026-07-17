@@ -8,7 +8,9 @@ export type AgentEvent =
   | { type: "toolEnd"; result: ToolResult }
   | { type: "error"; message: string }
   | { type: "aborted" }
-  | { type: "done" };
+  | { type: "done" }
+  | { type: "retrying"; reason: string; attempt: number; maxAttempts: number }
+  | { type: "contextTrimmed"; removedTools: number; removedMessages: number };
 
 /** 工具执行结果 */
 export type ToolResult =

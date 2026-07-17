@@ -2344,7 +2344,32 @@ input[type="checkbox"] {
 .hai-header-tools {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+}
+
+.hai-btn-glass,
+.hai-btn-theme {
+  font-size: 14px;
+  padding: 2px 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1;
+  opacity: 0.6;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.hai-btn-glass:hover,
+.hai-btn-theme:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--term-fg) 8%, transparent);
+}
+
+.hai-btn-glass.active {
+  opacity: 1;
+  background: color-mix(in srgb, var(--term-blue) 20%, transparent);
+  border-color: color-mix(in srgb, var(--term-blue) 30%, transparent);
 }
 
 .hai-mode-badge {
@@ -2674,5 +2699,124 @@ input[type="checkbox"] {
   font-size: 10px;
   font-style: italic;
   color: color-mix(in srgb, var(--term-yellow, #ffc107) 80%, transparent);
+}
+
+/* ---------- 独立主题 ---------- */
+
+.hai-modal[data-theme="light"] {
+  --hai-bg: #f5f5f5;
+  --hai-fg: #1a1a1a;
+  --hai-border: rgba(0, 0, 0, 0.12);
+  background: var(--hai-bg);
+  color: var(--hai-fg);
+}
+
+.hai-modal[data-theme="light"] .hai-header,
+.hai-modal[data-theme="light"] .hai-input-bar,
+.hai-modal[data-theme="light"] .hai-status-bar {
+  border-color: var(--hai-border);
+}
+
+.hai-modal[data-theme="light"] .hai-input {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--hai-fg);
+  border-color: var(--hai-border);
+}
+
+.hai-modal[data-theme="light"] .hai-msg-user {
+  background: rgba(0, 100, 200, 0.12);
+  border-color: rgba(0, 100, 200, 0.2);
+}
+
+.hai-modal[data-theme="light"] .hai-msg-assistant {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: var(--hai-border);
+}
+
+.hai-modal[data-theme="light"] .hai-msg-assistant .hai-msg-content pre {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.hai-modal[data-theme="dark"] {
+  --hai-bg: #1e1e1e;
+  --hai-fg: #e0e0e0;
+  --hai-border: rgba(255, 255, 255, 0.12);
+  background: var(--hai-bg);
+  color: var(--hai-fg);
+}
+
+.hai-modal[data-theme="dark"] .hai-header,
+.hai-modal[data-theme="dark"] .hai-input-bar,
+.hai-modal[data-theme="dark"] .hai-status-bar {
+  border-color: var(--hai-border);
+}
+
+.hai-modal[data-theme="dark"] .hai-input {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--hai-fg);
+  border-color: var(--hai-border);
+}
+
+.hai-modal[data-theme="dark"] .hai-msg-assistant .hai-msg-content pre {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+/* ---------- 智能玻璃模式 ---------- */
+
+.hai-modal[data-glass="true"] {
+  --hai-bg-rgb: 30, 30, 30;
+  --hai-fg-rgb: 224, 224, 224;
+
+  background: rgba(var(--hai-bg-rgb), 0.12);
+  backdrop-filter: blur(24px) saturate(1.2);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+}
+
+.hai-modal[data-glass="true"][data-theme="light"] {
+  --hai-bg-rgb: 245, 245, 245;
+  --hai-fg-rgb: 26, 26, 26;
+}
+
+.hai-modal[data-glass="true"][data-theme="dark"] {
+  --hai-bg-rgb: 30, 30, 30;
+  --hai-fg-rgb: 224, 224, 224;
+}
+
+.hai-modal[data-glass="true"] .hai-header,
+.hai-modal[data-glass="true"] .hai-input-bar,
+.hai-modal[data-glass="true"] .hai-status-bar {
+  background: rgba(var(--hai-bg-rgb), 0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-color: rgba(var(--hai-fg-rgb), 0.08);
+}
+
+.hai-modal[data-glass="true"] .hai-messages {
+  background: transparent;
+}
+
+.hai-modal[data-glass="true"] .hai-msg-user {
+  background: rgba(var(--hai-fg-rgb), 0.08);
+  border: 1px solid rgba(var(--hai-fg-rgb), 0.1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.hai-modal[data-glass="true"] .hai-msg-assistant {
+  background: rgba(var(--hai-bg-rgb), 0.55);
+  border: 1px solid rgba(var(--hai-fg-rgb), 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.hai-modal[data-glass="true"] .hai-tool-call {
+  background: rgba(var(--hai-bg-rgb), 0.45);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-color: rgba(var(--hai-fg-rgb), 0.1);
+}
+
+.hai-modal[data-glass="true"] .hai-input {
+  background: rgba(var(--hai-bg-rgb), 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
