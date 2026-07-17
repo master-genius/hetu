@@ -127,7 +127,8 @@ async fn chat_with_retry(
         }
 
         let endpoint = &endpoints[endpoint_idx];
-        let provider = OpenAiProvider::from_endpoint(endpoint, model)?;
+        let model_id = AiConfig::get_model_id(endpoint, model);
+        let provider = OpenAiProvider::from_endpoint(endpoint, model_id)?;
 
         match provider.chat_stream(messages, system_prompt, tool_defs, tx, abort).await {
             Ok(result) => return Ok(result),
@@ -304,7 +305,7 @@ pub async fn session_loop(
                     }
                 };
 
-                let max_tokens = endpoints.first().map(|e| e.max_tokens).unwrap_or(8192);
+                let max_tokens = endpoints.first().map(|e| e.options.max_tokens).unwrap_or(8192);
 
                 let _ = state.abort_tx.send(false);
 

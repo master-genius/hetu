@@ -60,11 +60,9 @@ async function ensureHljs(): Promise<void> {
 
 // ---------- 类型 ----------
 
-interface EndpointConfig {
-  url?: string;
-  key: string;
-  max_tokens: number;
-  temperature: number;
+interface GenOptions {
+  max_tokens?: number;
+  temperature?: number;
   top_p?: number;
   frequency_penalty?: number;
   presence_penalty?: number;
@@ -72,16 +70,33 @@ interface EndpointConfig {
   seed?: number;
 }
 
-interface AiConfig {
-  providers: Record<string, Record<string, EndpointConfig[]>>;
+interface EndpointConfig {
+  id?: string;
+  url?: string;
+  key: string;
+  weight?: number;
+  options?: GenOptions;
+}
+
+interface ModelGroup {
+  show_name?: string;
+  endpoints: EndpointConfig[];
+}
+
+interface ProviderConfig {
   default_model: string;
+  models: Record<string, ModelGroup>;
+}
+
+interface AiConfig {
+  providers: Record<string, ProviderConfig>;
   default_provider: string;
   execution?: {
     default_mode?: string;
     dangerous_commands?: string[];
     always_ask_for?: string[];
   };
-  roles?: Record<string, { model?: string; provider?: string }>;
+  roles?: Record<string, { model?: string }>;
 }
 
 // ---------- AgentModal ----------
@@ -167,8 +182,12 @@ export class AgentModal {
                 </select>
               </div>
               <div class="hai-form-row">
-                <label>模型 ID</label>
+                <label>模型分组 ID</label>
                 <input type="text" class="hai-cfg-model" placeholder="deepseek-v3" />
+              </div>
+              <div class="hai-form-row">
+                <label>显示名称</label>
+                <input type="text" class="hai-cfg-showname" placeholder="DeepSeek V3（留空则用分组 ID）" />
               </div>
             </div>
             <div class="hai-settings-section">
@@ -176,6 +195,10 @@ export class AgentModal {
               <div class="hai-form-row">
                 <label>URL</label>
                 <input type="text" class="hai-cfg-url" placeholder="https://api.deepseek.com/v1" />
+              </div>
+              <div class="hai-form-row">
+                <label>API Model ID</label>
+                <input type="text" class="hai-cfg-endpoint-id" placeholder="留空则用分组 ID" />
               </div>
               <div class="hai-form-row">
                 <label>API Key</label>
@@ -320,28 +343,32 @@ export class AgentModal {
 
   private populateSettingsForm(config: AiConfig): void {
     const provider = config.default_provider || "openai";
-    const model = config.default_model || "";
-    const endpoints = config.providers?.[provider]?.[model];
-    const ep = endpoints?.[0] ?? ({} as EndpointConfig);
+    const providerCfg = config.providers?.[provider];
+    const model = providerCfg?.default_model || "";
+    const group = providerCfg?.models?.[model];
+    const ep = group?.endpoints?.[0] ?? ({} as EndpointConfig);
+    const opts = ep.options ?? ({} as GenOptions);
 
     (this.overlay.querySelector(".hai-cfg-provider") as HTMLSelectElement).value = provider;
     (this.overlay.querySelector(".hai-cfg-model") as HTMLInputElement).value = model;
+    (this.overlay.querySelector(".hai-cfg-showname") as HTMLInputElement).value = group?.show_name ?? "";
     (this.overlay.querySelector(".hai-cfg-url") as HTMLInputElement).value = ep.url ?? "";
+    (this.overlay.querySelector(".hai-cfg-endpoint-id") as HTMLInputElement).value = ep.id ?? "";
     (this.overlay.querySelector(".hai-cfg-key") as HTMLInputElement).value = ep.key ?? "";
     (this.overlay.querySelector(".hai-cfg-max-tokens") as HTMLInputElement).value =
-      String(ep.max_tokens ?? 8192);
+      String(opts.max_tokens ?? 8192);
     (this.overlay.querySelector(".hai-cfg-temperature") as HTMLInputElement).value =
-      String(ep.temperature ?? 0.7);
+      String(opts.temperature ?? 0.7);
     (this.overlay.querySelector(".hai-cfg-top-p") as HTMLInputElement).value =
-      ep.top_p != null ? String(ep.top_p) : "";
+      opts.top_p != null ? String(opts.top_p) : "";
     (this.overlay.querySelector(".hai-cfg-freq-penalty") as HTMLInputElement).value =
-      ep.frequency_penalty != null ? String(ep.frequency_penalty) : "";
+      opts.frequency_penalty != null ? String(opts.frequency_penalty) : "";
     (this.overlay.querySelector(".hai-cfg-pres-penalty") as HTMLInputElement).value =
-      ep.presence_penalty != null ? String(ep.presence_penalty) : "";
+      opts.presence_penalty != null ? String(opts.presence_penalty) : "";
     (this.overlay.querySelector(".hai-cfg-stop") as HTMLInputElement).value =
-      ep.stop?.join(", ") ?? "";
+      opts.stop?.join(", ") ?? "";
     (this.overlay.querySelector(".hai-cfg-seed") as HTMLInputElement).value =
-      ep.seed != null ? String(ep.seed) : "";
+      opts.seed != null ? String(opts.seed) : "";
   }
 
   private async saveSettings(): Promise<void> {
@@ -350,7 +377,9 @@ export class AgentModal {
 
     const provider = (this.overlay.querySelector(".hai-cfg-provider") as HTMLSelectElement).value;
     const model = (this.overlay.querySelector(".hai-cfg-model") as HTMLInputElement).value.trim();
+    const showName = (this.overlay.querySelector(".hai-cfg-showname") as HTMLInputElement).value.trim();
     const url = (this.overlay.querySelector(".hai-cfg-url") as HTMLInputElement).value.trim();
+    const endpointId = (this.overlay.querySelector(".hai-cfg-endpoint-id") as HTMLInputElement).value.trim();
     const key = (this.overlay.querySelector(".hai-cfg-key") as HTMLInputElement).value.trim();
     const maxTokens = parseInt(
       (this.overlay.querySelector(".hai-cfg-max-tokens") as HTMLInputElement).value || "8192",
@@ -366,7 +395,7 @@ export class AgentModal {
     const seedStr = (this.overlay.querySelector(".hai-cfg-seed") as HTMLInputElement).value.trim();
 
     if (!model) {
-      hint.textContent = "模型 ID 不能为空";
+      hint.textContent = "模型分组 ID 不能为空";
       return;
     }
     if (!key) {
@@ -379,29 +408,40 @@ export class AgentModal {
     try {
       config = await api.agentLoadConfig() as AiConfig;
     } catch {
-      config = { providers: {}, default_model: "", default_provider: "" };
+      config = { providers: {}, default_provider: "openai" };
     }
 
     config.default_provider = provider;
-    config.default_model = model;
     if (!config.providers) config.providers = {};
-    if (!config.providers[provider]) config.providers[provider] = {};
+    if (!config.providers[provider]) config.providers[provider] = { default_model: "", models: {} };
+    config.providers[provider].default_model = model;
 
-    const endpoint: EndpointConfig = {
-      url: url || undefined,
-      key,
+    // 构建 options
+    const options: GenOptions = {
       max_tokens: maxTokens || 8192,
       temperature: Number.isFinite(temperature) ? temperature : 0.7,
     };
-    if (topPStr) endpoint.top_p = parseFloat(topPStr);
-    if (freqPenaltyStr) endpoint.frequency_penalty = parseFloat(freqPenaltyStr);
-    if (presPenaltyStr) endpoint.presence_penalty = parseFloat(presPenaltyStr);
-    if (stopStr) {
-      endpoint.stop = stopStr.split(",").map((s) => s.trim()).filter(Boolean);
-    }
-    if (seedStr) endpoint.seed = parseInt(seedStr, 10);
+    if (topPStr) options.top_p = parseFloat(topPStr);
+    if (freqPenaltyStr) options.frequency_penalty = parseFloat(freqPenaltyStr);
+    if (presPenaltyStr) options.presence_penalty = parseFloat(presPenaltyStr);
+    if (stopStr) options.stop = stopStr.split(",").map((s) => s.trim()).filter(Boolean);
+    if (seedStr) options.seed = parseInt(seedStr, 10);
 
-    config.providers[provider][model] = [endpoint];
+    // 构建 endpoint
+    const endpoint: EndpointConfig = {
+      key,
+      options,
+    };
+    if (url) endpoint.url = url;
+    if (endpointId) endpoint.id = endpointId;
+
+    // 构建 model group
+    const group: ModelGroup = {
+      endpoints: [endpoint],
+    };
+    if (showName) group.show_name = showName;
+
+    config.providers[provider].models[model] = group;
 
     try {
       await api.agentSaveConfig(config);

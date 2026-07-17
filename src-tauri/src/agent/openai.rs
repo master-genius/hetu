@@ -306,24 +306,26 @@ fn finalize_tool_calls(acc: &mut HashMap<usize, ToolCallAccumulator>) -> Vec<Too
 }
 
 impl OpenAiProvider {
-    /// 从 endpoint 配置构建 provider
-    pub fn from_endpoint(endpoint: &crate::agent::config::Endpoint, model: &str) -> Result<Self> {
+    /// 从 endpoint 配置构建 provider。
+    /// model_id: 实际发给 API 的 model 参数（由 config.get_model_id 解析）。
+    pub fn from_endpoint(endpoint: &crate::agent::config::Endpoint, model_id: &str) -> Result<Self> {
         let url = endpoint
             .url
             .as_deref()
             .ok_or_else(|| Error::msg("OpenAI 兼容 provider 需要配置 url"))?;
+        let opts = &endpoint.options;
         let mut provider = OpenAiProvider::new(
             url.to_string(),
             endpoint.key.clone(),
-            model.to_string(),
-            endpoint.max_tokens,
-            endpoint.temperature,
+            model_id.to_string(),
+            opts.max_tokens,
+            opts.temperature,
         );
-        provider.top_p = endpoint.top_p;
-        provider.frequency_penalty = endpoint.frequency_penalty;
-        provider.presence_penalty = endpoint.presence_penalty;
-        provider.stop = endpoint.stop.clone();
-        provider.seed = endpoint.seed;
+        provider.top_p = opts.top_p;
+        provider.frequency_penalty = opts.frequency_penalty;
+        provider.presence_penalty = opts.presence_penalty;
+        provider.stop = opts.stop.clone();
+        provider.seed = opts.seed;
         Ok(provider)
     }
 }
