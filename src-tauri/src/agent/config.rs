@@ -31,6 +31,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
 use crate::error::{Error, Result};
@@ -74,12 +75,18 @@ pub struct Endpoint {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     pub key: String,
-    /// 轮转权重（暂不实现，结构预留）
+    /// 轮转权重（加权轮转已实现）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weight: Option<u32>,
-    /// 生成参数
+    /// 生成参数（OpenAI body 标准字段）
     #[serde(default)]
     pub options: GenOptions,
+    /// 自定义 HTTP 头（如 OpenRouter 的 HTTP-Referer/X-Title，或平台特定头）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headers: Option<HashMap<String, String>>,
+    /// 非标准 body 参数透传（response_format/logit_bias/n 等，直接合并进 request body）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<HashMap<String, Value>>,
 }
 
 // ---------- Model Group ----------

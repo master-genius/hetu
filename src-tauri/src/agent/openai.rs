@@ -24,6 +24,8 @@ pub struct OpenAiProvider {
     presence_penalty: Option<f32>,
     stop: Option<Vec<String>>,
     seed: Option<u64>,
+    headers: Vec<(String, String)>,
+    extra_body: Vec<(String, serde_json::Value)>,
 }
 
 impl OpenAiProvider {
@@ -32,6 +34,7 @@ impl OpenAiProvider {
             url, key, model, max_tokens, temperature,
             top_p: None, frequency_penalty: None, presence_penalty: None,
             stop: None, seed: None,
+            headers: Vec::new(), extra_body: Vec::new(),
         }
     }
 }
@@ -191,14 +194,32 @@ impl LlmProvider for OpenAiProvider {
             tools: if tool_refs.is_empty() { None } else { Some(tool_refs) },
         };
 
+        // 合并 extra_body（非标准 OpenAI body 参数透传）
+        let mut body_val = serde_json::to_value(&body)
+            .map_err(|e| Error::msg(format!("序列化请求失败: {e}")))?;
+        if !self.extra_body.is_empty() {
+            if let Some(obj) = body_val.as_object_mut() {
+                for (k, v) in &self.extra_body {
+                    obj.insert(k.clone(), v.clone());
+                }
+            }
+        }
+
         let endpoint = format!("{}/chat/completions", self.url.trim_end_matches('/'));
 
         let client = reqwest::Client::new();
-        let resp = client
+        let mut req = client
             .post(&endpoint)
             .header("Authorization", format!("Bearer {}", self.key))
-            .header("Accept", "text/event-stream")
-            .json(&body)
+            .header("Accept", "text/event-stream");
+
+        // 自定义 HTTP 头
+        for (k, v) in &self.headers {
+            req = req.header(k, v);
+        }
+
+        let resp = req
+            .json(&body_val)
             .timeout(std::time::Duration::from_secs(120))
             .send()
             .await
@@ -326,6 +347,12 @@ impl OpenAiProvider {
         provider.presence_penalty = opts.presence_penalty;
         provider.stop = opts.stop.clone();
         provider.seed = opts.seed;
+        if let Some(ref h) = endpoint.headers {
+            provider.headers = h.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        }
+        if let Some(ref b) = endpoint.body {
+            provider.extra_body = b.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        }
         Ok(provider)
     }
 }

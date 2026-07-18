@@ -6,7 +6,6 @@
 use std::sync::Arc;
 
 use russh::ChannelMsg;
-use tokio::io::AsyncReadExt;
 
 use crate::agent::protocol::ToolResult;
 use crate::error::{Error, Result};
