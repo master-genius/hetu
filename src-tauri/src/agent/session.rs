@@ -160,7 +160,7 @@ async fn chat_with_retry(
     system_prompt: &str,
     tool_defs: &[crate::agent::provider::ToolDef],
     tx: &Channel<AgentEvent>,
-    abort: &watch::Receiver<bool>,
+    abort: &mut watch::Receiver<bool>,
 ) -> Result<StreamResult, Error> {
     let endpoint_count = endpoints.len();
     let max_retries = 3;
@@ -213,7 +213,10 @@ async fn chat_with_retry(
                             attempt,
                             max_attempts: max_retries,
                         });
-                        tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                        tokio::select! {
+                            _ = tokio::time::sleep(std::time::Duration::from_secs(delay)) => {}
+                            _ = abort.changed() => return Err(Error::msg("已中止")),
+                        }
                         continue;
                     }
                     return Err(e);
@@ -227,7 +230,10 @@ async fn chat_with_retry(
                             attempt,
                             max_attempts: 2,
                         });
-                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        tokio::select! {
+                            _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {}
+                            _ = abort.changed() => return Err(Error::msg("已中止")),
+                        }
                         continue;
                     }
                     return Err(e);
@@ -378,7 +384,7 @@ pub async fn session_loop(
                         &system_prompt,
                         &tool_defs,
                         &event_tx,
-                        &abort_rx,
+                        &mut abort_rx,
                     )
                     .await
                     {
@@ -418,7 +424,7 @@ pub async fn session_loop(
                         // --- 特殊工具 ---
 
                         if tc.name == "ask_user" {
-                            let tool_result = handle_ask_user(&args, &state, &event_tx, &abort_rx).await;
+                            let tool_result = handle_ask_user(&args, &state, &event_tx, &mut abort_rx).await;
                             history.push(Message::tool_result(&tc.id, tool_result.to_llm_text()));
                             emit(&event_tx, AgentEvent::ToolEnd { result: tool_result });
                             continue;
@@ -456,7 +462,7 @@ pub async fn session_loop(
                                 lines,
                                 &state,
                                 &event_tx,
-                                &abort_rx,
+                                &mut abort_rx,
                             )
                             .await;
 
@@ -491,6 +497,7 @@ pub async fn session_loop(
                             let approved = tokio::select! {
                                 r = approve_rx => r.unwrap_or(false),
                                 _ = tokio::time::sleep(std::time::Duration::from_secs(300)) => false,
+                                _ = abort_rx.changed() => false,
                             };
 
                             if *abort_rx.borrow() {
@@ -562,7 +569,7 @@ async fn handle_ask_user(
     args: &Value,
     state: &SessionState,
     tx: &Channel<AgentEvent>,
-    abort: &watch::Receiver<bool>,
+    abort: &mut watch::Receiver<bool>,
 ) -> ToolResult {
     let question = args.get("question").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let choices: Vec<UserChoice> = args
@@ -600,6 +607,9 @@ async fn handle_ask_user(
         _ = tokio::time::sleep(std::time::Duration::from_secs(300)) => {
             ToolResult::Error { message: "提问超时（5分钟）".into() }
         }
+        _ = abort.changed() => {
+            ToolResult::Error { message: "已中止".into() }
+        }
     }
 }
 
@@ -609,7 +619,7 @@ async fn handle_read_terminal(
     lines: usize,
     state: &SessionState,
     tx: &Channel<AgentEvent>,
-    _abort: &watch::Receiver<bool>,
+    abort: &mut watch::Receiver<bool>,
 ) -> ToolResult {
     let request_id = format!(
         "rt_{}",
@@ -637,6 +647,9 @@ async fn handle_read_terminal(
         }
         _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
             ToolResult::Error { message: "读取终端超时（5s）".into() }
+        }
+        _ = abort.changed() => {
+            ToolResult::Error { message: "已中止".into() }
         }
     }
 }

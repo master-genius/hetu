@@ -1,5 +1,5 @@
 //! LlmProvider trait — 抽象不同 LLM 后端的流式对话接口。
-//! Phase 1b 支持 tool calling。Phase 4 加 AnthropicProvider。
+//! Phase 1b 支持 tool calling。新 provider 通过实现此 trait 扩展。
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

@@ -224,6 +224,8 @@ pub async fn file_stat(conn: &Arc<Connection>, path: &str) -> ToolResult {
 
 /// 在连接上执行命令，返回 (stdout, stderr, exit_code)
 async fn exec_channel(conn: &Arc<Connection>, cmd: &str) -> Result<(String, String, i32)> {
+    // Handle 不实现 Clone，channel_open_session 需要持有锁。
+    // 但该操作是快速的（发送 channel open 请求），不会长时间持锁。
     let mut channel = {
         let guard = conn.handle.lock().await;
         let handle = guard.as_ref().ok_or_else(|| Error::msg("连接未建立"))?;

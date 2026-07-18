@@ -6,12 +6,19 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::OnceLock;
 use tauri::ipc::Channel;
 use tokio::sync::watch;
 
 use crate::agent::protocol::{emit, AgentEvent};
 use crate::agent::provider::{LlmProvider, Message, StreamResult, ToolCall, ToolDef};
 use crate::error::{Error, Result};
+
+/// 全局复用 reqwest::Client（连接池共享，避免每次请求新建）
+fn shared_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| reqwest::Client::new())
+}
 
 pub struct OpenAiProvider {
     url: String,
@@ -207,7 +214,7 @@ impl LlmProvider for OpenAiProvider {
 
         let endpoint = format!("{}/chat/completions", self.url.trim_end_matches('/'));
 
-        let client = reqwest::Client::new();
+        let client = shared_client();
         let mut req = client
             .post(&endpoint)
             .header("Authorization", format!("Bearer {}", self.key))

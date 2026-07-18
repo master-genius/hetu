@@ -376,8 +376,7 @@ async fn search(pattern: &str, path: &str) -> ToolResult {
         .arg("-rn")
         .arg("--color=never")
         .arg(pattern)
-        .arg(&path)
-        .current_dir("/")
+        .arg(path)
         .output()
         .await
     {
