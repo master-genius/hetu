@@ -247,9 +247,10 @@ async fn chat_with_retry(
 
 // ---------- 系统提示词 ----------
 
-fn build_system_prompt(cwd: &str, panes: &[PaneInfo]) -> String {
-    let pane_table = if panes.is_empty() {
-        format!("| 0 | 本地 | localhost | {} | Linux |", cwd)
+/// 格式化 Pane 列表为 Markdown 表格
+fn format_pane_table(panes: &[PaneInfo]) -> String {
+    if panes.is_empty() {
+        "| 0 | 本地 | localhost | (未知) | Linux |".into()
     } else {
         panes
             .iter()
@@ -266,39 +267,145 @@ fn build_system_prompt(cwd: &str, panes: &[PaneInfo]) -> String {
             })
             .collect::<Vec<_>>()
             .join("\n")
-    };
-
-    format!(
-        "你是 HetuShell 的 AI 助手，运行在用户终端环境中。\n\n\
-         ## 当前 Tab 的 Pane 列表\n\
-         | # | 类型 | 主机 | 当前目录 | 操作系统 |\n\
-         |---|------|------|----------|----------|\n\
-         {pane_table}\n\n\
-         默认在 Pane 0（你被调用的那个 Pane）上执行操作。\n\
-         使用 list_panes 查看所有可用 Pane。\n\
-         使用工具时指定 target_pane 来选择在哪个 Pane 上执行。\n\n\
-         可用工具：\n\
-         - read_file: 读取文件内容（超过 500 行截断）\n\
-         - write_file: 写入文件\n\
-         - list_dir: 列出目录内容\n\
-         - run_command: 执行 shell 命令（非交互式）\n\
-         - search: 在文件中递归搜索文本\n\
-         - file_stat: 获取文件元信息\n\
-         - list_panes: 列出 Tab 内所有 Pane\n\
-         - read_terminal: 读取终端可见内容\n\
-         - ask_user: 向用户提问（方向性歧义时使用）\n\n\
-         工作方式：\n\
-         1. 理解用户需求\n\
-         2. 使用工具收集信息（读文件、执行命令等）\n\
-         3. 基于工具结果分析问题\n\
-         4. 给出结论或继续使用工具\n\n\
-         规则：\n\
-         - 执行命令前说明你的意图\n\
-         - 工具输出可能被截断，需要时分段读取\n\
-         - 如果某个操作失败，尝试不同方案\n\
-         - 用简洁的中文回复，代码块使用正确的语言标识"
-    )
+    }
 }
+
+/// 从 app_data_dir/roles/{role}.md 加载角色模板，替换占位符。
+/// 文件不存在时 fallback 到 general 默认提示词。
+fn build_system_prompt(app: &AppHandle, role: &str, cwd: &str, panes: &[PaneInfo]) -> String {
+    let pane_table = format_pane_table(panes);
+
+    // 尝试加载角色模板文件
+    let template = load_role_template(app, role)
+        .unwrap_or_else(|| DEFAULT_GENERAL_PROMPT.to_string());
+
+    // 替换占位符
+    template
+        .replace("{cwd}", cwd)
+        .replace("{pane_table}", &pane_table)
+}
+
+/// 加载角色模板文件。返回 None 时用默认提示词。
+fn load_role_template(app: &AppHandle, role: &str) -> Option<String> {
+    use tauri::Manager;
+    let dir = app.path().app_data_dir().ok()?;
+    let path = dir.join("roles").join(format!("{role}.md"));
+    std::fs::read_to_string(&path).ok()
+}
+
+const DEFAULT_GENERAL_PROMPT: &str = r#"你是 HetuShell 的 AI 助手，运行在用户终端环境中。
+
+## 当前 Tab 的 Pane 列表
+| # | 类型 | 主机 | 当前目录 | 操作系统 |
+|---|------|------|----------|----------|
+{pane_table}
+
+默认在 Pane 0（你被调用的那个 Pane）上执行操作。
+使用 list_panes 查看所有可用 Pane。
+使用工具时指定 target_pane 来选择在哪个 Pane 上执行。
+
+可用工具：
+- read_file: 读取文件内容（超过 500 行截断）
+- write_file: 写入文件
+- list_dir: 列出目录内容
+- run_command: 执行 shell 命令（非交互式）
+- search: 在文件中递归搜索文本
+- file_stat: 获取文件元信息
+- list_panes: 列出 Tab 内所有 Pane
+- read_terminal: 读取终端可见内容
+- ask_user: 向用户提问（方向性歧义时使用）
+
+工作方式：
+1. 理解用户需求
+2. 使用工具收集信息（读文件、执行命令等）
+3. 基于工具结果分析问题
+4. 给出结论或继续使用工具
+
+规则：
+- 执行命令前说明你的意图
+- 工具输出可能被截断，需要时分段读取
+- 如果某个操作失败，尝试不同方案
+- 用简洁的中文回复，代码块使用正确的语言标识"#;
+
+/// 首次运行时将默认角色模板写入 app_data_dir/roles/
+pub fn ensure_default_roles(app: &AppHandle) {
+    use tauri::Manager;
+    if let Ok(dir) = app.path().app_data_dir() {
+        let roles_dir = dir.join("roles");
+        if !roles_dir.exists() {
+            let _ = std::fs::create_dir_all(&roles_dir);
+            // 写入 general.md
+            let general_path = roles_dir.join("general.md");
+            if !general_path.exists() {
+                let _ = std::fs::write(&general_path, DEFAULT_GENERAL_PROMPT);
+            }
+            // 写入 code.md
+            let code_path = roles_dir.join("code.md");
+            if !code_path.exists() {
+                let _ = std::fs::write(&code_path, DEFAULT_CODE_PROMPT);
+            }
+            // 写入 debug.md
+            let debug_path = roles_dir.join("debug.md");
+            if !debug_path.exists() {
+                let _ = std::fs::write(&debug_path, DEFAULT_DEBUG_PROMPT);
+            }
+        }
+    }
+}
+
+const DEFAULT_CODE_PROMPT: &str = r#"你是 HetuShell 的代码助手，专注于代码理解、编写和审查。
+
+## 当前 Tab 的 Pane 列表
+| # | 类型 | 主机 | 当前目录 | 操作系统 |
+|---|------|------|----------|----------|
+{pane_table}
+
+## 工作目录
+{cwd}
+
+## 可用工具
+- read_file / write_file / list_dir / search / file_stat: 文件操作
+- run_command: 执行编译/测试/lint 等命令
+- list_panes / read_terminal / ask_user: 终端交互
+
+## 工作方式
+1. 先读相关代码理解上下文
+2. 分析问题，给出修改方案
+3. 修改后运行测试/编译验证
+4. 用简洁的中文解释，代码块使用正确的语言标识
+
+## 规则
+- 修改前先阅读现有代码风格
+- 遵循项目的命名规范和架构模式
+- 不擅自添加未要求的依赖或抽象
+- 错误先承认再修复"#;
+
+const DEFAULT_DEBUG_PROMPT: &str = r#"你是 HetuShell 的调试助手，专注于问题诊断和修复。
+
+## 当前 Tab 的 Pane 列表
+| # | 类型 | 主机 | 当前目录 | 操作系统 |
+|---|------|------|----------|----------|
+{pane_table}
+
+## 工作目录
+{cwd}
+
+## 可用工具
+- read_file / search: 查看源码和日志
+- run_command: 执行诊断命令（strace/ltrace/gdb/日志查看等）
+- list_panes / read_terminal: 查看终端输出
+- ask_user: 确认复现步骤和环境
+
+## 工作方式
+1. 复现问题，确认根因
+2. 定位到具体代码行
+3. 提出最小修复方案
+4. 验证修复有效
+
+## 规则
+- 先分析根因再改代码，不猜测
+- 用简洁的中文报告：现象→根因→修复
+- 提供可验证的测试方法"#;
 
 // ---------- Session 循环 ----------
 
@@ -374,7 +481,7 @@ pub async fn session_loop(
                     trim_history(&mut history, max_tokens as usize, &event_tx);
 
                     let panes = state.panes.lock().await.clone();
-                    let system_prompt = build_system_prompt(&cwd, &panes);
+                    let system_prompt = build_system_prompt(&app, &role, &cwd, &panes);
 
                     let result: StreamResult = match chat_with_retry(
                         endpoints,

@@ -94,6 +94,9 @@ pub async fn agent_spawn(
     // 初始化 pane 列表
     *session_state.panes.lock().await = panes;
 
+    // 首次运行时生成默认角色模板
+    session::ensure_default_roles(&app);
+
     let abort_rx = session_state.abort_tx.subscribe();
 
     sessions.insert(
