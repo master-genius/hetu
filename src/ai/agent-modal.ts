@@ -10,6 +10,7 @@
 
 import { Channel } from "@tauri-apps/api/core";
 import { api } from "../ipc";
+import { toast } from "../ui";
 import type { AgentEvent, HaiSpec, HistoryEntry, PaneInfo, ToolResult, UserChoice } from "./protocol";
 import { StreamingMarkdown } from "./renderer";
 
@@ -127,6 +128,7 @@ export class AgentModal {
   private mode: string;
   private glassMode = false;
   private themeMode: "auto" | "light" | "dark" = "auto";
+  private currentCwd = "";
 
   /** 外部设置的终端读取回调（main.ts 注入，用于 read_terminal 工具） */
   onReadTerminal: ((paneId: string, lines: number) => Promise<string>) | null = null;
@@ -479,6 +481,7 @@ export class AgentModal {
   async show(spec: HaiSpec, cwd: string, panes: PaneInfo[]): Promise<void> {
     this.role = spec.role || "general";
     this.mode = spec.mode || "auto";
+    this.currentCwd = cwd;
 
     const modeBadge = this.overlay.querySelector(".hai-mode-badge")!;
     modeBadge.textContent = this.mode.charAt(0).toUpperCase() + this.mode.slice(1);
