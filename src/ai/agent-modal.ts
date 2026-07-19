@@ -743,8 +743,9 @@ export class AgentModal {
 
     // summary 是 Markdown 文本，用 marked 渲染
     const summaryEl = el.querySelector(".hai-plan-summary")!;
-    if (window.__marked_parse) {
-      summaryEl.innerHTML = window.__marked_parse(summary);
+    const w = window as any;
+    if (w.__marked_parse) {
+      summaryEl.innerHTML = w.__marked_parse(summary);
     } else {
       summaryEl.textContent = summary;
     }

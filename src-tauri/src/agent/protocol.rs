@@ -69,6 +69,19 @@ pub enum AgentEvent {
 
     /// 上下文截断通知（trim_history 移除了旧工具输出 / 旧消息）
     ContextTrimmed { removed_tools: usize, removed_messages: usize },
+
+    /// 历史恢复（agent_spawn 时加载了持久化历史，前端渲染旧消息）
+    HistoryRestored { messages: Vec<HistoryEntry> },
+
+    /// 历史清除（用户点击"清除"按钮）
+    HistoryCleared,
+}
+
+/// 历史消息条目（前端渲染用，不含 tool_calls）
+#[derive(Serialize, Clone)]
+pub struct HistoryEntry {
+    pub role: String,
+    pub content: String,
 }
 
 /// 工具执行结果

@@ -167,8 +167,32 @@ pub fn definitions() -> Vec<ToolDef> {
                 }),
             },
         },
+        ToolDef {
+            def_type: "function".into(),
+            function: ToolFunction {
+                name: "read_memory".into(),
+                description: "读取项目记忆文件（.hetu/ai-memory.md）。Agent 跨会话记住的项目上下文。".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {}
+                }),
+            },
+        },
+        ToolDef {
+            def_type: "function".into(),
+            function: ToolFunction {
+                name: "write_memory".into(),
+                description: "写入/更新项目记忆文件（.hetu/ai-memory.md）。用于记住项目结构、约定、常见问题等跨会话信息。".into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "content": { "type": "string", "description": "完整的记忆内容（Markdown）" }
+                    },
+                    "required": ["content"]
+                }),
+            },
+        },
     ];
-    let _ = &mut defs;
     defs
 }
 
@@ -247,6 +271,33 @@ pub async fn execute(name: &str, args: &Value, cwd: &str, conn: Option<&Arc<Conn
             match conn {
                 Some(c) => crate::agent::tools_ssh::file_stat(c, &path).await,
                 None => file_stat(&path).await,
+            }
+        }
+        "read_memory" => {
+            let memory_path = format!("{}/.hetu/ai-memory.md", cwd.trim_end_matches('/'));
+            match conn {
+                Some(c) => crate::agent::tools_ssh::read_file(c, &memory_path).await,
+                None => read_file(&memory_path).await,
+            }
+        }
+        "write_memory" => {
+            let content = match args.get("content").and_then(|v| v.as_str()) {
+                Some(c) => c,
+                None => return err("缺少参数: content"),
+            };
+            let memory_path = format!("{}/.hetu/ai-memory.md", cwd.trim_end_matches('/'));
+            // 确保目录存在
+            let dir = format!("{}/.hetu", cwd.trim_end_matches('/'));
+            match conn {
+                Some(c) => {
+                    let mkdir_cmd = format!("mkdir -p {}", sh_quote(&dir));
+                    crate::agent::tools_ssh::run_command(c, &mkdir_cmd, Some(&cwd)).await;
+                    crate::agent::tools_ssh::write_file(c, &memory_path, content).await
+                }
+                None => {
+                    let _ = tokio::fs::create_dir_all(&dir).await;
+                    write_file(&memory_path, content).await
+                }
             }
         }
         _ => err(format!("未知工具: {name}")),
@@ -444,6 +495,10 @@ async fn file_stat(path: &str) -> ToolResult {
 }
 
 // ---------- 辅助函数 ----------
+
+fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
 
 fn resolve_path(path: &str, cwd: &str) -> String {
     if path.starts_with('/') || path.starts_with('~') {

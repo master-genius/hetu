@@ -8,7 +8,7 @@ use base64::Engine;
 use russh::ChannelMsg;
 use serde::Serialize;
 use tauri::{AppHandle, ipc::Channel};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::error::{Error, Result};
 use crate::ssh::conn::Connection;
@@ -68,46 +68,61 @@ pub async fn open(
         .await?;
     channel.request_shell(false).await?;
 
+    // 读/写分离：ChannelWriteHalf 的方法都是 &self，move 到写 task 不需要锁；
+    // ChannelReadHalf 的 wait() 需要 &mut self，独占读 task。
+    // 这样写 task 的 data().await 阻塞（远程窗口满）时，读 task 仍可 poll wait()，
+    // 不会出现 Ctrl+C 等 cat/grep 大输出结束后才生效的问题。
+    let (mut read_half, write_half) = channel.split();
+    let (done_tx, mut done_rx) = oneshot::channel::<()>();
+
+    // 读 task：独占 read_half
     tokio::spawn(async move {
         let mut exited = false;
         loop {
+            match read_half.wait().await {
+                Some(ChannelMsg::Data { data }) => {
+                    let _ = on_event.send(PaneEvent::Output { data: b64(&data) });
+                }
+                Some(ChannelMsg::ExtendedData { data, .. }) => {
+                    let _ = on_event.send(PaneEvent::Output { data: b64(&data) });
+                }
+                Some(ChannelMsg::ExitStatus { exit_status }) => {
+                    exited = true;
+                    let _ = on_event.send(PaneEvent::Exit { status: exit_status as i32 });
+                }
+                Some(_) => {}
+                None => {
+                    if !exited && !conn.is_alive().await {
+                        conn.clone().trigger_reconnect(app.clone());
+                    }
+                    let _ = on_event.send(PaneEvent::Closed { exited });
+                    break;
+                }
+            }
+        }
+        let _ = done_tx.send(());
+    });
+
+    // 写 task：独占 write_half（方法均为 &self，无需 &mut）
+    tokio::spawn(async move {
+        loop {
             tokio::select! {
-                msg = channel.wait() => match msg {
-                    Some(ChannelMsg::Data { data }) => {
-                        let _ = on_event.send(PaneEvent::Output { data: b64(&data) });
-                    }
-                    Some(ChannelMsg::ExtendedData { data, .. }) => {
-                        let _ = on_event.send(PaneEvent::Output { data: b64(&data) });
-                    }
-                    Some(ChannelMsg::ExitStatus { exit_status }) => {
-                        exited = true;
-                        let _ = on_event.send(PaneEvent::Exit { status: exit_status as i32 });
-                    }
-                    Some(_) => {}
-                    None => {
-                        // channel 结束：若非正常退出且连接已断，交给重连逻辑
-                        if !exited && !conn.is_alive().await {
-                            conn.clone().trigger_reconnect(app.clone());
-                        }
-                        let _ = on_event.send(PaneEvent::Closed { exited });
-                        break;
-                    }
-                },
                 cmd = rx.recv() => match cmd {
                     Some(PaneCmd::Data(d)) => {
-                        if channel.data(&d[..]).await.is_err() {
+                        if write_half.data(&d[..]).await.is_err() {
                             break;
                         }
                     }
                     Some(PaneCmd::Resize { cols, rows }) => {
-                        let _ = channel.window_change(cols, rows, 0, 0).await;
+                        let _ = write_half.window_change(cols, rows, 0, 0).await;
                     }
                     Some(PaneCmd::Close) | None => {
-                        let _ = channel.eof().await;
-                        let _ = channel.close().await;
+                        let _ = write_half.eof().await;
+                        let _ = write_half.close().await;
                         break;
                     }
                 },
+                _ = &mut done_rx => break,
             }
         }
     });

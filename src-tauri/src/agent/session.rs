@@ -15,7 +15,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::agent::config::{load_config, AiConfig, Endpoint};
 use crate::agent::openai::OpenAiProvider;
-use crate::agent::protocol::{emit, AgentEvent, PaneInfo, ToolResult, UserChoice};
+use crate::agent::protocol::{emit, AgentEvent, HistoryEntry, PaneInfo, ToolResult, UserChoice};
 use crate::agent::provider::{LlmProvider, Message, StreamResult};
 use crate::agent::tools;
 use crate::agent::SessionState;
