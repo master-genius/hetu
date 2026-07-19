@@ -105,6 +105,12 @@ export const api = {
     invoke<void>("agent_update_panes", { tabId, panes }),
   agentClearHistory: (tabId: string) =>
     invoke<void>("agent_clear_history", { tabId }),
+  agentListHistory: (pattern?: string) =>
+    invoke<any[]>("agent_list_history", { pattern: pattern || null }),
+  agentDeleteHistory: (cwd: string) =>
+    invoke<void>("agent_delete_history", { cwd }),
+  agentMigrateHistory: (oldCwd: string, newCwd: string) =>
+    invoke<void>("agent_migrate_history", { oldCwd, newCwd }),
   paneSetCwd: (paneId: string, cwd: string) =>
     invoke<void>("pane_set_cwd", { paneId, cwd }),
 };

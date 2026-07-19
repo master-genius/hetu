@@ -24,6 +24,16 @@ export interface HistoryEntry {
   content: string;
 }
 
+/** 全局历史索引条目 */
+export interface HistoryIndex {
+  cwd: string;
+  lastActive: string;
+  preview: string;
+  role: string;
+  model: string;
+  dirExists: boolean;
+}
+
 /** 工具执行结果 */
 export type ToolResult =
   | { status: "success"; output: string; truncated: boolean }

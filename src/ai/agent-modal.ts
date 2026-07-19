@@ -120,6 +120,7 @@ export class AgentModal {
   private glassBtn: HTMLElement;
   private themeBtn: HTMLElement;
   private clearBtn: HTMLElement;
+  private historyView: HTMLElement;
 
   private tabId: string;
   private role: string;
@@ -152,6 +153,7 @@ export class AgentModal {
           <div class="hai-tabs">
             <button class="hai-tab active" data-view="chat">Chat</button>
             <button class="hai-tab" data-view="settings">设置</button>
+            <button class="hai-tab" data-view="history">历史</button>
           </div>
           <div class="hai-header-tools">
             <button class="btn hai-btn-glass" title="玻璃模式">🔲</button>
@@ -244,10 +246,14 @@ export class AgentModal {
             <span class="hai-settings-hint"></span>
           </div>
         </div>
+        <div class="hai-view hai-view-history">
+          <div class="hai-history-list"></div>
+        </div>
       </div>`;
 
     this.chatView = this.overlay.querySelector(".hai-view-chat")!;
     this.settingsView = this.overlay.querySelector(".hai-view-settings")!;
+    this.historyView = this.overlay.querySelector(".hai-view-history")!;
     this.messagesEl = this.overlay.querySelector(".hai-messages")!;
     this.inputEl = this.overlay.querySelector(".hai-input")!;
     this.sendBtn = this.overlay.querySelector(".hai-btn-send")!;
@@ -294,7 +300,7 @@ export class AgentModal {
     this.overlay.querySelectorAll<HTMLElement>(".hai-tab").forEach((tab) => {
       tab.addEventListener("click", () => {
         const view = tab.dataset.view;
-        if (view) this.switchView(view as "chat" | "settings");
+        if (view) this.switchView(view as "chat" | "settings" | "history");
       });
     });
 
@@ -320,14 +326,18 @@ export class AgentModal {
 
   // ---------- 视图切换 ----------
 
-  private switchView(view: "chat" | "settings"): void {
+  private switchView(view: "chat" | "settings" | "history"): void {
     this.chatView.classList.toggle("active", view === "chat");
     this.settingsView.classList.toggle("active", view === "settings");
+    this.historyView.classList.toggle("active", view === "history");
     this.overlay.querySelectorAll<HTMLElement>(".hai-tab").forEach((tab) => {
       tab.classList.toggle("active", tab.dataset.view === view);
     });
     if (view === "settings" && !this.configLoaded) {
       void this.loadSettings();
+    }
+    if (view === "history") {
+      void this.loadHistoryList();
     }
     if (view === "chat") {
       this.inputEl.focus();
@@ -886,7 +896,81 @@ export class AgentModal {
     });
   }
 
-  // ---------- 历史恢复 / 清除 ----------
+  // ---------- 历史恢复 / 清除 / 浏览 ----------
+
+  /** 加载全局历史索引列表 */
+  private async loadHistoryList(): Promise<void> {
+    const listEl = this.historyView.querySelector(".hai-history-list") as HTMLElement;
+    listEl.innerHTML = '<div class="hai-history-loading">加载中…</div>';
+    try {
+      const entries = await api.agentListHistory();
+      if (entries.length === 0) {
+        listEl.innerHTML = '<div class="hai-history-empty">暂无历史对话</div>';
+        return;
+      }
+      listEl.innerHTML = "";
+      for (const entry of entries) {
+        listEl.appendChild(this.createHistoryCard(entry));
+      }
+    } catch (e: any) {
+      listEl.innerHTML = `<div class="hai-history-empty">加载失败: ${e?.message || e}</div>`;
+    }
+  }
+
+  /** 创建历史卡片 */
+  private createHistoryCard(entry: any): HTMLElement {
+    const el = document.createElement("div");
+    el.className = "hai-history-card";
+    const dirExists = entry.dirExists;
+    el.innerHTML = `
+      <div class="hai-history-cwd">${entry.cwd}</div>
+      <div class="hai-history-meta">${entry.lastActive} · ${entry.role} · ${entry.model}</div>
+      <div class="hai-history-preview">${entry.preview || "(无预览)"}</div>
+      <div class="hai-history-actions">
+        <button class="btn hai-hist-continue">继续</button>
+        ${dirExists ? "" : '<button class="btn hai-hist-migrate">迁移</button>'}
+        <button class="btn hai-hist-delete">删除</button>
+      </div>`;
+
+    el.querySelector(".hai-hist-continue")!.addEventListener("click", () => {
+      this.switchView("chat");
+      this.setStatus(`恢复 ${entry.cwd} 的历史…`);
+      // 通过后端加载该目录的历史（如果当前 cwd 不同，提示用户切换目录）
+      if (entry.cwd !== this.currentCwd) {
+        this.setStatus(`请在 ${entry.cwd} 目录下运行 hai 继续对话`);
+        toast(`历史属于 ${entry.cwd}，请切换到该目录后运行 hai`);
+      }
+    });
+
+    el.querySelector(".hai-hist-delete")!.addEventListener("click", async () => {
+      if (confirm(`确定删除 ${entry.cwd} 的历史？`)) {
+        try {
+          await api.agentDeleteHistory(entry.cwd);
+          el.remove();
+        } catch (e: any) {
+          toast(`删除失败: ${e?.message || e}`);
+        }
+      }
+    });
+
+    const migrateBtn = el.querySelector(".hai-hist-migrate");
+    if (migrateBtn) {
+      migrateBtn.addEventListener("click", async () => {
+        const newCwd = prompt(`迁移 ${entry.cwd} 的历史到新目录：`, entry.cwd);
+        if (newCwd && newCwd !== entry.cwd) {
+          try {
+            await api.agentMigrateHistory(entry.cwd, newCwd);
+            toast("迁移成功");
+            void this.loadHistoryList();
+          } catch (e: any) {
+            toast(`迁移失败: ${e?.message || e}`);
+          }
+        }
+      });
+    }
+
+    return el;
+  }
 
   private onHistoryRestored(messages: HistoryEntry[]): void {
     for (const msg of messages) {
