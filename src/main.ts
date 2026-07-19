@@ -459,7 +459,7 @@ async function bootstrap() {
       // 已有 session：更新 pane 列表
       api.agentUpdatePanes(tabId, collectPanes(tab)).catch(() => {});
     }
-    await modal.show(spec, pane.cwd || "", panes);
+    await modal.show(spec, pane.cwd || "", panes, pane.element.getBoundingClientRect());
   };
 
   const requestCloseTab = async (tab: Tab) => {

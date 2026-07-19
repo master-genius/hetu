@@ -514,14 +514,32 @@ export class AgentModal {
 
   // ---------- 显示 / 隐藏 / 销毁 ----------
 
-  /** 显示 Modal。若首次则创建 Channel + invoke agent_spawn。 */
-  async show(spec: HaiSpec, cwd: string, panes: PaneInfo[]): Promise<void> {
+  /** 显示 Modal。若首次则创建 Channel + invoke agent_spawn。
+   *  withShell=true 时为浮动覆盖层模式，跟随 pane 定位。 */
+  async show(spec: HaiSpec, cwd: string, panes: PaneInfo[], paneRect?: DOMRect): Promise<void> {
     this.role = spec.role || "general";
     this.mode = spec.mode || "auto";
     this.currentCwd = cwd;
 
     const modeBadge = this.overlay.querySelector(".hai-mode-badge")!;
     modeBadge.textContent = this.mode.charAt(0).toUpperCase() + this.mode.slice(1);
+
+    // 浮动覆盖层模式：跟随 pane 定位，紧凑尺寸
+    if (spec.w && paneRect) {
+      this.overlay.classList.add("hai-floating");
+      const modal = this.overlay.querySelector(".hai-modal") as HTMLElement;
+      modal.style.left = `${paneRect.left}px`;
+      modal.style.top = `${paneRect.top}px`;
+      modal.style.width = `${paneRect.width}px`;
+      modal.style.height = `${paneRect.height}px`;
+    } else {
+      this.overlay.classList.remove("hai-floating");
+      const modal = this.overlay.querySelector(".hai-modal") as HTMLElement;
+      modal.style.left = "";
+      modal.style.top = "";
+      modal.style.width = "";
+      modal.style.height = "";
+    }
 
     document.body.appendChild(this.overlay);
     this.overlay.style.display = "flex";
