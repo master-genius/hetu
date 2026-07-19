@@ -1,6 +1,6 @@
 [package]
 name = "hetushell"
-version = "3.1.0-beta"
+version = "3.1.0-beta2"
 description = "河图终端 HetuShell：终端 + AI/工具链的融合体验，原生支持自实现 SSH"
 authors = ["BraveWang"]
 license = "MulanPSL-2.0"

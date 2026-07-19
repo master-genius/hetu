@@ -1389,6 +1389,18 @@ async function bootstrap() {
   document.getElementById("btn-split-v")!.addEventListener("click", () => void tabs.splitActive("col"));
   document.getElementById("btn-settings")!.addEventListener("click", () => showSettingsDialog());
 
+  // AI 助手按钮：在当前活跃 pane 上打开 Agent Modal
+  document.getElementById("btn-ai")!.addEventListener("click", () => {
+    const tab = tabs.active;
+    if (!tab) return;
+    const pane = tab.layout.panes().find((p) => p.id === tab.activePaneId) ?? tab.layout.panes()[0];
+    if (!pane) return;
+    handleHai(
+      { tok: "", op: "launch", role: "general", mode: "auto", msg: "", w: false },
+      pane,
+    );
+  });
+
   // ---------- 设置热应用到所有终端 ----------
 
   // 追踪上次应用的主题 id + 基调：拖透明度/模糊时 onSettingsChange 仍会触发，
