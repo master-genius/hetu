@@ -55,6 +55,14 @@ pub struct GenOptions {
     pub stop: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<u64>,
+    /// HTTP 请求超时（秒）：覆盖从发送请求到收到完整响应的最大等待。
+    /// 仅作用于初始响应；SSE 流式阶段由 stream_chunk_timeout 控制。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_timeout: Option<u32>,
+    /// SSE 流式读取时，两个 chunk 之间的最大间隔（秒）。
+    /// 超过则判定连接挂起，中止当前请求并触发重试。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_chunk_timeout: Option<u32>,
 }
 
 fn default_max_tokens() -> u32 {
@@ -63,6 +71,13 @@ fn default_max_tokens() -> u32 {
 fn default_temperature() -> f32 {
     0.7
 }
+
+/// 默认 HTTP 请求超时（秒）
+pub const DEFAULT_REQUEST_TIMEOUT: u64 = 120;
+/// 默认 SSE chunk 间隔超时（秒）
+pub const DEFAULT_STREAM_CHUNK_TIMEOUT: u64 = 60;
+/// 默认 run_command 超时（秒）
+pub const DEFAULT_COMMAND_TIMEOUT: u32 = 120;
 
 // ---------- Endpoint ----------
 
@@ -153,6 +168,10 @@ pub struct ExecutionConfig {
     pub dangerous_commands: Vec<String>,
     #[serde(default = "default_always_ask_for")]
     pub always_ask_for: Vec<String>,
+    /// run_command 工具的执行超时（秒）。超时后强制终止命令并返回错误。
+    /// 防止 LLM 调用 tail -f 等不退出命令导致 session 永久阻塞。
+    #[serde(default = "default_command_timeout")]
+    pub command_timeout: u32,
 }
 
 fn default_mode() -> String {
@@ -169,6 +188,9 @@ fn default_dangerous_commands() -> Vec<String> {
 }
 fn default_always_ask_for() -> Vec<String> {
     vec!["run_command".into()]
+}
+fn default_command_timeout() -> u32 {
+    DEFAULT_COMMAND_TIMEOUT
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,6 +218,7 @@ impl Default for AiConfig {
                 default_mode: default_mode(),
                 dangerous_commands: default_dangerous_commands(),
                 always_ask_for: default_always_ask_for(),
+                command_timeout: default_command_timeout(),
             },
             roles: HashMap::new(),
         }

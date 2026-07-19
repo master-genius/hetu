@@ -845,7 +845,17 @@ pub async fn session_loop(
                             None
                         };
 
-                        let tool_result = tools::execute(&tc.name, &args, &target_cwd, conn.as_ref()).await;
+                        let command_timeout = config.execution.command_timeout;
+
+                        // 用 select! 包裹工具执行，使其可被 abort 中断
+                        let tool_result = tokio::select! {
+                            r = tools::execute(&tc.name, &args, &target_cwd, conn.as_ref(), command_timeout) => r,
+                            _ = abort_rx.changed() => {
+                                emit(&event_tx, AgentEvent::Aborted);
+                                abort_tools = true;
+                                break;
+                            }
+                        };
 
                         emit(&event_tx, AgentEvent::ToolEnd { result: tool_result.clone() });
                         history.push(Message::tool_result(&tc.id, tool_result.to_llm_text()));

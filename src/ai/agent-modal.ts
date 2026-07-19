@@ -69,6 +69,8 @@ interface GenOptions {
   presence_penalty?: number;
   stop?: string[];
   seed?: number;
+  request_timeout?: number;
+  stream_chunk_timeout?: number;
 }
 
 interface EndpointConfig {
@@ -96,6 +98,7 @@ interface AiConfig {
     default_mode?: string;
     dangerous_commands?: string[];
     always_ask_for?: string[];
+    command_timeout?: number;
   };
   roles?: Record<string, { model?: string }>;
 }
@@ -240,6 +243,21 @@ export class AgentModal {
               <div class="hai-form-row">
                 <label>Seed</label>
                 <input type="number" class="hai-cfg-seed" placeholder="留空使用默认" />
+              </div>
+              <div class="hai-form-row">
+                <label>请求超时(秒)</label>
+                <input type="number" class="hai-cfg-request-timeout" placeholder="留空=120" min="5" />
+              </div>
+              <div class="hai-form-row">
+                <label>流式超时(秒)</label>
+                <input type="number" class="hai-cfg-stream-timeout" placeholder="留空=60" min="5" />
+              </div>
+            </div>
+            <div class="hai-settings-section">
+              <h4>执行策略</h4>
+              <div class="hai-form-row">
+                <label>命令超时(秒)</label>
+                <input type="number" class="hai-cfg-command-timeout" placeholder="留空=120" min="5" />
               </div>
             </div>
           </div>
@@ -389,6 +407,13 @@ export class AgentModal {
       opts.stop?.join(", ") ?? "";
     (this.overlay.querySelector(".hai-cfg-seed") as HTMLInputElement).value =
       opts.seed != null ? String(opts.seed) : "";
+    (this.overlay.querySelector(".hai-cfg-request-timeout") as HTMLInputElement).value =
+      opts.request_timeout != null ? String(opts.request_timeout) : "";
+    (this.overlay.querySelector(".hai-cfg-stream-timeout") as HTMLInputElement).value =
+      opts.stream_chunk_timeout != null ? String(opts.stream_chunk_timeout) : "";
+    const exec = config.execution ?? {};
+    (this.overlay.querySelector(".hai-cfg-command-timeout") as HTMLInputElement).value =
+      exec.command_timeout != null ? String(exec.command_timeout) : "";
   }
 
   private async saveSettings(): Promise<void> {
@@ -446,6 +471,18 @@ export class AgentModal {
     if (presPenaltyStr) options.presence_penalty = parseFloat(presPenaltyStr);
     if (stopStr) options.stop = stopStr.split(",").map((s) => s.trim()).filter(Boolean);
     if (seedStr) options.seed = parseInt(seedStr, 10);
+
+    const reqTimeoutStr = (this.overlay.querySelector(".hai-cfg-request-timeout") as HTMLInputElement).value.trim();
+    const streamTimeoutStr = (this.overlay.querySelector(".hai-cfg-stream-timeout") as HTMLInputElement).value.trim();
+    if (reqTimeoutStr) options.request_timeout = parseInt(reqTimeoutStr, 10);
+    if (streamTimeoutStr) options.stream_chunk_timeout = parseInt(streamTimeoutStr, 10);
+
+    // 命令超时写入 execution
+    const cmdTimeoutStr = (this.overlay.querySelector(".hai-cfg-command-timeout") as HTMLInputElement).value.trim();
+    if (cmdTimeoutStr) {
+      if (!config.execution) config.execution = {};
+      config.execution.command_timeout = parseInt(cmdTimeoutStr, 10);
+    }
 
     // 构建 endpoint
     const endpoint: EndpointConfig = {
@@ -670,7 +707,21 @@ export class AgentModal {
   private appendError(message: string): void {
     const el = document.createElement("div");
     el.className = "hai-msg hai-msg-error";
-    el.textContent = `⚠ ${message}`;
+
+    // 配置相关错误 → 引导用户去设置
+    if (message.includes("未配置") || message.includes("未找到模型配置") || message.includes("ai-config.json")) {
+      el.innerHTML = "";
+      const text = document.createElement("div");
+      text.textContent = `⚠ ${message}`;
+      el.appendChild(text);
+      const hint = document.createElement("div");
+      hint.className = "hai-error-hint";
+      hint.innerHTML = `请点击右上角 <strong>⚙ 设置</strong> 配置模型和 API Key`;
+      el.appendChild(hint);
+    } else {
+      el.textContent = `⚠ ${message}`;
+    }
+
     this.messagesEl.appendChild(el);
     this.scrollToBottom();
   }

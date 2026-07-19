@@ -33,6 +33,10 @@ pub struct OpenAiProvider {
     seed: Option<u64>,
     headers: Vec<(String, String)>,
     extra_body: Vec<(String, serde_json::Value)>,
+    /// HTTP 请求超时（秒）
+    request_timeout: u64,
+    /// SSE chunk 间隔超时（秒）
+    stream_chunk_timeout: u64,
 }
 
 impl OpenAiProvider {
@@ -42,6 +46,8 @@ impl OpenAiProvider {
             top_p: None, frequency_penalty: None, presence_penalty: None,
             stop: None, seed: None,
             headers: Vec::new(), extra_body: Vec::new(),
+            request_timeout: crate::agent::config::DEFAULT_REQUEST_TIMEOUT,
+            stream_chunk_timeout: crate::agent::config::DEFAULT_STREAM_CHUNK_TIMEOUT,
         }
     }
 }
@@ -172,7 +178,7 @@ impl LlmProvider for OpenAiProvider {
         system_prompt: &str,
         tools: &[ToolDef],
         tx: &Channel<AgentEvent>,
-        abort: &watch::Receiver<bool>,
+        abort: &mut watch::Receiver<bool>,
     ) -> Result<StreamResult> {
         // 构建请求消息：system prompt + history
         let mut api_messages = vec![ChatMessage {
@@ -227,7 +233,7 @@ impl LlmProvider for OpenAiProvider {
 
         let resp = req
             .json(&body_val)
-            .timeout(std::time::Duration::from_secs(120))
+            .timeout(std::time::Duration::from_secs(self.request_timeout))
             .send()
             .await
             .map_err(|e| Error::msg(format!("LLM 请求失败: {e}")))?;
@@ -246,18 +252,37 @@ impl LlmProvider for OpenAiProvider {
         let mut full_content = String::new();
         let mut tool_acc: HashMap<usize, ToolCallAccumulator> = HashMap::new();
 
-        while let Some(chunk_result) = stream.next().await {
-            // abort 检查点
-            if *abort.borrow() {
-                emit(tx, AgentEvent::Aborted);
-                return Ok(StreamResult {
-                    content: full_content,
-                    tool_calls: Vec::new(),
-                });
-            }
+        let chunk_timeout = std::time::Duration::from_secs(self.stream_chunk_timeout);
 
-            let chunk = chunk_result.map_err(|e| Error::msg(format!("SSE 读取失败: {e}")))?;
-            line_buf.push_str(&String::from_utf8_lossy(&chunk));
+        loop {
+            // abort 检查 + 等待下一个 chunk（带超时），三者竞争
+            tokio::select! {
+                // abort 信号：立即中止
+                _ = abort.changed() => {
+                    emit(tx, AgentEvent::Aborted);
+                    return Ok(StreamResult {
+                        content: full_content,
+                        tool_calls: Vec::new(),
+                    });
+                }
+                // chunk 间隔超时：判定连接挂起
+                _ = tokio::time::sleep(chunk_timeout) => {
+                    return Err(Error::msg(format!(
+                        "SSE 流式读取超时（{}s 无数据），可能连接已挂起",
+                        self.stream_chunk_timeout
+                    )));
+                }
+                // 正常收到 chunk
+                chunk_result = stream.next() => {
+                    let chunk_result = match chunk_result {
+                        Some(r) => r,
+                        None => break, // 流结束
+                    };
+
+                    let chunk = chunk_result.map_err(|e| Error::msg(format!("SSE 读取失败: {e}")))?;
+                    line_buf.push_str(&String::from_utf8_lossy(&chunk));
+                }
+            }
 
             let (complete_lines, remaining) = split_lines(&line_buf);
             line_buf = remaining;
@@ -354,6 +379,12 @@ impl OpenAiProvider {
         provider.presence_penalty = opts.presence_penalty;
         provider.stop = opts.stop.clone();
         provider.seed = opts.seed;
+        provider.request_timeout = opts.request_timeout
+            .map(|s| s as u64)
+            .unwrap_or(crate::agent::config::DEFAULT_REQUEST_TIMEOUT);
+        provider.stream_chunk_timeout = opts.stream_chunk_timeout
+            .map(|s| s as u64)
+            .unwrap_or(crate::agent::config::DEFAULT_STREAM_CHUNK_TIMEOUT);
         if let Some(ref h) = endpoint.headers {
             provider.headers = h.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         }

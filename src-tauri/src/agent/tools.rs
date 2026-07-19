@@ -197,7 +197,14 @@ pub fn definitions() -> Vec<ToolDef> {
 }
 
 /// 执行工具调用。conn=None 走本地，conn=Some 走远程。
-pub async fn execute(name: &str, args: &Value, cwd: &str, conn: Option<&Arc<Connection>>) -> ToolResult {
+/// command_timeout 控制 run_command 的最大执行时间（秒）。
+pub async fn execute(
+    name: &str,
+    args: &Value,
+    cwd: &str,
+    conn: Option<&Arc<Connection>>,
+    command_timeout: u32,
+) -> ToolResult {
     match name {
         "read_file" => {
             match args.get("path").and_then(|v| v.as_str()) {
@@ -245,8 +252,8 @@ pub async fn execute(name: &str, args: &Value, cwd: &str, conn: Option<&Arc<Conn
                 .map(|p| resolve_path(p, cwd))
                 .unwrap_or_else(|| cwd.to_string());
             match conn {
-                Some(c) => crate::agent::tools_ssh::run_command(c, command, Some(&work_dir)).await,
-                None => run_command(command, &work_dir).await,
+                Some(c) => crate::agent::tools_ssh::run_command(c, command, Some(&work_dir), command_timeout).await,
+                None => run_command(command, &work_dir, command_timeout).await,
             }
         }
         "search" => {
@@ -291,7 +298,7 @@ pub async fn execute(name: &str, args: &Value, cwd: &str, conn: Option<&Arc<Conn
             match conn {
                 Some(c) => {
                     let mkdir_cmd = format!("mkdir -p {}", sh_quote(&dir));
-                    crate::agent::tools_ssh::run_command(c, &mkdir_cmd, Some(&cwd)).await;
+                    crate::agent::tools_ssh::run_command(c, &mkdir_cmd, Some(&cwd), command_timeout).await;
                     crate::agent::tools_ssh::write_file(c, &memory_path, content).await
                 }
                 None => {
@@ -380,16 +387,22 @@ async fn list_dir(path: &str) -> ToolResult {
     success(output, truncated)
 }
 
-async fn run_command(command: &str, work_dir: &str) -> ToolResult {
-    let output = match Command::new("sh")
-        .arg("-c")
-        .arg(command)
-        .current_dir(work_dir)
-        .output()
-        .await
+async fn run_command(command: &str, work_dir: &str, timeout_secs: u32) -> ToolResult {
+    let timeout_dur = std::time::Duration::from_secs(timeout_secs as u64);
+
+    let output = match tokio::time::timeout(
+        timeout_dur,
+        Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .current_dir(work_dir)
+            .output(),
+    )
+    .await
     {
-        Ok(out) => out,
-        Err(e) => return err(format!("执行命令失败: {e}")),
+        Ok(Ok(out)) => out,
+        Ok(Err(e)) => return err(format!("执行命令失败: {e}")),
+        Err(_) => return err(format!("命令执行超时（{timeout_secs}s），可能是不退出命令（如 tail -f）")),
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout);

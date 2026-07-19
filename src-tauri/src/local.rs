@@ -481,9 +481,10 @@ emit "$_payload"
 
 const HAI_SCRIPT: &str = r#"#!/bin/sh
 # HetuShell 内建命令：启动 AI Agent (HAI) 面板。
-# 用法: hai [--ask|--plan] [--role <名称>] [消息]
-# - --ask: 每次工具调用前确认（Phase 1a 暂不生效，预留）
-# - --plan: 先出计划再执行（Phase 1a 暂不生效，预留）
+# 用法: hai [-w] [--ask|--plan] [--role <名称>] [消息]
+# - -w: 浮动覆盖层模式（跟随当前终端分屏定位，紧凑布局）
+# - --ask: 每次工具调用前确认
+# - --plan: 先出计划再执行
 # - --role <名称>: 指定角色（默认 general）
 # - 不带消息则打开空对话；带消息则自动发送首条
 OSC=1733
@@ -493,18 +494,20 @@ b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
 role="general"
 mode="auto"
 message=""
+with_shell=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --ask)    mode="ask"; shift;;
-    --plan)   mode="plan"; shift;;
-    --role)   [ $# -ge 2 ] || { echo "hai: 选项 $1 缺少参数" >&2; exit 1; }; role="$2"; shift 2;;
-    -h|--help) echo "用法: hai [--ask|--plan] [--role <名称>] [消息]"; exit 0;;
-    *)        message="$*"; break;;
+    -w)        with_shell=1; shift;;
+    --ask)     mode="ask"; shift;;
+    --plan)    mode="plan"; shift;;
+    --role)    [ $# -ge 2 ] || { echo "hai: 选项 $1 缺少参数" >&2; exit 1; }; role="$2"; shift 2;;
+    -h|--help) echo "用法: hai [-w] [--ask|--plan] [--role <名称>] [消息]"; exit 0;;
+    *)         message="$*"; break;;
   esac
 done
 
-_payload="tok=$(b64 "${HSSH_TOKEN:-}");op=launch;role=$(b64 "$role");mode=$(b64 "$mode");msg=$(b64 "$message")"
+_payload="tok=$(b64 "${HSSH_TOKEN:-}");op=$(b64 "launch");role=$(b64 "$role");mode=$(b64 "$mode");msg=$(b64 "$message");w=$with_shell"
 emit "$_payload"
 "#;
 

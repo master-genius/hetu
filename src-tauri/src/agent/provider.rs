@@ -100,6 +100,6 @@ pub trait LlmProvider: Send + Sync {
         system_prompt: &str,
         tools: &[ToolDef],
         tx: &Channel<AgentEvent>,
-        abort: &watch::Receiver<bool>,
+        abort: &mut watch::Receiver<bool>,
     ) -> Result<StreamResult>;
 }

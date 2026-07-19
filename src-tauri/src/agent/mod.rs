@@ -84,8 +84,9 @@ pub async fn agent_spawn(
 ) -> Result<()> {
     let mut sessions = state.sessions.lock().await;
 
-    if sessions.remove(&tab_id).is_some() {
-        // 旧 session 的 tx 被 drop，task 退出
+    // 先中止旧 session 的 task，避免旧 task 完成后 save_history 覆盖新 session 历史
+    if let Some(old) = sessions.remove(&tab_id) {
+        let _ = old.state.abort_tx.send(true);
     }
 
     let (tx, rx) = mpsc::unbounded_channel();
@@ -174,7 +175,12 @@ pub async fn agent_destroy(
     state: tauri::State<'_, AgentManager>,
     tab_id: String,
 ) -> Result<()> {
-    state.sessions.lock().await.remove(&tab_id);
+    // 先发 abort 信号中止正在运行的 task（LLM 请求 / 工具执行 / 交互等待），
+    // 再从 HashMap 移除。避免旧 task 完成后 save_history 覆盖或继续持有连接。
+    let removed = state.sessions.lock().await.remove(&tab_id);
+    if let Some(handle) = removed {
+        let _ = handle.state.abort_tx.send(true);
+    }
     Ok(())
 }
 

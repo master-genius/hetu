@@ -71,4 +71,6 @@ export interface HaiSpec {
   role: string;
   mode: string;
   msg: string;
+  /** 浮动覆盖层模式（-w） */
+  w: boolean;
 }
