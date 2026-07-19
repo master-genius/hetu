@@ -32,5 +32,6 @@ export function parseHai(data: string): HaiSpec | null {
     role: b64utf8(f.role ?? "") || "general",
     mode: b64utf8(f.mode ?? "") || "auto",
     msg: b64utf8(f.msg ?? ""),
+    w: f.w === "1",
   };
 }
