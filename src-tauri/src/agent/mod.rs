@@ -252,3 +252,16 @@ pub async fn agent_load_config(app: tauri::AppHandle) -> Result<config::AiConfig
 pub async fn agent_save_config(app: tauri::AppHandle, config: config::AiConfig) -> Result<()> {
     config::save_config(&app, &config)
 }
+
+/// 清除对话历史（删除持久化文件 + 清空内存历史）
+#[tauri::command]
+pub async fn agent_clear_history(
+    state: tauri::State<'_, AgentManager>,
+    tab_id: String,
+) -> Result<()> {
+    let sessions = state.sessions.lock().await;
+    if let Some(handle) = sessions.get(&tab_id) {
+        let _ = handle.tx.send(session::SessionCmd::ClearHistory);
+    }
+    Ok(())
+}

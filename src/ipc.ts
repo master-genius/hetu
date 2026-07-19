@@ -103,6 +103,8 @@ export const api = {
     invoke<void>("agent_terminal_data", { tabId, requestId, data }),
   agentUpdatePanes: (tabId: string, panes: any[]) =>
     invoke<void>("agent_update_panes", { tabId, panes }),
+  agentClearHistory: (tabId: string) =>
+    invoke<void>("agent_clear_history", { tabId }),
   paneSetCwd: (paneId: string, cwd: string) =>
     invoke<void>("pane_set_cwd", { paneId, cwd }),
 };

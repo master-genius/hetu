@@ -14,7 +14,15 @@ export type AgentEvent =
   | { type: "aborted" }
   | { type: "done" }
   | { type: "retrying"; reason: string; attempt: number; maxAttempts: number }
-  | { type: "contextTrimmed"; removedTools: number; removedMessages: number };
+  | { type: "contextTrimmed"; removedTools: number; removedMessages: number }
+  | { type: "historyRestored"; messages: HistoryEntry[] }
+  | { type: "historyCleared" };
+
+/** 历史消息条目 */
+export interface HistoryEntry {
+  role: string;
+  content: string;
+}
 
 /** 工具执行结果 */
 export type ToolResult =

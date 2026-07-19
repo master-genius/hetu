@@ -25,6 +25,7 @@ use crate::error::Error;
 pub enum SessionCmd {
     Message(String),
     Abort,
+    ClearHistory,
 }
 
 // ---------- 上下文窗口管理 ----------
@@ -245,6 +246,52 @@ async fn chat_with_retry(
     }
 }
 
+// ---------- 历史持久化 ----------
+
+fn session_file_path(cwd: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(format!("{}/.hetu/ai-session.json", cwd.trim_end_matches('/')))
+}
+
+/// 从 {cwd}/.hetu/ai-session.json 加载历史。返回 (history, entries_for_frontend)
+fn load_history(cwd: &str) -> (Vec<Message>, Vec<HistoryEntry>) {
+    let path = session_file_path(cwd);
+    let data = match std::fs::read_to_string(&path) {
+        Ok(d) => d,
+        Err(_) => return (Vec::new(), Vec::new()),
+    };
+    let history: Vec<Message> = match serde_json::from_str(&data) {
+        Ok(h) => h,
+        Err(_) => return (Vec::new(), Vec::new()),
+    };
+    let entries: Vec<HistoryEntry> = history
+        .iter()
+        .filter(|m| m.role == "user" || m.role == "assistant")
+        .filter(|m| !m.content.is_empty())
+        .map(|m| HistoryEntry {
+            role: m.role.clone(),
+            content: m.content.clone(),
+        })
+        .collect();
+    (history, entries)
+}
+
+/// 保存历史到 {cwd}/.hetu/ai-session.json
+fn save_history(cwd: &str, history: &[Message]) {
+    let path = session_file_path(cwd);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(data) = serde_json::to_string_pretty(history) {
+        let _ = std::fs::write(&path, data);
+    }
+}
+
+/// 删除历史文件
+fn clear_history_file(cwd: &str) {
+    let path = session_file_path(cwd);
+    let _ = std::fs::remove_file(&path);
+}
+
 // ---------- 系统提示词 ----------
 
 /// 格式化 Pane 列表为 Markdown 表格
@@ -419,7 +466,12 @@ pub async fn session_loop(
     state: SessionState,
     mut abort_rx: watch::Receiver<bool>,
 ) {
-    let mut history: Vec<Message> = Vec::new();
+    // 加载持久化历史
+    let (mut history, restored_entries) = load_history(&cwd);
+    if !restored_entries.is_empty() {
+        emit(&event_tx, AgentEvent::HistoryRestored { messages: restored_entries });
+    }
+
     let tool_defs = tools::definitions();
     let mut wrr = WeightedRR::new();
 
@@ -699,9 +751,16 @@ pub async fn session_loop(
                 }
 
                 emit(&event_tx, AgentEvent::Done);
+                // 持久化历史
+                save_history(&cwd, &history);
             }
             Some(SessionCmd::Abort) => {
                 let _ = state.abort_tx.send(true);
+            }
+            Some(SessionCmd::ClearHistory) => {
+                history.clear();
+                clear_history_file(&cwd);
+                emit(&event_tx, AgentEvent::HistoryCleared);
             }
             None => break,
         }

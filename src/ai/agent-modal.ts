@@ -10,7 +10,7 @@
 
 import { Channel } from "@tauri-apps/api/core";
 import { api } from "../ipc";
-import type { AgentEvent, HaiSpec, PaneInfo, ToolResult, UserChoice } from "./protocol";
+import type { AgentEvent, HaiSpec, HistoryEntry, PaneInfo, ToolResult, UserChoice } from "./protocol";
 import { StreamingMarkdown } from "./renderer";
 
 // ---------- marked + highlight.js 懒初始化 ----------
@@ -119,6 +119,7 @@ export class AgentModal {
   private settingsView: HTMLElement;
   private glassBtn: HTMLElement;
   private themeBtn: HTMLElement;
+  private clearBtn: HTMLElement;
 
   private tabId: string;
   private role: string;
@@ -155,6 +156,7 @@ export class AgentModal {
           <div class="hai-header-tools">
             <button class="btn hai-btn-glass" title="玻璃模式">🔲</button>
             <button class="btn hai-btn-theme" title="主题切换">🌓</button>
+            <button class="btn hai-btn-clear" title="清除对话历史">🗑</button>
             <span class="hai-mode-badge">Auto</span>
             <button class="btn hai-btn-close" title="隐藏 (Alt+H)">隐藏</button>
           </div>
@@ -254,6 +256,7 @@ export class AgentModal {
     this.closeBtn = this.overlay.querySelector(".hai-btn-close")!;
     this.glassBtn = this.overlay.querySelector(".hai-btn-glass")!;
     this.themeBtn = this.overlay.querySelector(".hai-btn-theme")!;
+    this.clearBtn = this.overlay.querySelector(".hai-btn-clear")!;
 
     // 从 localStorage 恢复偏好
     this.glassMode = localStorage.getItem("hai-glass") === "true";
@@ -279,6 +282,11 @@ export class AgentModal {
     this.closeBtn.addEventListener("click", () => this.hide());
     this.glassBtn.addEventListener("click", () => this.toggleGlass());
     this.themeBtn.addEventListener("click", () => this.cycleTheme());
+    this.clearBtn.addEventListener("click", () => {
+      if (confirm("确定清除对话历史？")) {
+        api.agentClearHistory(this.tabId).catch(() => {});
+      }
+    });
     this.sendBtn.addEventListener("click", () => this.send());
     this.abortBtn.addEventListener("click", () => this.abort());
 
@@ -565,6 +573,12 @@ export class AgentModal {
         break;
       case "contextTrimmed":
         this.setStatus(`上下文截断: 移除 ${event.removedTools} 工具 + ${event.removedMessages} 消息`);
+        break;
+      case "historyRestored":
+        this.onHistoryRestored(event.messages);
+        break;
+      case "historyCleared":
+        this.onHistoryCleared();
         break;
       case "error":
         this.appendError(event.message);
@@ -870,6 +884,30 @@ export class AgentModal {
     requestAnimationFrame(() => {
       this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
     });
+  }
+
+  // ---------- 历史恢复 / 清除 ----------
+
+  private onHistoryRestored(messages: HistoryEntry[]): void {
+    for (const msg of messages) {
+      if (msg.role === "user") {
+        this.appendUserMessage(msg.content);
+      } else if (msg.role === "assistant") {
+        const { el, renderer } = this.appendAssistantBubble();
+        renderer.push(msg.content);
+        renderer.done();
+      }
+    }
+    this.scrollToBottom();
+  }
+
+  private onHistoryCleared(): void {
+    this.messagesEl.innerHTML = "";
+    this.turns = [];
+    this.currentRenderer = null;
+    this.currentToolEl = null;
+    this.setProcessing(false);
+    this.setStatus("就绪");
   }
 
   // ---------- 玻璃模式 / 主题 ----------
