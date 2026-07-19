@@ -471,6 +471,9 @@ pub async fn session_loop(
 
                 let _ = state.abort_tx.send(false);
 
+                // Plan 模式状态：第一轮不传 tools，LLM 输出文字计划；确认后切换为 auto
+                let mut plan_confirmed = mode != "plan";
+
                 // ReAct 循环
                 loop {
                     if *abort_rx.borrow() {
@@ -483,13 +486,16 @@ pub async fn session_loop(
                     let panes = state.panes.lock().await.clone();
                     let system_prompt = build_system_prompt(&app, &role, &cwd, &panes);
 
+                    // Plan 模式未确认时，不传 tools（LLM 只能用文字描述计划）
+                    let active_tools: &[crate::agent::provider::ToolDef] = if plan_confirmed { &tool_defs } else { &[] };
+
                     let result: StreamResult = match chat_with_retry(
                         endpoints,
                         model,
                         &mut wrr,
                         &history,
                         &system_prompt,
-                        &tool_defs,
+                        active_tools,
                         &event_tx,
                         &mut abort_rx,
                     )
@@ -507,10 +513,43 @@ pub async fn session_loop(
                         }
                     };
 
+                    let content_clone = result.content.clone();
                     history.push(Message::assistant_with_tool_calls(
                         result.content,
                         result.tool_calls.clone(),
                     ));
+
+                    // Plan 模式：LLM 输出了文字计划（无 tool_calls），推送 ProposedPlan 等待确认
+                    if !plan_confirmed && result.tool_calls.is_empty() {
+                        emit(&event_tx, AgentEvent::ProposedPlan {
+                            steps: Vec::new(),
+                            summary: content_clone,
+                        });
+
+                        let (approve_tx, approve_rx) = oneshot::channel();
+                        *state.approve_tx.lock().await = Some(approve_tx);
+
+                        let approved = tokio::select! {
+                            r = approve_rx => r.unwrap_or(false),
+                            _ = tokio::time::sleep(std::time::Duration::from_secs(600)) => false,
+                            _ = abort_rx.changed() => false,
+                        };
+
+                        if *abort_rx.borrow() {
+                            emit(&event_tx, AgentEvent::Aborted);
+                            break;
+                        }
+
+                        if approved {
+                            plan_confirmed = true;
+                            // 继续循环，下一轮传 tools，LLM 开始执行
+                            continue;
+                        } else {
+                            // 用户拒绝计划，告知 LLM
+                            history.push(Message::user("用户拒绝了该计划，请重新分析或调整方案。"));
+                            continue;
+                        }
+                    }
 
                     if result.tool_calls.is_empty() {
                         break;

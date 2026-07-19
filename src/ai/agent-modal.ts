@@ -557,6 +557,9 @@ export class AgentModal {
       case "readTerminalRequest":
         void this.onReadTerminalRequest(event.requestId, event.paneId, event.lines);
         break;
+      case "proposedPlan":
+        this.onProposedPlan(event.summary);
+        break;
       case "retrying":
         this.setStatus(`重试中 (${event.attempt}/${event.maxAttempts}): ${event.reason}`);
         break;
@@ -720,7 +723,44 @@ export class AgentModal {
     this.scrollToBottom();
   }
 
-  // ---------- Ask 确认 / AskUser 提问 / read_terminal ----------
+  // ---------- Plan 确认 / Ask 确认 / AskUser 提问 / read_terminal ----------
+
+  private onProposedPlan(summary: string): void {
+    if (this.currentRenderer) {
+      this.currentRenderer.done();
+      this.currentRenderer = null;
+    }
+
+    const el = document.createElement("div");
+    el.className = "hai-plan-approval";
+    el.innerHTML = `
+      <div class="hai-plan-header">📋 执行计划</div>
+      <div class="hai-plan-summary"></div>
+      <div class="hai-plan-actions">
+        <button class="btn hai-plan-approve">确认执行 ✔</button>
+        <button class="btn hai-plan-reject">拒绝 ✘</button>
+      </div>`;
+
+    // summary 是 Markdown 文本，用 marked 渲染
+    const summaryEl = el.querySelector(".hai-plan-summary")!;
+    if (window.__marked_parse) {
+      summaryEl.innerHTML = window.__marked_parse(summary);
+    } else {
+      summaryEl.textContent = summary;
+    }
+
+    el.querySelector(".hai-plan-approve")!.addEventListener("click", () => {
+      el.remove();
+      api.agentApproveTool(this.tabId, true).catch(() => {});
+    });
+    el.querySelector(".hai-plan-reject")!.addEventListener("click", () => {
+      el.remove();
+      api.agentApproveTool(this.tabId, false).catch(() => {});
+    });
+
+    this.messagesEl.appendChild(el);
+    this.scrollToBottom();
+  }
 
   private onAskApproval(tool: string, args: any, reason: string): void {
     if (this.currentRenderer) {
