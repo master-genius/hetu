@@ -787,6 +787,9 @@ pub fn run() {
             agent::agent_terminal_data,
             agent::agent_update_panes,
             agent::agent_clear_history,
+            agent::agent_list_history,
+            agent::agent_delete_history,
+            agent::agent_migrate_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

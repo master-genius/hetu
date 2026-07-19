@@ -265,3 +265,33 @@ pub async fn agent_clear_history(
     }
     Ok(())
 }
+
+/// 列出全局历史索引（可选按 cwd 模糊匹配）
+#[tauri::command]
+pub async fn agent_list_history(
+    app: tauri::AppHandle,
+    pattern: Option<String>,
+) -> Result<Vec<protocol::HistoryIndex>> {
+    Ok(session::list_history(&app, pattern.as_deref()))
+}
+
+/// 删除指定目录的历史（session 文件 + 索引条目）
+#[tauri::command]
+pub async fn agent_delete_history(
+    app: tauri::AppHandle,
+    cwd: String,
+) -> Result<()> {
+    session::delete_history(&app, &cwd);
+    Ok(())
+}
+
+/// 迁移历史到新目录
+#[tauri::command]
+pub async fn agent_migrate_history(
+    app: tauri::AppHandle,
+    old_cwd: String,
+    new_cwd: String,
+) -> Result<()> {
+    session::migrate_history(&app, &old_cwd, &new_cwd);
+    Ok(())
+}

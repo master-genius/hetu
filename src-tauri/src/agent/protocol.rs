@@ -131,6 +131,18 @@ pub struct PaneInfo {
     pub os: String,
 }
 
+/// 全局历史索引条目（app_data_dir/ai-sessions.json）
+#[derive(Serialize, Clone, Deserialize)]
+pub struct HistoryIndex {
+    pub cwd: String,
+    pub last_active: String,
+    pub preview: String,
+    pub role: String,
+    pub model: String,
+    /// 目录是否存在（前端用于显示"迁移"按钮）
+    pub dir_exists: bool,
+}
+
 /// 向 Channel 推送事件，忽略发送错误（前端可能已关闭）。
 pub fn emit(tx: &Channel<AgentEvent>, event: AgentEvent) {
     let _ = tx.send(event);

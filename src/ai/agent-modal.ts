@@ -893,7 +893,7 @@ export class AgentModal {
       if (msg.role === "user") {
         this.appendUserMessage(msg.content);
       } else if (msg.role === "assistant") {
-        const { el, renderer } = this.appendAssistantBubble();
+        const { renderer } = this.appendAssistantBubble();
         renderer.push(msg.content);
         renderer.done();
       }

@@ -15,7 +15,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::agent::config::{load_config, AiConfig, Endpoint};
 use crate::agent::openai::OpenAiProvider;
-use crate::agent::protocol::{emit, AgentEvent, HistoryEntry, PaneInfo, ToolResult, UserChoice};
+use crate::agent::protocol::{emit, AgentEvent, HistoryEntry, HistoryIndex, PaneInfo, ToolResult, UserChoice};
 use crate::agent::provider::{LlmProvider, Message, StreamResult};
 use crate::agent::tools;
 use crate::agent::SessionState;
@@ -290,6 +290,112 @@ fn save_history(cwd: &str, history: &[Message]) {
 fn clear_history_file(cwd: &str) {
     let path = session_file_path(cwd);
     let _ = std::fs::remove_file(&path);
+}
+
+// ---------- 全局历史索引 ----------
+
+fn index_file_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    use tauri::Manager;
+    app.path().app_data_dir().ok().map(|d| d.join("ai-sessions.json"))
+}
+
+fn load_index(app: &AppHandle) -> Vec<HistoryIndex> {
+    let path = match index_file_path(app) {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+    let data = match std::fs::read_to_string(&path) {
+        Ok(d) => d,
+        Err(_) => return Vec::new(),
+    };
+    serde_json::from_str(&data).unwrap_or_default()
+}
+
+fn save_index(app: &AppHandle, index: &[HistoryIndex]) {
+    let path = match index_file_path(app) {
+        Some(p) => p,
+        None => return,
+    };
+    if let Ok(data) = serde_json::to_string_pretty(index) {
+        let _ = std::fs::write(&path, data);
+    }
+}
+
+/// 更新索引条目（同 cwd 覆盖）。在 save_history 后调用。
+pub fn update_index_entry(app: &AppHandle, cwd: &str, preview: &str, role: &str, model: &str) {
+    if cwd.is_empty() {
+        return;
+    }
+    let mut index = load_index(app);
+    index.retain(|e| e.cwd != cwd);
+    index.push(HistoryIndex {
+        cwd: cwd.to_string(),
+        last_active: now_iso(),
+        preview: preview.chars().take(100).collect(),
+        role: role.to_string(),
+        model: model.to_string(),
+        dir_exists: true,
+    });
+    save_index(app, &index);
+}
+
+/// 列出全局历史索引，按 last_active 降序。pattern 模糊匹配 cwd。
+pub fn list_history(app: &AppHandle, pattern: Option<&str>) -> Vec<HistoryIndex> {
+    let mut index = load_index(app);
+    if let Some(p) = pattern {
+        if !p.is_empty() {
+            index.retain(|e| e.cwd.contains(p));
+        }
+    }
+    // 标记目录是否存在
+    for entry in &mut index {
+        entry.dir_exists = std::path::Path::new(&entry.cwd).exists();
+    }
+    index.sort_by(|a, b| b.last_active.cmp(&a.last_active));
+    index
+}
+
+/// 删除指定目录的历史（session 文件 + 索引条目）
+pub fn delete_history(app: &AppHandle, cwd: &str) {
+    let session_path = session_file_path(cwd);
+    let _ = std::fs::remove_file(&session_path);
+    let mut index = load_index(app);
+    index.retain(|e| e.cwd != cwd);
+    save_index(app, &index);
+}
+
+/// 迁移历史到新目录（复制 session 文件 + 更新索引）
+pub fn migrate_history(app: &AppHandle, old_cwd: &str, new_cwd: &str) {
+    let old_path = session_file_path(old_cwd);
+    let new_path = session_file_path(new_cwd);
+    if let Some(parent) = new_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::copy(&old_path, &new_path);
+    let mut index = load_index(app);
+    if let Some(entry) = index.iter_mut().find(|e| e.cwd == old_cwd) {
+        entry.cwd = new_cwd.to_string();
+        entry.dir_exists = std::path::Path::new(new_cwd).exists();
+    }
+    save_index(app, &index);
+}
+
+fn now_iso() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // 简单 ISO 格式（无需 chrono 依赖）
+    let days = secs / 86400;
+    let time = secs % 86400;
+    let h = time / 3600;
+    let m = (time % 3600) / 60;
+    let s = time % 60;
+    // 从 1970-01-01 计算日期（足够用，不处理闰年细节）
+    let year = 1970 + (days / 365);
+    let day_of_year = days % 365;
+    format!("{year}-{day_of_year:03}T{h:02}:{m:02}:{s:02}Z")
 }
 
 // ---------- 系统提示词 ----------
@@ -751,8 +857,13 @@ pub async fn session_loop(
                 }
 
                 emit(&event_tx, AgentEvent::Done);
-                // 持久化历史
+                // 持久化历史 + 更新全局索引
                 save_history(&cwd, &history);
+                let preview = history.iter()
+                    .find(|m| m.role == "user" && !m.content.is_empty())
+                    .map(|m| m.content.clone())
+                    .unwrap_or_default();
+                update_index_entry(&app, &cwd, &preview, &role, model);
             }
             Some(SessionCmd::Abort) => {
                 let _ = state.abort_tx.send(true);
