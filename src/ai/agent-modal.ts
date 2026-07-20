@@ -516,9 +516,7 @@ export class AgentModal {
 
     // 删除模型
     card.querySelector(".hai-model-delete-btn")!.addEventListener("click", () => {
-      if (confirm(`确定删除模型 ${model}？`)) {
-        this.deleteModel(provider, model);
-      }
+      this.showConfirm(`确定删除模型 ${model}？`, () => this.deleteModel(provider, model));
     });
 
     // 渲染 endpoints
