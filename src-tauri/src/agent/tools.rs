@@ -268,7 +268,7 @@ pub async fn execute(
                 None => cwd.to_string(),
             };
             match conn {
-                Some(c) => crate::agent::tools_ssh::search(c, pattern, &path).await,
+                Some(c) => crate::agent::tools_ssh::search(c, pattern, &path, tx).await,
                 None => search(pattern, &path).await,
             }
         }
@@ -300,7 +300,7 @@ pub async fn execute(
             match conn {
                 Some(c) => {
                     let mkdir_cmd = format!("mkdir -p {}", sh_quote(&dir));
-                    crate::agent::tools_ssh::run_command(c, &mkdir_cmd, Some(&cwd), command_timeout).await;
+                    crate::agent::tools_ssh::run_command(c, &mkdir_cmd, Some(&cwd), command_timeout, tx).await;
                     crate::agent::tools_ssh::write_file(c, &memory_path, content).await
                 }
                 None => {

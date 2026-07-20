@@ -172,7 +172,7 @@ pub async fn search(conn: &Arc<Connection>, pattern: &str, path: &str, tx: &Chan
 
     let cmd = format!("grep -rn --color=never -- {} {}", sh_quote(pattern), sh_quote(path));
     // search 默认用 command_timeout（通过调用方传入），这里用合理默认值 60s
-    match exec_channel(conn, &cmd, 60).await {
+    match exec_channel(conn, &cmd, 60, tx).await {
         Ok((stdout, stderr, code)) => {
             // grep exit code 1 = no matches (not error), 2 = error
             if code == 2 && !stderr.is_empty() {
