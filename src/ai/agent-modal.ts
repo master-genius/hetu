@@ -655,10 +655,10 @@ export class AgentModal {
       if (!config.providers[p]) {
         config.providers[p] = { default_model: "", models: {} };
       }
-      // 如果是当前选中的 provider，更新 default_model
-      if (p === provider) {
-        config.providers[p].default_model = m;
-      } else if (this.config?.providers[p]?.default_model === m) {
+      // 检查 DOM 中该卡片是否有默认徽章
+      const isDefault = card.querySelector(".hai-default-badge") !== null;
+      if (isDefault) {
+        config.default_provider = p;
         config.providers[p].default_model = m;
       }
 
