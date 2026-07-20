@@ -193,6 +193,9 @@ export class AgentModal {
         <div class="hai-body">
           <div class="hai-view hai-view-chat active">
             <div class="hai-messages"></div>
+            <div class="hai-model-bar">
+              <select class="hai-model-select" title="切换模型"></select>
+            </div>
             <div class="hai-input-container">
               <textarea class="hai-input" rows="1" placeholder="Send a message…"></textarea>
               <button class="hai-send-btn" title="发送 (Enter)">${ICONS.send}</button>
@@ -312,6 +315,17 @@ export class AgentModal {
       this.inputEl.style.height = "auto";
       this.inputEl.style.height = Math.min(this.inputEl.scrollHeight, 200) + "px";
     });
+
+    // 模型选择器：切换后直接保存配置
+    const modelSelect = this.overlay.querySelector(".hai-model-select") as HTMLSelectElement;
+    modelSelect.addEventListener("change", () => {
+      const value = modelSelect.value;
+      const slashIdx = value.indexOf("/");
+      if (slashIdx < 0) return;
+      const provider = value.slice(0, slashIdx);
+      const model = value.slice(slashIdx + 1);
+      void this.switchModel(provider, model);
+    });
   }
 
   // ---------- 视图切换 ----------
@@ -325,6 +339,51 @@ export class AgentModal {
     }
     if (view === "chat") {
       this.inputEl.focus();
+    }
+  }
+
+  // ---------- 模型选择器 ----------
+
+  private async loadModelSelector(): Promise<void> {
+    const select = this.overlay.querySelector(".hai-model-select") as HTMLSelectElement;
+    try {
+      const config = await api.agentLoadConfig() as AiConfig;
+      select.innerHTML = "";
+      let hasSelection = false;
+      for (const [providerName, providerCfg] of Object.entries(config.providers || {})) {
+        for (const [modelKey, group] of Object.entries(providerCfg.models || {})) {
+          const opt = document.createElement("option");
+          opt.value = `${providerName}/${modelKey}`;
+          opt.textContent = group.show_name || modelKey;
+          if (providerName === config.default_provider && modelKey === providerCfg.default_model) {
+            opt.selected = true;
+            hasSelection = true;
+          }
+          select.appendChild(opt);
+        }
+      }
+      if (!hasSelection && select.options.length > 0) {
+        select.options[0].selected = true;
+      }
+    } catch {
+      // 配置未加载，选择器保持空
+    }
+  }
+
+  private async switchModel(provider: string, model: string): Promise<void> {
+    try {
+      const config = await api.agentLoadConfig() as AiConfig;
+      config.default_provider = provider;
+      if (config.providers[provider]) {
+        config.providers[provider].default_model = model;
+      }
+      await api.agentSaveConfig(config);
+      this.setStatus(`已切换到 ${config.providers[provider]?.models[model]?.show_name || model}`);
+      setTimeout(() => {
+        if (this.statusEl.textContent?.startsWith("已切换到")) this.setStatus("就绪");
+      }, 2000);
+    } catch (e: any) {
+      toast(`切换模型失败: ${e?.message || e}`);
     }
   }
 
@@ -782,10 +841,19 @@ export class AgentModal {
         <button class="btn hai-hist-delete">删除</button>
       </div>`;
 
-    el.querySelector(".hai-hist-continue")!.addEventListener("click", () => {
+    el.querySelector(".hai-hist-continue")!.addEventListener("click", async () => {
       this.historyDrawer.classList.add("hidden");
-      if (entry.cwd !== this.currentCwd) {
-        toast(`历史属于 ${entry.cwd}，请切换到该目录后运行 hai`);
+      this.switchView("chat");
+      this.setStatus("恢复历史中…");
+      try {
+        await api.agentLoadHistory(this.tabId, entry.cwd);
+        this.setStatus("已恢复历史对话");
+        setTimeout(() => {
+          if (this.statusEl.textContent === "已恢复历史对话") this.setStatus("就绪");
+        }, 2000);
+      } catch (e: any) {
+        this.setStatus("恢复失败");
+        toast(`恢复历史失败: ${e?.message || e}`);
       }
     });
 
@@ -849,6 +917,14 @@ export class AgentModal {
     document.body.appendChild(this.overlay);
     this.overlay.style.display = "flex";
     window.addEventListener("keydown", this.onKey, true);
+
+    // 确保渲染依赖已加载（避免首条消息渲染为纯文本）
+    await ensureMarked();
+    await ensureHljs();
+
+    // 加载模型选择器（非阻塞，不阻止面板显示）
+    void this.loadModelSelector();
+
     this.inputEl.focus();
 
     if (!this.spawned) {
@@ -1266,6 +1342,12 @@ export class AgentModal {
   // ---------- 历史恢复 / 清除 ----------
 
   private onHistoryRestored(messages: HistoryEntry[]): void {
+    // 清空旧消息（用于 LoadHistory 场景）
+    this.messagesEl.innerHTML = "";
+    this.turns = [];
+    this.currentRenderer = null;
+    this.currentToolEl = null;
+
     for (const msg of messages) {
       if (msg.role === "user") {
         this.appendUserMessage(msg.content);

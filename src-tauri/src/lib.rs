@@ -790,6 +790,7 @@ pub fn run() {
             agent::agent_list_history,
             agent::agent_delete_history,
             agent::agent_migrate_history,
+            agent::agent_load_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -6,8 +6,9 @@ use std::sync::Arc;
 
 use serde_json::{json, Value};
 use tokio::process::Command;
+use tauri::ipc::Channel;
 
-use crate::agent::protocol::ToolResult;
+use crate::agent::protocol::{emit, AgentEvent, ToolResult};
 use crate::agent::provider::{ToolDef, ToolFunction};
 use crate::ssh::conn::Connection;
 
@@ -204,6 +205,7 @@ pub async fn execute(
     cwd: &str,
     conn: Option<&Arc<Connection>>,
     command_timeout: u32,
+    tx: &Channel<AgentEvent>,
 ) -> ToolResult {
     match name {
         "read_file" => {
@@ -252,8 +254,8 @@ pub async fn execute(
                 .map(|p| resolve_path(p, cwd))
                 .unwrap_or_else(|| cwd.to_string());
             match conn {
-                Some(c) => crate::agent::tools_ssh::run_command(c, command, Some(&work_dir), command_timeout).await,
-                None => run_command(command, &work_dir, command_timeout).await,
+                Some(c) => crate::agent::tools_ssh::run_command(c, command, Some(&work_dir), command_timeout, tx).await,
+                None => run_command(command, &work_dir, command_timeout, tx).await,
             }
         }
         "search" => {
@@ -387,38 +389,82 @@ async fn list_dir(path: &str) -> ToolResult {
     success(output, truncated)
 }
 
-async fn run_command(command: &str, work_dir: &str, timeout_secs: u32) -> ToolResult {
-    let timeout_dur = std::time::Duration::from_secs(timeout_secs as u64);
+async fn run_command(command: &str, work_dir: &str, timeout_secs: u32, tx: &Channel<AgentEvent>) -> ToolResult {
+    use tokio::io::AsyncBufReadExt;
 
-    let output = match tokio::time::timeout(
-        timeout_dur,
-        Command::new("sh")
-            .arg("-c")
-            .arg(command)
-            .current_dir(work_dir)
-            .output(),
-    )
-    .await
+    let mut child = match Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .current_dir(work_dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
     {
-        Ok(Ok(out)) => out,
-        Ok(Err(e)) => return err(format!("执行命令失败: {e}")),
-        Err(_) => return err(format!("命令执行超时（{timeout_secs}s），可能是不退出命令（如 tail -f）")),
+        Ok(c) => c,
+        Err(e) => return err(format!("执行命令失败: {e}")),
     };
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let code = output.status.code().unwrap_or(-1);
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let mut stdout_reader = tokio::io::BufReader::new(stdout).lines();
+    let mut stderr_reader = tokio::io::BufReader::new(stderr).lines();
+
+    let mut stdout_buf = String::new();
+    let mut stderr_buf = String::new();
+    let mut stdout_done = false;
+    let mut stderr_done = false;
+
+    let timeout_dur = std::time::Duration::from_secs(timeout_secs as u64);
+
+    let read_result = tokio::time::timeout(timeout_dur, async {
+        while !stdout_done || !stderr_done {
+            tokio::select! {
+                line = stdout_reader.next_line(), if !stdout_done => {
+                    match line {
+                        Ok(Some(l)) => {
+                            emit(tx, AgentEvent::ToolOutput { output: format!("{}\n", l) });
+                            stdout_buf.push_str(&l);
+                            stdout_buf.push('\n');
+                        }
+                        _ => stdout_done = true,
+                    }
+                }
+                line = stderr_reader.next_line(), if !stderr_done => {
+                    match line {
+                        Ok(Some(l)) => {
+                            emit(tx, AgentEvent::ToolOutput { output: format!("[stderr] {}\n", l) });
+                            stderr_buf.push_str(&l);
+                            stderr_buf.push('\n');
+                        }
+                        _ => stderr_done = true,
+                    }
+                }
+            }
+        }
+    })
+    .await;
+
+    if read_result.is_err() {
+        let _ = child.start_kill();
+        return err(format!("命令执行超时（{timeout_secs}s），可能是不退出命令（如 tail -f）"));
+    }
+
+    let status = match child.wait().await {
+        Ok(s) => s,
+        Err(e) => return err(format!("等待命令完成失败: {e}")),
+    };
+    let code = status.code().unwrap_or(-1);
 
     let mut combined = String::new();
-    if !stdout.is_empty() {
-        combined.push_str(&stdout);
+    if !stdout_buf.is_empty() {
+        combined.push_str(&stdout_buf);
     }
-    if !stderr.is_empty() {
+    if !stderr_buf.is_empty() {
         if !combined.is_empty() {
             combined.push('\n');
         }
         combined.push_str("[stderr]\n");
-        combined.push_str(&stderr);
+        combined.push_str(&stderr_buf);
     }
     combined.push_str(&format!("\n[exit code: {code}]"));
 

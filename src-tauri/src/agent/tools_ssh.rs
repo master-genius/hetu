@@ -6,8 +6,9 @@
 use std::sync::Arc;
 
 use russh::ChannelMsg;
+use tauri::ipc::Channel;
 
-use crate::agent::protocol::ToolResult;
+use crate::agent::protocol::{emit, AgentEvent, ToolResult};
 use crate::error::{Error, Result};
 use crate::ssh::conn::Connection;
 use crate::ssh::sftp;
@@ -125,7 +126,7 @@ pub async fn list_dir(conn: &Arc<Connection>, path: &str) -> ToolResult {
 }
 
 /// run_command: 通过 SSH exec channel 执行命令（独立于用户 PTY）
-pub async fn run_command(conn: &Arc<Connection>, command: &str, cwd: Option<&str>, timeout_secs: u32) -> ToolResult {
+pub async fn run_command(conn: &Arc<Connection>, command: &str, cwd: Option<&str>, timeout_secs: u32, tx: &Channel<AgentEvent>) -> ToolResult {
     const MAX_LINES: usize = 300;
 
     // 如果有 cwd，用 cd 包裹命令
@@ -134,7 +135,7 @@ pub async fn run_command(conn: &Arc<Connection>, command: &str, cwd: Option<&str
         _ => command.to_string(),
     };
 
-    match exec_channel(conn, &full_cmd, timeout_secs).await {
+    match exec_channel(conn, &full_cmd, timeout_secs, tx).await {
         Ok((stdout, stderr, code)) => {
             let mut combined = String::new();
             if !stdout.is_empty() {
@@ -166,7 +167,7 @@ pub async fn run_command(conn: &Arc<Connection>, command: &str, cwd: Option<&str
 }
 
 /// search: 通过 SSH exec 执行 grep -rn
-pub async fn search(conn: &Arc<Connection>, pattern: &str, path: &str) -> ToolResult {
+pub async fn search(conn: &Arc<Connection>, pattern: &str, path: &str, tx: &Channel<AgentEvent>) -> ToolResult {
     const MAX_MATCHES: usize = 100;
 
     let cmd = format!("grep -rn --color=never -- {} {}", sh_quote(pattern), sh_quote(path));
@@ -225,7 +226,7 @@ pub async fn file_stat(conn: &Arc<Connection>, path: &str) -> ToolResult {
 
 /// 在连接上执行命令，返回 (stdout, stderr, exit_code)
 /// timeout_secs 控制命令执行的最大时间，超时后强制终止。
-async fn exec_channel(conn: &Arc<Connection>, cmd: &str, timeout_secs: u32) -> Result<(String, String, i32)> {
+async fn exec_channel(conn: &Arc<Connection>, cmd: &str, timeout_secs: u32, tx: &Channel<AgentEvent>) -> Result<(String, String, i32)> {
     let timeout_dur = std::time::Duration::from_secs(timeout_secs as u64);
 
     let mut channel = {
@@ -239,12 +240,19 @@ async fn exec_channel(conn: &Arc<Connection>, cmd: &str, timeout_secs: u32) -> R
     let mut stderr = Vec::new();
     let mut code = -1i32;
 
-    // 用 timeout 包裹 channel.wait() 循环，超时则返回错误
     let wait_result = tokio::time::timeout(timeout_dur, async {
         while let Some(msg) = channel.wait().await {
             match msg {
-                ChannelMsg::Data { data } => stdout.extend_from_slice(&data),
-                ChannelMsg::ExtendedData { data, .. } => stderr.extend_from_slice(&data),
+                ChannelMsg::Data { ref data } => {
+                    let text = String::from_utf8_lossy(data);
+                    emit(tx, AgentEvent::ToolOutput { output: text.into_owned() });
+                    stdout.extend_from_slice(data);
+                }
+                ChannelMsg::ExtendedData { ref data, .. } => {
+                    let text = String::from_utf8_lossy(data);
+                    emit(tx, AgentEvent::ToolOutput { output: format!("[stderr] {}", text) });
+                    stderr.extend_from_slice(data);
+                }
                 ChannelMsg::ExitStatus { exit_status } => code = exit_status as i32,
                 _ => {}
             }

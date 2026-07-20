@@ -301,3 +301,20 @@ pub async fn agent_migrate_history(
     session::migrate_history(&app, &old_cwd, &new_cwd);
     Ok(())
 }
+
+/// 加载指定 cwd 的历史到当前 session（历史恢复/继续对话）
+#[tauri::command]
+pub async fn agent_load_history(
+    state: tauri::State<'_, AgentManager>,
+    tab_id: String,
+    cwd: String,
+) -> Result<()> {
+    let sessions = state.sessions.lock().await;
+    if let Some(handle) = sessions.get(&tab_id) {
+        handle
+            .tx
+            .send(session::SessionCmd::LoadHistory(cwd))
+            .map_err(|_| crate::error::Error::msg("Agent session 已关闭"))?;
+    }
+    Ok(())
+}
