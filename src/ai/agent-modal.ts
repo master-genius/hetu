@@ -1,11 +1,12 @@
-/** AgentModal — Hai Agent 前端面板。
+/**
+ * AgentModal — HetuShell 内置 AI Agent 的前端 UI。
+ *
+ * 设计参考 AI Studio 的融合式输入容器 + 侧边抽屉模式。
  *
  * Modal 生命周期：
  * - hai 命令 → OSC 1733 → show()：若已有 session 则恢复 hidden Modal，否则新建。
  * - ESC → 中止当前对话；Alt+H → 隐藏面板（session 保留）。
  * - Tab 关闭 → destroy()，invoke agent_destroy。
- *
- * 视图切换：[Chat] / [设置] 标签，切换时会话保持运行。
  */
 
 import { Channel } from "@tauri-apps/api/core";
@@ -58,6 +59,23 @@ async function ensureHljs(): Promise<void> {
   (window as any).__hljs = hljs;
   hljsReady = true;
 }
+
+// ---------- SVG 图标 ----------
+
+const ICONS = {
+  send: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 19V5M12 5l-6 6M12 5l6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  abort: `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`,
+  close: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+  settings: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 005 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 005 9.4a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>`,
+  history: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 4v4h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  glass: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M3 9h18M9 3v18" stroke="currentColor" stroke-width="1.5"/></svg>`,
+  theme: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/><path d="M12 3a9 9 0 000 18z" fill="currentColor"/></svg>`,
+  clear: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  plus: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+  trash: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  chevron: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  check: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+};
 
 // ---------- 类型 ----------
 
@@ -124,7 +142,9 @@ export class AgentModal {
   private glassBtn: HTMLElement;
   private themeBtn: HTMLElement;
   private clearBtn: HTMLElement;
-  private historyView: HTMLElement;
+  private settingsBtn: HTMLElement;
+  private historyBtn: HTMLElement;
+  private historyDrawer: HTMLElement;
 
   private tabId: string;
   private role: string;
@@ -132,6 +152,10 @@ export class AgentModal {
   private glassMode = false;
   private themeMode: "auto" | "light" | "dark" = "auto";
   private currentCwd = "";
+
+  /** 设置面板缓存的配置 */
+  private config: AiConfig | null = null;
+  private configLoaded = false;
 
   /** 外部设置的终端读取回调（main.ts 注入，用于 read_terminal 工具） */
   onReadTerminal: ((paneId: string, lines: number) => Promise<string>) | null = null;
@@ -141,7 +165,6 @@ export class AgentModal {
   private processing = false;
   private currentRenderer: StreamingMarkdown | null = null;
   private turns: ChatTurn[] = [];
-  private configLoaded = false;
 
   private onKey: (e: KeyboardEvent) => void;
 
@@ -155,134 +178,80 @@ export class AgentModal {
     this.overlay.innerHTML = `
       <div class="modal hai-modal">
         <div class="hai-header">
-          <div class="hai-tabs">
-            <button class="hai-tab active" data-view="chat">Chat</button>
-            <button class="hai-tab" data-view="settings">设置</button>
-            <button class="hai-tab" data-view="history">历史</button>
-          </div>
-          <div class="hai-header-tools">
-            <button class="btn hai-btn-glass" title="玻璃模式">🔲</button>
-            <button class="btn hai-btn-theme" title="主题切换">🌓</button>
-            <button class="btn hai-btn-clear" title="清除对话历史">🗑</button>
+          <div class="hai-header-left">
+            <button class="hai-icon-btn hai-btn-history" title="历史对话">${ICONS.history}</button>
             <span class="hai-mode-badge">Auto</span>
-            <button class="btn hai-btn-close" title="隐藏 (Alt+H)">隐藏</button>
+          </div>
+          <div class="hai-header-right">
+            <button class="hai-icon-btn hai-btn-settings" title="设置">${ICONS.settings}</button>
+            <button class="hai-icon-btn hai-btn-glass" title="玻璃模式">${ICONS.glass}</button>
+            <button class="hai-icon-btn hai-btn-theme" title="主题切换">${ICONS.theme}</button>
+            <button class="hai-icon-btn hai-btn-clear" title="清除对话历史">${ICONS.clear}</button>
+            <button class="hai-icon-btn hai-btn-close" title="隐藏 (Alt+H)">${ICONS.close}</button>
           </div>
         </div>
-        <div class="hai-view hai-view-chat active">
-          <div class="hai-messages"></div>
-          <div class="hai-input-bar">
-            <textarea class="hai-input" rows="1" placeholder="输入消息… (Enter 发送, Shift+Enter 换行)"></textarea>
-            <button class="btn hai-btn-send" title="发送">发送</button>
-            <button class="btn hai-btn-abort hidden" title="中止 (ESC)">⏸ 中止</button>
+        <div class="hai-body">
+          <div class="hai-view hai-view-chat active">
+            <div class="hai-messages"></div>
+            <div class="hai-input-container">
+              <textarea class="hai-input" rows="1" placeholder="Send a message…"></textarea>
+              <button class="hai-send-btn" title="发送 (Enter)">${ICONS.send}</button>
+              <button class="hai-abort-btn hidden" title="中止 (ESC)">${ICONS.abort}</button>
+            </div>
+            <div class="hai-status-bar">
+              <span class="hai-status">就绪</span>
+            </div>
           </div>
-          <div class="hai-status-bar">
-            <span class="hai-status">就绪</span>
+          <div class="hai-view hai-view-settings">
+            <div class="hai-settings-body">
+              <div class="hai-settings-top">
+                <div class="hai-form-row">
+                  <label>默认 Provider</label>
+                  <select class="hai-cfg-provider">
+                    <option value="openai">openai</option>
+                    <option value="anthropic">anthropic</option>
+                  </select>
+                </div>
+              </div>
+              <div class="hai-model-list"></div>
+              <button class="hai-btn-add-model">${ICONS.plus} 新增模型</button>
+              <div class="hai-settings-section">
+                <h4>执行策略</h4>
+                <div class="hai-form-row">
+                  <label>命令超时(秒)</label>
+                  <input type="number" class="hai-cfg-command-timeout" placeholder="留空=120" min="5" />
+                </div>
+              </div>
+            </div>
+            <div class="hai-settings-actions">
+              <button class="btn hai-btn-save-settings">保存</button>
+              <span class="hai-settings-hint"></span>
+            </div>
           </div>
         </div>
-        <div class="hai-view hai-view-settings">
-          <div class="hai-settings-body">
-            <div class="hai-settings-section">
-              <h4>默认模型</h4>
-              <div class="hai-form-row">
-                <label>Provider</label>
-                <select class="hai-cfg-provider">
-                  <option value="openai">openai</option>
-                  <option value="anthropic">anthropic</option>
-                </select>
-              </div>
-              <div class="hai-form-row">
-                <label>模型分组 ID</label>
-                <input type="text" class="hai-cfg-model" placeholder="deepseek-v3" />
-              </div>
-              <div class="hai-form-row">
-                <label>显示名称</label>
-                <input type="text" class="hai-cfg-showname" placeholder="DeepSeek V3（留空则用分组 ID）" />
-              </div>
-            </div>
-            <div class="hai-settings-section">
-              <h4>API 端点</h4>
-              <div class="hai-form-row">
-                <label>URL</label>
-                <input type="text" class="hai-cfg-url" placeholder="https://api.deepseek.com/v1" />
-              </div>
-              <div class="hai-form-row">
-                <label>API Model ID</label>
-                <input type="text" class="hai-cfg-endpoint-id" placeholder="留空则用分组 ID" />
-              </div>
-              <div class="hai-form-row">
-                <label>API Key</label>
-                <input type="password" class="hai-cfg-key" placeholder="sk-..." />
-              </div>
-            </div>
-            <div class="hai-settings-section">
-              <h4>生成参数</h4>
-              <div class="hai-form-row">
-                <label>Max Tokens</label>
-                <input type="number" class="hai-cfg-max-tokens" value="8192" min="1" />
-              </div>
-              <div class="hai-form-row">
-                <label>Temperature</label>
-                <input type="number" class="hai-cfg-temperature" value="0.7" min="0" max="2" step="0.1" />
-              </div>
-              <div class="hai-form-row">
-                <label>Top P</label>
-                <input type="number" class="hai-cfg-top-p" min="0" max="1" step="0.1" placeholder="留空使用默认" />
-              </div>
-              <div class="hai-form-row">
-                <label>Frequency Penalty</label>
-                <input type="number" class="hai-cfg-freq-penalty" min="-2" max="2" step="0.1" placeholder="留空使用默认" />
-              </div>
-              <div class="hai-form-row">
-                <label>Presence Penalty</label>
-                <input type="number" class="hai-cfg-pres-penalty" min="-2" max="2" step="0.1" placeholder="留空使用默认" />
-              </div>
-              <div class="hai-form-row">
-                <label>Stop（逗号分隔）</label>
-                <input type="text" class="hai-cfg-stop" placeholder="留空使用默认" />
-              </div>
-              <div class="hai-form-row">
-                <label>Seed</label>
-                <input type="number" class="hai-cfg-seed" placeholder="留空使用默认" />
-              </div>
-              <div class="hai-form-row">
-                <label>请求超时(秒)</label>
-                <input type="number" class="hai-cfg-request-timeout" placeholder="留空=120" min="5" />
-              </div>
-              <div class="hai-form-row">
-                <label>流式超时(秒)</label>
-                <input type="number" class="hai-cfg-stream-timeout" placeholder="留空=60" min="5" />
-              </div>
-            </div>
-            <div class="hai-settings-section">
-              <h4>执行策略</h4>
-              <div class="hai-form-row">
-                <label>命令超时(秒)</label>
-                <input type="number" class="hai-cfg-command-timeout" placeholder="留空=120" min="5" />
-              </div>
-            </div>
+        <div class="hai-history-drawer hidden">
+          <div class="hai-history-drawer-header">
+            <span>历史对话</span>
+            <button class="hai-icon-btn hai-history-drawer-close" title="关闭">${ICONS.close}</button>
           </div>
-          <div class="hai-settings-actions">
-            <button class="btn hai-btn-save-settings">保存</button>
-            <span class="hai-settings-hint"></span>
-          </div>
-        </div>
-        <div class="hai-view hai-view-history">
           <div class="hai-history-list"></div>
         </div>
       </div>`;
 
     this.chatView = this.overlay.querySelector(".hai-view-chat")!;
     this.settingsView = this.overlay.querySelector(".hai-view-settings")!;
-    this.historyView = this.overlay.querySelector(".hai-view-history")!;
+    this.historyDrawer = this.overlay.querySelector(".hai-history-drawer")!;
     this.messagesEl = this.overlay.querySelector(".hai-messages")!;
     this.inputEl = this.overlay.querySelector(".hai-input")!;
-    this.sendBtn = this.overlay.querySelector(".hai-btn-send")!;
-    this.abortBtn = this.overlay.querySelector(".hai-btn-abort")!;
+    this.sendBtn = this.overlay.querySelector(".hai-send-btn")!;
+    this.abortBtn = this.overlay.querySelector(".hai-abort-btn")!;
     this.statusEl = this.overlay.querySelector(".hai-status")!;
     this.closeBtn = this.overlay.querySelector(".hai-btn-close")!;
     this.glassBtn = this.overlay.querySelector(".hai-btn-glass")!;
     this.themeBtn = this.overlay.querySelector(".hai-btn-theme")!;
     this.clearBtn = this.overlay.querySelector(".hai-btn-clear")!;
+    this.settingsBtn = this.overlay.querySelector(".hai-btn-settings")!;
+    this.historyBtn = this.overlay.querySelector(".hai-btn-history")!;
 
     // 从 localStorage 恢复偏好
     this.glassMode = localStorage.getItem("hai-glass") === "true";
@@ -313,20 +282,21 @@ export class AgentModal {
         api.agentClearHistory(this.tabId).catch(() => {});
       }
     });
+    this.settingsBtn.addEventListener("click", () => this.switchView("settings"));
+    this.historyBtn.addEventListener("click", () => this.toggleHistoryDrawer());
+    this.overlay.querySelector(".hai-history-drawer-close")!.addEventListener("click", () => this.toggleHistoryDrawer(false));
+
     this.sendBtn.addEventListener("click", () => this.send());
     this.abortBtn.addEventListener("click", () => this.abort());
-
-    // 标签切换
-    this.overlay.querySelectorAll<HTMLElement>(".hai-tab").forEach((tab) => {
-      tab.addEventListener("click", () => {
-        const view = tab.dataset.view;
-        if (view) this.switchView(view as "chat" | "settings" | "history");
-      });
-    });
 
     // 保存设置
     this.overlay.querySelector(".hai-btn-save-settings")!.addEventListener("click", () => {
       void this.saveSettings();
+    });
+
+    // 新增模型
+    this.overlay.querySelector(".hai-btn-add-model")!.addEventListener("click", () => {
+      void this.addModel();
     });
 
     // 输入框：Enter 发送，Shift+Enter 换行
@@ -340,24 +310,18 @@ export class AgentModal {
     // 自动调整 textarea 高度
     this.inputEl.addEventListener("input", () => {
       this.inputEl.style.height = "auto";
-      this.inputEl.style.height = Math.min(this.inputEl.scrollHeight, 150) + "px";
+      this.inputEl.style.height = Math.min(this.inputEl.scrollHeight, 200) + "px";
     });
   }
 
   // ---------- 视图切换 ----------
 
-  private switchView(view: "chat" | "settings" | "history"): void {
+  private switchView(view: "chat" | "settings"): void {
     this.chatView.classList.toggle("active", view === "chat");
     this.settingsView.classList.toggle("active", view === "settings");
-    this.historyView.classList.toggle("active", view === "history");
-    this.overlay.querySelectorAll<HTMLElement>(".hai-tab").forEach((tab) => {
-      tab.classList.toggle("active", tab.dataset.view === view);
-    });
+    this.settingsBtn.classList.toggle("active", view === "settings");
     if (view === "settings" && !this.configLoaded) {
       void this.loadSettings();
-    }
-    if (view === "history") {
-      void this.loadHistoryList();
     }
     if (view === "chat") {
       this.inputEl.focus();
@@ -370,8 +334,9 @@ export class AgentModal {
     const hint = this.overlay.querySelector(".hai-settings-hint") as HTMLElement;
     hint.textContent = "加载中…";
     try {
-      const config = await api.agentLoadConfig() as AiConfig;
-      this.populateSettingsForm(config);
+      this.config = await api.agentLoadConfig() as AiConfig;
+      this.renderModelList();
+      this.populateExecutionFields();
       this.configLoaded = true;
       hint.textContent = "";
     } catch (err: any) {
@@ -379,131 +344,393 @@ export class AgentModal {
     }
   }
 
-  private populateSettingsForm(config: AiConfig): void {
-    const provider = config.default_provider || "openai";
-    const providerCfg = config.providers?.[provider];
-    const model = providerCfg?.default_model || "";
-    const group = providerCfg?.models?.[model];
-    const ep = group?.endpoints?.[0] ?? ({} as EndpointConfig);
-    const opts = ep.options ?? ({} as GenOptions);
+  private populateExecutionFields(): void {
+    const exec = this.config?.execution ?? {};
+    const cmdTimeoutEl = this.overlay.querySelector(".hai-cfg-command-timeout") as HTMLInputElement;
+    cmdTimeoutEl.value = exec.command_timeout != null ? String(exec.command_timeout) : "";
 
-    (this.overlay.querySelector(".hai-cfg-provider") as HTMLSelectElement).value = provider;
-    (this.overlay.querySelector(".hai-cfg-model") as HTMLInputElement).value = model;
-    (this.overlay.querySelector(".hai-cfg-showname") as HTMLInputElement).value = group?.show_name ?? "";
-    (this.overlay.querySelector(".hai-cfg-url") as HTMLInputElement).value = ep.url ?? "";
-    (this.overlay.querySelector(".hai-cfg-endpoint-id") as HTMLInputElement).value = ep.id ?? "";
-    (this.overlay.querySelector(".hai-cfg-key") as HTMLInputElement).value = ep.key ?? "";
-    (this.overlay.querySelector(".hai-cfg-max-tokens") as HTMLInputElement).value =
-      String(opts.max_tokens ?? 8192);
-    (this.overlay.querySelector(".hai-cfg-temperature") as HTMLInputElement).value =
-      String(opts.temperature ?? 0.7);
-    (this.overlay.querySelector(".hai-cfg-top-p") as HTMLInputElement).value =
-      opts.top_p != null ? String(opts.top_p) : "";
-    (this.overlay.querySelector(".hai-cfg-freq-penalty") as HTMLInputElement).value =
-      opts.frequency_penalty != null ? String(opts.frequency_penalty) : "";
-    (this.overlay.querySelector(".hai-cfg-pres-penalty") as HTMLInputElement).value =
-      opts.presence_penalty != null ? String(opts.presence_penalty) : "";
-    (this.overlay.querySelector(".hai-cfg-stop") as HTMLInputElement).value =
-      opts.stop?.join(", ") ?? "";
-    (this.overlay.querySelector(".hai-cfg-seed") as HTMLInputElement).value =
-      opts.seed != null ? String(opts.seed) : "";
-    (this.overlay.querySelector(".hai-cfg-request-timeout") as HTMLInputElement).value =
-      opts.request_timeout != null ? String(opts.request_timeout) : "";
-    (this.overlay.querySelector(".hai-cfg-stream-timeout") as HTMLInputElement).value =
-      opts.stream_chunk_timeout != null ? String(opts.stream_chunk_timeout) : "";
-    const exec = config.execution ?? {};
-    (this.overlay.querySelector(".hai-cfg-command-timeout") as HTMLInputElement).value =
-      exec.command_timeout != null ? String(exec.command_timeout) : "";
+    const providerEl = this.overlay.querySelector(".hai-cfg-provider") as HTMLSelectElement;
+    providerEl.value = this.config?.default_provider || "openai";
   }
 
+  /** 渲染模型卡片列表 */
+  private renderModelList(): void {
+    const listEl = this.overlay.querySelector(".hai-model-list") as HTMLElement;
+    listEl.innerHTML = "";
+
+    if (!this.config?.providers) return;
+
+    for (const [providerName, providerCfg] of Object.entries(this.config.providers)) {
+      for (const [modelKey, group] of Object.entries(providerCfg.models)) {
+        const isDefault = providerName === this.config!.default_provider &&
+                          modelKey === providerCfg.default_model;
+        listEl.appendChild(
+          this.createModelCard(providerName, modelKey, group, isDefault),
+        );
+      }
+    }
+  }
+
+  /** 创建模型卡片 */
+  private createModelCard(
+    provider: string,
+    model: string,
+    group: ModelGroup,
+    isDefault: boolean,
+  ): HTMLElement {
+    const card = document.createElement("div");
+    card.className = "hai-model-card";
+    card.dataset.provider = provider;
+    card.dataset.model = model;
+
+    const showName = group.show_name || "";
+    const epCount = group.endpoints.length;
+
+    card.innerHTML = `
+      <div class="hai-model-card-header">
+        <div class="hai-model-info">
+          <span class="hai-model-key">${model}</span>
+          ${showName ? `<span class="hai-model-sep">·</span><span class="hai-model-name">${showName}</span>` : ""}
+        </div>
+        <div class="hai-model-actions">
+          ${isDefault ? '<span class="hai-default-badge">默认</span>' : `<button class="hai-icon-btn hai-model-set-default" title="设为默认">${ICONS.check}</button>`}
+          <span class="hai-ep-count">${epCount} endpoint${epCount !== 1 ? "s" : ""}</span>
+          <button class="hai-icon-btn hai-model-expand" title="展开/折叠">${ICONS.chevron}</button>
+        </div>
+      </div>
+      <div class="hai-model-card-body hidden">
+        <div class="hai-form-row">
+          <label>显示名称</label>
+          <input type="text" class="hai-cfg-showname" value="${showName}" placeholder="留空则用模型 ID" />
+        </div>
+        <div class="hai-endpoint-list"></div>
+        <button class="hai-btn-add-endpoint">${ICONS.plus} 新增 Endpoint</button>
+        <div class="hai-model-card-footer">
+          ${!isDefault ? `<button class="btn hai-model-set-default-btn">设为默认模型</button>` : ""}
+          <button class="btn hai-model-delete-btn">${ICONS.trash} 删除模型</button>
+        </div>
+      </div>`;
+
+    // 展开/折叠
+    const expandBtn = card.querySelector(".hai-model-expand")!;
+    expandBtn.addEventListener("click", () => {
+      card.querySelector(".hai-model-card-body")!.classList.toggle("hidden");
+      expandBtn.classList.toggle("expanded");
+    });
+
+    // 设为默认
+    const setDefaultBtn = card.querySelector(".hai-model-set-default, .hai-model-set-default-btn");
+    if (setDefaultBtn) {
+      setDefaultBtn.addEventListener("click", () => {
+        this.setDefaultModel(provider, model);
+      });
+    }
+
+    // 删除模型
+    card.querySelector(".hai-model-delete-btn")!.addEventListener("click", () => {
+      if (confirm(`确定删除模型 ${model}？`)) {
+        this.deleteModel(provider, model);
+      }
+    });
+
+    // 渲染 endpoints
+    const epListEl = card.querySelector(".hai-endpoint-list")!;
+    for (let i = 0; i < group.endpoints.length; i++) {
+      epListEl.appendChild(this.createEndpointCard(provider, model, i, group.endpoints[i]));
+    }
+
+    // 新增 endpoint
+    card.querySelector(".hai-btn-add-endpoint")!.addEventListener("click", () => {
+      this.addEndpoint(provider, model);
+    });
+
+    return card;
+  }
+
+  /** 创建 endpoint 编辑卡片 */
+  private createEndpointCard(
+    provider: string,
+    model: string,
+    idx: number,
+    ep: EndpointConfig,
+  ): HTMLElement {
+    const card = document.createElement("div");
+    card.className = "hai-endpoint-card";
+    card.dataset.idx = String(idx);
+
+    const opts = ep.options ?? {};
+
+    card.innerHTML = `
+      <div class="hai-endpoint-card-header">
+        <span class="hai-endpoint-label">Endpoint ${idx + 1}</span>
+        <button class="hai-icon-btn hai-endpoint-expand" title="展开/折叠">${ICONS.chevron}</button>
+      </div>
+      <div class="hai-endpoint-card-body">
+        <div class="hai-form-row">
+          <label>URL</label>
+          <input type="text" class="hai-cfg-url" value="${ep.url ?? ""}" placeholder="https://api.deepseek.com/v1" />
+        </div>
+        <div class="hai-form-row">
+          <label>API Model ID</label>
+          <input type="text" class="hai-cfg-endpoint-id" value="${ep.id ?? ""}" placeholder="留空则用模型 ID" />
+        </div>
+        <div class="hai-form-row">
+          <label>API Key</label>
+          <input type="password" class="hai-cfg-key" value="${ep.key}" placeholder="sk-..." />
+        </div>
+        <div class="hai-form-row">
+          <label>权重</label>
+          <input type="number" class="hai-cfg-weight" value="${ep.weight ?? 1}" min="1" />
+        </div>
+        <details class="hai-advanced-params">
+          <summary>高级参数</summary>
+          <div class="hai-form-row">
+            <label>Max Tokens</label>
+            <input type="number" class="hai-cfg-max-tokens" value="${opts.max_tokens ?? 8192}" min="1" />
+          </div>
+          <div class="hai-form-row">
+            <label>Temperature</label>
+            <input type="number" class="hai-cfg-temperature" value="${opts.temperature ?? 0.7}" min="0" max="2" step="0.1" />
+          </div>
+          <div class="hai-form-row">
+            <label>Top P</label>
+            <input type="number" class="hai-cfg-top-p" value="${opts.top_p ?? ""}" min="0" max="1" step="0.1" placeholder="留空使用默认" />
+          </div>
+          <div class="hai-form-row">
+            <label>Frequency Penalty</label>
+            <input type="number" class="hai-cfg-freq-penalty" value="${opts.frequency_penalty ?? ""}" min="-2" max="2" step="0.1" placeholder="留空使用默认" />
+          </div>
+          <div class="hai-form-row">
+            <label>Presence Penalty</label>
+            <input type="number" class="hai-cfg-pres-penalty" value="${opts.presence_penalty ?? ""}" min="-2" max="2" step="0.1" placeholder="留空使用默认" />
+          </div>
+          <div class="hai-form-row">
+            <label>Stop（逗号分隔）</label>
+            <input type="text" class="hai-cfg-stop" value="${opts.stop?.join(", ") ?? ""}" placeholder="留空使用默认" />
+          </div>
+          <div class="hai-form-row">
+            <label>Seed</label>
+            <input type="number" class="hai-cfg-seed" value="${opts.seed ?? ""}" placeholder="留空使用默认" />
+          </div>
+          <div class="hai-form-row">
+            <label>请求超时(秒)</label>
+            <input type="number" class="hai-cfg-request-timeout" value="${opts.request_timeout ?? ""}" placeholder="留空=120" min="5" />
+          </div>
+          <div class="hai-form-row">
+            <label>流式超时(秒)</label>
+            <input type="number" class="hai-cfg-stream-timeout" value="${opts.stream_chunk_timeout ?? ""}" placeholder="留空=60" min="5" />
+          </div>
+        </details>
+        <div class="hai-endpoint-card-footer">
+          <button class="btn hai-endpoint-delete-btn">${ICONS.trash} 删除 Endpoint</button>
+        </div>
+      </div>`;
+
+    // 展开/折叠
+    card.querySelector(".hai-endpoint-expand")!.addEventListener("click", () => {
+      card.querySelector(".hai-endpoint-card-body")!.classList.toggle("hidden");
+    });
+
+    // 删除
+    card.querySelector(".hai-endpoint-delete-btn")!.addEventListener("click", () => {
+      if (confirm(`确定删除 Endpoint ${idx + 1}？`)) {
+        this.deleteEndpoint(provider, model, idx);
+      }
+    });
+
+    return card;
+  }
+
+  /** 新增模型 */
+  private async addModel(): Promise<void> {
+    const modelKey = prompt("输入模型 ID（如 deepseek-v3）：");
+    if (!modelKey) return;
+
+    const provider = (this.overlay.querySelector(".hai-cfg-provider") as HTMLSelectElement).value;
+
+    if (!this.config) this.config = { providers: {}, default_provider: provider };
+    if (!this.config.providers[provider]) {
+      this.config.providers[provider] = { default_model: "", models: {} };
+    }
+    if (this.config.providers[provider].models[modelKey]) {
+      toast("模型已存在");
+      return;
+    }
+
+    this.config.providers[provider].models[modelKey] = {
+      endpoints: [{ key: "", options: { max_tokens: 8192, temperature: 0.7 } }],
+    };
+
+    if (!this.config.providers[provider].default_model) {
+      this.config.providers[provider].default_model = modelKey;
+    }
+
+    this.renderModelList();
+  }
+
+  /** 新增 endpoint */
+  private addEndpoint(provider: string, model: string): void {
+    if (!this.config) return;
+    const group = this.config.providers?.[provider]?.models?.[model];
+    if (!group) return;
+
+    group.endpoints.push({
+      key: "",
+      options: { max_tokens: 8192, temperature: 0.7 },
+    });
+
+    this.renderModelList();
+    // 重新展开刚操作的卡片
+    const card = this.overlay.querySelector(`.hai-model-card[data-provider="${provider}"][data-model="${model}"]`);
+    if (card) {
+      card.querySelector(".hai-model-card-body")!.classList.remove("hidden");
+    }
+  }
+
+  /** 删除模型 */
+  private deleteModel(provider: string, model: string): void {
+    if (!this.config) return;
+    const providerCfg = this.config.providers?.[provider];
+    if (!providerCfg) return;
+
+    delete providerCfg.models[model];
+    if (providerCfg.default_model === model) {
+      const remaining = Object.keys(providerCfg.models);
+      providerCfg.default_model = remaining[0] ?? "";
+    }
+
+    this.renderModelList();
+  }
+
+  /** 删除 endpoint */
+  private deleteEndpoint(provider: string, model: string, idx: number): void {
+    if (!this.config) return;
+    const group = this.config.providers?.[provider]?.models?.[model];
+    if (!group) return;
+
+    group.endpoints.splice(idx, 1);
+
+    this.renderModelList();
+    // 重新展开卡片
+    const card = this.overlay.querySelector(`.hai-model-card[data-provider="${provider}"][data-model="${model}"]`);
+    if (card) {
+      card.querySelector(".hai-model-card-body")!.classList.remove("hidden");
+    }
+  }
+
+  /** 设为默认模型 */
+  private setDefaultModel(provider: string, model: string): void {
+    if (!this.config) return;
+    this.config.default_provider = provider;
+    if (!this.config.providers[provider]) return;
+    this.config.providers[provider].default_model = model;
+
+    // 更新 provider 下拉
+    (this.overlay.querySelector(".hai-cfg-provider") as HTMLSelectElement).value = provider;
+
+    this.renderModelList();
+  }
+
+  /** 从 DOM 收集配置并保存 */
   private async saveSettings(): Promise<void> {
     const hint = this.overlay.querySelector(".hai-settings-hint") as HTMLElement;
     hint.textContent = "保存中…";
 
     const provider = (this.overlay.querySelector(".hai-cfg-provider") as HTMLSelectElement).value;
-    const model = (this.overlay.querySelector(".hai-cfg-model") as HTMLInputElement).value.trim();
-    const showName = (this.overlay.querySelector(".hai-cfg-showname") as HTMLInputElement).value.trim();
-    const url = (this.overlay.querySelector(".hai-cfg-url") as HTMLInputElement).value.trim();
-    const endpointId = (this.overlay.querySelector(".hai-cfg-endpoint-id") as HTMLInputElement).value.trim();
-    const key = (this.overlay.querySelector(".hai-cfg-key") as HTMLInputElement).value.trim();
-    const maxTokens = parseInt(
-      (this.overlay.querySelector(".hai-cfg-max-tokens") as HTMLInputElement).value || "8192",
-      10,
-    );
-    const temperature = parseFloat(
-      (this.overlay.querySelector(".hai-cfg-temperature") as HTMLInputElement).value || "0.7",
-    );
-    const topPStr = (this.overlay.querySelector(".hai-cfg-top-p") as HTMLInputElement).value.trim();
-    const freqPenaltyStr = (this.overlay.querySelector(".hai-cfg-freq-penalty") as HTMLInputElement).value.trim();
-    const presPenaltyStr = (this.overlay.querySelector(".hai-cfg-pres-penalty") as HTMLInputElement).value.trim();
-    const stopStr = (this.overlay.querySelector(".hai-cfg-stop") as HTMLInputElement).value.trim();
-    const seedStr = (this.overlay.querySelector(".hai-cfg-seed") as HTMLInputElement).value.trim();
 
-    if (!model) {
-      hint.textContent = "模型分组 ID 不能为空";
-      return;
-    }
-    if (!key) {
-      hint.textContent = "API Key 不能为空";
-      return;
-    }
-
-    // 加载现有配置（保留 roles、execution 等），仅修改 providers + default
-    let config: AiConfig;
-    try {
-      config = await api.agentLoadConfig() as AiConfig;
-    } catch {
-      config = { providers: {}, default_provider: "openai" };
-    }
-
-    config.default_provider = provider;
-    if (!config.providers) config.providers = {};
-    if (!config.providers[provider]) config.providers[provider] = { default_model: "", models: {} };
-    config.providers[provider].default_model = model;
-
-    // 构建 options
-    const options: GenOptions = {
-      max_tokens: maxTokens || 8192,
-      temperature: Number.isFinite(temperature) ? temperature : 0.7,
+    // 从 DOM 重建配置
+    const config: AiConfig = {
+      providers: {},
+      default_provider: provider,
+      execution: this.config?.execution ?? {},
+      roles: this.config?.roles ?? {},
     };
-    if (topPStr) options.top_p = parseFloat(topPStr);
-    if (freqPenaltyStr) options.frequency_penalty = parseFloat(freqPenaltyStr);
-    if (presPenaltyStr) options.presence_penalty = parseFloat(presPenaltyStr);
-    if (stopStr) options.stop = stopStr.split(",").map((s) => s.trim()).filter(Boolean);
-    if (seedStr) options.seed = parseInt(seedStr, 10);
 
-    const reqTimeoutStr = (this.overlay.querySelector(".hai-cfg-request-timeout") as HTMLInputElement).value.trim();
-    const streamTimeoutStr = (this.overlay.querySelector(".hai-cfg-stream-timeout") as HTMLInputElement).value.trim();
-    if (reqTimeoutStr) options.request_timeout = parseInt(reqTimeoutStr, 10);
-    if (streamTimeoutStr) options.stream_chunk_timeout = parseInt(streamTimeoutStr, 10);
+    // 遍历所有模型卡片
+    const modelCards = this.overlay.querySelectorAll<HTMLElement>(".hai-model-card");
+    for (const card of modelCards) {
+      const p = card.dataset.provider!;
+      const m = card.dataset.model!;
 
-    // 命令超时写入 execution
+      if (!config.providers[p]) {
+        config.providers[p] = { default_model: "", models: {} };
+      }
+      // 如果是当前选中的 provider，更新 default_model
+      if (p === provider) {
+        config.providers[p].default_model = m;
+      } else if (this.config?.providers[p]?.default_model === m) {
+        config.providers[p].default_model = m;
+      }
+
+      const showName = (card.querySelector(".hai-cfg-showname") as HTMLInputElement).value.trim();
+      const group: ModelGroup = { endpoints: [] };
+      if (showName) group.show_name = showName;
+
+      // 遍历 endpoint 卡片
+      const epCards = card.querySelectorAll<HTMLElement>(".hai-endpoint-card");
+      for (const epCard of epCards) {
+        const url = (epCard.querySelector(".hai-cfg-url") as HTMLInputElement).value.trim();
+        const endpointId = (epCard.querySelector(".hai-cfg-endpoint-id") as HTMLInputElement).value.trim();
+        const key = (epCard.querySelector(".hai-cfg-key") as HTMLInputElement).value.trim();
+        const weight = parseInt((epCard.querySelector(".hai-cfg-weight") as HTMLInputElement).value || "1", 10);
+        const maxTokens = parseInt((epCard.querySelector(".hai-cfg-max-tokens") as HTMLInputElement).value || "8192", 10);
+        const temperature = parseFloat((epCard.querySelector(".hai-cfg-temperature") as HTMLInputElement).value || "0.7");
+        const topPStr = (epCard.querySelector(".hai-cfg-top-p") as HTMLInputElement).value.trim();
+        const freqPenaltyStr = (epCard.querySelector(".hai-cfg-freq-penalty") as HTMLInputElement).value.trim();
+        const presPenaltyStr = (epCard.querySelector(".hai-cfg-pres-penalty") as HTMLInputElement).value.trim();
+        const stopStr = (epCard.querySelector(".hai-cfg-stop") as HTMLInputElement).value.trim();
+        const seedStr = (epCard.querySelector(".hai-cfg-seed") as HTMLInputElement).value.trim();
+        const reqTimeoutStr = (epCard.querySelector(".hai-cfg-request-timeout") as HTMLInputElement).value.trim();
+        const streamTimeoutStr = (epCard.querySelector(".hai-cfg-stream-timeout") as HTMLInputElement).value.trim();
+
+        if (!key) {
+          hint.textContent = `${p}/${m} 的 Endpoint 缺少 API Key`;
+          return;
+        }
+
+        const options: GenOptions = {
+          max_tokens: maxTokens || 8192,
+          temperature: Number.isFinite(temperature) ? temperature : 0.7,
+        };
+        if (topPStr) options.top_p = parseFloat(topPStr);
+        if (freqPenaltyStr) options.frequency_penalty = parseFloat(freqPenaltyStr);
+        if (presPenaltyStr) options.presence_penalty = parseFloat(presPenaltyStr);
+        if (stopStr) options.stop = stopStr.split(",").map((s) => s.trim()).filter(Boolean);
+        if (seedStr) options.seed = parseInt(seedStr, 10);
+        if (reqTimeoutStr) options.request_timeout = parseInt(reqTimeoutStr, 10);
+        if (streamTimeoutStr) options.stream_chunk_timeout = parseInt(streamTimeoutStr, 10);
+
+        const endpoint: EndpointConfig = { key, options };
+        if (url) endpoint.url = url;
+        if (endpointId) endpoint.id = endpointId;
+        if (weight && weight > 0) endpoint.weight = weight;
+
+        group.endpoints.push(endpoint);
+      }
+
+      config.providers[p].models[m] = group;
+    }
+
+    // 从 default_model 反查：如果没有明确的默认，取第一个
+    for (const pc of Object.values(config.providers)) {
+      if (!pc.default_model) {
+        const first = Object.keys(pc.models)[0];
+        if (first) pc.default_model = first;
+      }
+    }
+
+    // 执行策略
     const cmdTimeoutStr = (this.overlay.querySelector(".hai-cfg-command-timeout") as HTMLInputElement).value.trim();
     if (cmdTimeoutStr) {
       if (!config.execution) config.execution = {};
       config.execution.command_timeout = parseInt(cmdTimeoutStr, 10);
     }
 
-    // 构建 endpoint
-    const endpoint: EndpointConfig = {
-      key,
-      options,
-    };
-    if (url) endpoint.url = url;
-    if (endpointId) endpoint.id = endpointId;
-
-    // 构建 model group
-    const group: ModelGroup = {
-      endpoints: [endpoint],
-    };
-    if (showName) group.show_name = showName;
-
-    config.providers[provider].models[model] = group;
+    this.config = config;
 
     try {
       await api.agentSaveConfig(config);
       hint.textContent = "已保存";
-      // 下次对话时新配置生效（session_loop 每次请求前重新加载 config）
       setTimeout(() => {
         if (hint.textContent === "已保存") hint.textContent = "";
       }, 3000);
@@ -512,10 +739,88 @@ export class AgentModal {
     }
   }
 
+  // ---------- 历史抽屉 ----------
+
+  private toggleHistoryDrawer(force?: boolean): void {
+    const show = force ?? this.historyDrawer.classList.contains("hidden");
+    this.historyDrawer.classList.toggle("hidden", !show);
+    if (show) {
+      void this.loadHistoryList();
+    }
+  }
+
+  private async loadHistoryList(): Promise<void> {
+    const listEl = this.historyDrawer.querySelector(".hai-history-list") as HTMLElement;
+    listEl.innerHTML = '<div class="hai-history-loading">加载中…</div>';
+    try {
+      const entries = await api.agentListHistory();
+      if (entries.length === 0) {
+        listEl.innerHTML = '<div class="hai-history-empty">暂无历史对话</div>';
+        return;
+      }
+      listEl.innerHTML = "";
+      for (const entry of entries) {
+        listEl.appendChild(this.createHistoryCard(entry));
+      }
+    } catch (e: any) {
+      listEl.innerHTML = `<div class="hai-history-empty">加载失败: ${e?.message || e}</div>`;
+    }
+  }
+
+  private createHistoryCard(entry: any): HTMLElement {
+    const el = document.createElement("div");
+    el.className = "hai-history-card";
+    const dirExists = entry.dirExists;
+    const isCurrent = entry.cwd === this.currentCwd;
+    el.innerHTML = `
+      <div class="hai-history-cwd">${entry.cwd}${isCurrent ? ' <span class="hai-history-current">当前</span>' : ""}</div>
+      <div class="hai-history-meta">${entry.lastActive} · ${entry.role} · ${entry.model}</div>
+      <div class="hai-history-preview">${entry.preview || "(无预览)"}</div>
+      <div class="hai-history-actions">
+        <button class="btn hai-hist-continue" ${!dirExists ? "disabled" : ""}>继续</button>
+        ${!dirExists ? '<button class="btn hai-hist-migrate">迁移</button>' : ""}
+        <button class="btn hai-hist-delete">删除</button>
+      </div>`;
+
+    el.querySelector(".hai-hist-continue")!.addEventListener("click", () => {
+      this.historyDrawer.classList.add("hidden");
+      if (entry.cwd !== this.currentCwd) {
+        toast(`历史属于 ${entry.cwd}，请切换到该目录后运行 hai`);
+      }
+    });
+
+    el.querySelector(".hai-hist-delete")!.addEventListener("click", async () => {
+      if (confirm(`确定删除 ${entry.cwd} 的历史？`)) {
+        try {
+          await api.agentDeleteHistory(entry.cwd);
+          el.remove();
+        } catch (e: any) {
+          toast(`删除失败: ${e?.message || e}`);
+        }
+      }
+    });
+
+    const migrateBtn = el.querySelector(".hai-hist-migrate");
+    if (migrateBtn) {
+      migrateBtn.addEventListener("click", async () => {
+        const newCwd = prompt(`迁移 ${entry.cwd} 的历史到新目录：`, entry.cwd);
+        if (newCwd && newCwd !== entry.cwd) {
+          try {
+            await api.agentMigrateHistory(entry.cwd, newCwd);
+            toast("迁移成功");
+            void this.loadHistoryList();
+          } catch (e: any) {
+            toast(`迁移失败: ${e?.message || e}`);
+          }
+        }
+      });
+    }
+
+    return el;
+  }
+
   // ---------- 显示 / 隐藏 / 销毁 ----------
 
-  /** 显示 Modal。若首次则创建 Channel + invoke agent_spawn。
-   *  withShell=true 时为浮动覆盖层模式，跟随 pane 定位。 */
   async show(spec: HaiSpec, cwd: string, panes: PaneInfo[], paneRect?: DOMRect): Promise<void> {
     this.role = spec.role || "general";
     this.mode = spec.mode || "auto";
@@ -524,7 +829,7 @@ export class AgentModal {
     const modeBadge = this.overlay.querySelector(".hai-mode-badge")!;
     modeBadge.textContent = this.mode.charAt(0).toUpperCase() + this.mode.slice(1);
 
-    // 浮动覆盖层模式：跟随 pane 定位，紧凑尺寸
+    // 浮动覆盖层模式：跟随 pane 定位
     if (spec.w && paneRect) {
       this.overlay.classList.add("hai-floating");
       const modal = this.overlay.querySelector(".hai-modal") as HTMLElement;
@@ -546,7 +851,6 @@ export class AgentModal {
     window.addEventListener("keydown", this.onKey, true);
     this.inputEl.focus();
 
-    // 首次：创建 Channel + spawn session
     if (!this.spawned) {
       this.spawned = true;
       this.channel = new Channel<AgentEvent>();
@@ -561,14 +865,12 @@ export class AgentModal {
         this.appendError(String(err?.message ?? err));
       }
 
-      // 若有初始消息，在 UI 中展示
       if (spec.msg) {
         this.appendUserMessage(spec.msg);
       }
     }
   }
 
-  /** 隐藏 Modal（Alt+H / 隐藏按钮）。Session 保留，监听移除。 */
   hide(): void {
     this.overlay.style.display = "none";
     window.removeEventListener("keydown", this.onKey, true);
@@ -577,7 +879,6 @@ export class AgentModal {
     }
   }
 
-  /** 销毁 Session（Tab 关闭时调用）。 */
   async destroy(): Promise<void> {
     window.removeEventListener("keydown", this.onKey, true);
     if (this.overlay.parentElement) {
@@ -672,10 +973,8 @@ export class AgentModal {
   }
 
   private onMessage(content: string, done: boolean): void {
-    // 空内容 + done + 无活跃 renderer → LLM 返回空响应，不创建空气泡
     if (!content && done && !this.currentRenderer) return;
 
-    // 首次 chunk → 创建 assistant 消息气泡 + StreamingMarkdown
     if (!this.currentRenderer) {
       const { renderer } = this.appendAssistantBubble();
       this.currentRenderer = renderer;
@@ -688,8 +987,6 @@ export class AgentModal {
     }
 
     if (done) {
-      // Message done 仅表示该条消息的文本流结束，不代表整个轮次结束。
-      // 可能 LLM 还要调工具（ReAct 循环）。processing 由 Done 事件关闭。
       this.currentRenderer?.done();
       this.currentRenderer = null;
       this.setStatus("执行中…");
@@ -726,7 +1023,6 @@ export class AgentModal {
     const el = document.createElement("div");
     el.className = "hai-msg hai-msg-error";
 
-    // 配置相关错误 → 引导用户去设置
     if (message.includes("未配置") || message.includes("未找到模型配置") || message.includes("ai-config.json")) {
       el.innerHTML = "";
       const text = document.createElement("div");
@@ -734,7 +1030,11 @@ export class AgentModal {
       el.appendChild(text);
       const hint = document.createElement("div");
       hint.className = "hai-error-hint";
-      hint.innerHTML = `请点击右上角 <strong>⚙ 设置</strong> 配置模型和 API Key`;
+      const settingsBtn = document.createElement("button");
+      settingsBtn.className = "hai-error-settings-btn";
+      settingsBtn.textContent = "打开设置 →";
+      settingsBtn.addEventListener("click", () => this.switchView("settings"));
+      hint.appendChild(settingsBtn);
       el.appendChild(hint);
     } else {
       el.textContent = `⚠ ${message}`;
@@ -749,7 +1049,6 @@ export class AgentModal {
   private currentToolEl: HTMLElement | null = null;
 
   private onToolStart(tool: string, args: any): void {
-    // 若有活跃的消息 renderer，先冻结（文本阶段结束，工具阶段开始）
     if (this.currentRenderer) {
       this.currentRenderer.done();
       this.currentRenderer = null;
@@ -759,15 +1058,13 @@ export class AgentModal {
     el.className = "hai-tool-call";
     el.innerHTML = `
       <div class="hai-tool-header">
-        <span class="hai-tool-icon">🔧</span>
         <span class="hai-tool-name">${tool}</span>
         <span class="hai-tool-status">执行中…</span>
       </div>
       <div class="hai-tool-args"></div>
       <div class="hai-tool-output hidden"></div>`;
 
-    const argsEl = el.querySelector(".hai-tool-args")!;
-    argsEl.textContent = formatArgs(args);
+    el.querySelector(".hai-tool-args")!.textContent = formatArgs(args);
 
     this.messagesEl.appendChild(el);
     this.currentToolEl = el;
@@ -808,7 +1105,6 @@ export class AgentModal {
       outEl.classList.remove("hidden");
       outEl.textContent = result.message;
     } else {
-      // userRejected
       statusEl.textContent = "⊘";
       statusEl.classList.add("hai-tool-fail");
     }
@@ -830,14 +1126,13 @@ export class AgentModal {
     const el = document.createElement("div");
     el.className = "hai-plan-approval";
     el.innerHTML = `
-      <div class="hai-plan-header">📋 执行计划</div>
+      <div class="hai-plan-header">执行计划</div>
       <div class="hai-plan-summary"></div>
       <div class="hai-plan-actions">
-        <button class="btn hai-plan-approve">确认执行 ✔</button>
-        <button class="btn hai-plan-reject">拒绝 ✘</button>
+        <button class="btn hai-plan-approve">确认执行</button>
+        <button class="btn hai-plan-reject">拒绝</button>
       </div>`;
 
-    // summary 是 Markdown 文本，用 marked 渲染
     const summaryEl = el.querySelector(".hai-plan-summary")!;
     const w = window as any;
     if (w.__marked_parse) {
@@ -868,16 +1163,17 @@ export class AgentModal {
     const el = document.createElement("div");
     el.className = "hai-ask-approval";
     el.innerHTML = `
-      <div class="hai-ask-header">⚠ 工具调用确认</div>
+      <div class="hai-ask-header">工具调用确认</div>
       <div class="hai-ask-tool">${tool}</div>
       <div class="hai-ask-args"></div>
-      <div class="hai-ask-reason">${reason}</div>
+      <div class="hai-ask-reason"></div>
       <div class="hai-ask-actions">
-        <button class="btn hai-ask-approve">批准 ✔</button>
-        <button class="btn hai-ask-reject">拒绝 ✘</button>
+        <button class="btn hai-ask-approve">批准</button>
+        <button class="btn hai-ask-reject">拒绝</button>
       </div>`;
 
     el.querySelector(".hai-ask-args")!.textContent = formatArgs(args);
+    el.querySelector(".hai-ask-reason")!.textContent = reason;
 
     el.querySelector(".hai-ask-approve")!.addEventListener("click", () => {
       el.remove();
@@ -901,7 +1197,7 @@ export class AgentModal {
     const el = document.createElement("div");
     el.className = "hai-user-question";
     el.innerHTML = `
-      <div class="hai-uq-header">❓ ${question}</div>
+      <div class="hai-uq-header">${question}</div>
       <div class="hai-uq-choices"></div>
       <div class="hai-uq-free">
         <input type="text" class="hai-uq-input" placeholder="自由输入…" />
@@ -920,7 +1216,6 @@ export class AgentModal {
       choicesEl.appendChild(btn);
     }
 
-    // 自由输入
     const input = el.querySelector(".hai-uq-input") as HTMLInputElement;
     const sendFree = () => {
       const val = input.value.trim();
@@ -968,81 +1263,7 @@ export class AgentModal {
     });
   }
 
-  // ---------- 历史恢复 / 清除 / 浏览 ----------
-
-  /** 加载全局历史索引列表 */
-  private async loadHistoryList(): Promise<void> {
-    const listEl = this.historyView.querySelector(".hai-history-list") as HTMLElement;
-    listEl.innerHTML = '<div class="hai-history-loading">加载中…</div>';
-    try {
-      const entries = await api.agentListHistory();
-      if (entries.length === 0) {
-        listEl.innerHTML = '<div class="hai-history-empty">暂无历史对话</div>';
-        return;
-      }
-      listEl.innerHTML = "";
-      for (const entry of entries) {
-        listEl.appendChild(this.createHistoryCard(entry));
-      }
-    } catch (e: any) {
-      listEl.innerHTML = `<div class="hai-history-empty">加载失败: ${e?.message || e}</div>`;
-    }
-  }
-
-  /** 创建历史卡片 */
-  private createHistoryCard(entry: any): HTMLElement {
-    const el = document.createElement("div");
-    el.className = "hai-history-card";
-    const dirExists = entry.dirExists;
-    el.innerHTML = `
-      <div class="hai-history-cwd">${entry.cwd}</div>
-      <div class="hai-history-meta">${entry.lastActive} · ${entry.role} · ${entry.model}</div>
-      <div class="hai-history-preview">${entry.preview || "(无预览)"}</div>
-      <div class="hai-history-actions">
-        <button class="btn hai-hist-continue">继续</button>
-        ${dirExists ? "" : '<button class="btn hai-hist-migrate">迁移</button>'}
-        <button class="btn hai-hist-delete">删除</button>
-      </div>`;
-
-    el.querySelector(".hai-hist-continue")!.addEventListener("click", () => {
-      this.switchView("chat");
-      this.setStatus(`恢复 ${entry.cwd} 的历史…`);
-      // 通过后端加载该目录的历史（如果当前 cwd 不同，提示用户切换目录）
-      if (entry.cwd !== this.currentCwd) {
-        this.setStatus(`请在 ${entry.cwd} 目录下运行 hai 继续对话`);
-        toast(`历史属于 ${entry.cwd}，请切换到该目录后运行 hai`);
-      }
-    });
-
-    el.querySelector(".hai-hist-delete")!.addEventListener("click", async () => {
-      if (confirm(`确定删除 ${entry.cwd} 的历史？`)) {
-        try {
-          await api.agentDeleteHistory(entry.cwd);
-          el.remove();
-        } catch (e: any) {
-          toast(`删除失败: ${e?.message || e}`);
-        }
-      }
-    });
-
-    const migrateBtn = el.querySelector(".hai-hist-migrate");
-    if (migrateBtn) {
-      migrateBtn.addEventListener("click", async () => {
-        const newCwd = prompt(`迁移 ${entry.cwd} 的历史到新目录：`, entry.cwd);
-        if (newCwd && newCwd !== entry.cwd) {
-          try {
-            await api.agentMigrateHistory(entry.cwd, newCwd);
-            toast("迁移成功");
-            void this.loadHistoryList();
-          } catch (e: any) {
-            toast(`迁移失败: ${e?.message || e}`);
-          }
-        }
-      });
-    }
-
-    return el;
-  }
+  // ---------- 历史恢复 / 清除 ----------
 
   private onHistoryRestored(messages: HistoryEntry[]): void {
     for (const msg of messages) {
@@ -1091,11 +1312,9 @@ export class AgentModal {
   private applyTheme(): void {
     const modal = this.overlay.querySelector(".hai-modal") as HTMLElement;
     modal.dataset.theme = this.themeMode;
-    const labels: Record<string, string> = { auto: "🌓", light: "☀", dark: "🌙" };
-    this.themeBtn.textContent = labels[this.themeMode] ?? "🌓";
+    this.themeBtn.classList.toggle("active", this.themeMode !== "auto");
   }
 
-  /** 懒加载渲染依赖（在 show 前调用）。 */
   static preload(): void {
     ensureMarked().catch(() => {});
     ensureHljs().catch(() => {});
