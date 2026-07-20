@@ -877,15 +877,15 @@ export class AgentModal {
       }
     });
 
-    el.querySelector(".hai-hist-delete")!.addEventListener("click", async () => {
-      if (confirm(`确定删除 ${entry.cwd} 的历史？`)) {
+    el.querySelector(".hai-hist-delete")!.addEventListener("click", () => {
+      this.showConfirm(`确定删除 ${entry.cwd} 的历史？`, async () => {
         try {
           await api.agentDeleteHistory(entry.cwd);
           el.remove();
         } catch (e: any) {
           toast(`删除失败: ${e?.message || e}`);
         }
-      }
+      });
     });
 
     const migrateBtn = el.querySelector(".hai-hist-migrate");
