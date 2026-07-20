@@ -485,8 +485,8 @@ async fn search(pattern: &str, path: &str) -> ToolResult {
     let out = match Command::new("grep")
         .arg("-rn")
         .arg("--color=never")
-        .arg(pattern)
-        .arg(path)
+        .arg("-e").arg(pattern)
+        .arg("--").arg(path)
         .output()
         .await
     {

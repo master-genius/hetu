@@ -170,7 +170,7 @@ pub async fn run_command(conn: &Arc<Connection>, command: &str, cwd: Option<&str
 pub async fn search(conn: &Arc<Connection>, pattern: &str, path: &str, tx: &Channel<AgentEvent>) -> ToolResult {
     const MAX_MATCHES: usize = 100;
 
-    let cmd = format!("grep -rn --color=never -- {} {}", sh_quote(pattern), sh_quote(path));
+    let cmd = format!("grep -rn --color=never -e {} -- {}", sh_quote(pattern), sh_quote(path));
     // search 默认用 command_timeout（通过调用方传入），这里用合理默认值 60s
     match exec_channel(conn, &cmd, 60, tx).await {
         Ok((stdout, stderr, code)) => {
