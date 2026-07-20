@@ -292,9 +292,9 @@ export class AgentModal {
     this.glassBtn.addEventListener("click", () => this.toggleGlass());
     this.themeBtn.addEventListener("click", () => this.cycleTheme());
     this.clearBtn.addEventListener("click", () => {
-      if (confirm("确定清除对话历史？")) {
+      this.showConfirm("确定清除对话历史？", () => {
         api.agentClearHistory(this.tabId).catch(() => {});
-      }
+      });
     });
     this.settingsBtn.addEventListener("click", () => this.switchView("settings"));
     this.historyBtn.addEventListener("click", () => this.toggleHistoryDrawer());
