@@ -703,7 +703,7 @@ pub async fn session_loop(
 
                         let approved = tokio::select! {
                             r = approve_rx => r.unwrap_or(false),
-                            _ = tokio::time::sleep(std::time::Duration::from_secs(600)) => false,
+                            _ = tokio::time::sleep(std::time::Duration::from_secs(config.execution.plan_confirm_timeout as u64)) => false,
                             _ = abort_rx.changed() => false,
                         };
 
@@ -742,7 +742,7 @@ pub async fn session_loop(
                         // --- 特殊工具 ---
 
                         if tc.name == "ask_user" {
-                            let tool_result = handle_ask_user(&args, &state, &event_tx, &mut abort_rx).await;
+                            let tool_result = handle_ask_user(&args, &state, &event_tx, &mut abort_rx, config.execution.ask_user_timeout).await;
                             history.push(Message::tool_result(&tc.id, tool_result.to_llm_text()));
                             emit(&event_tx, AgentEvent::ToolEnd { result: tool_result });
                             continue;
@@ -781,6 +781,7 @@ pub async fn session_loop(
                                 &state,
                                 &event_tx,
                                 &mut abort_rx,
+                                config.execution.read_terminal_timeout,
                             )
                             .await;
 
@@ -814,7 +815,7 @@ pub async fn session_loop(
 
                             let approved = tokio::select! {
                                 r = approve_rx => r.unwrap_or(false),
-                                _ = tokio::time::sleep(std::time::Duration::from_secs(300)) => false,
+                                _ = tokio::time::sleep(std::time::Duration::from_secs(config.execution.ask_approval_timeout as u64)) => false,
                                 _ = abort_rx.changed() => false,
                             };
 
@@ -917,6 +918,7 @@ async fn handle_ask_user(
     state: &SessionState,
     tx: &Channel<AgentEvent>,
     abort: &mut watch::Receiver<bool>,
+    timeout_secs: u32,
 ) -> ToolResult {
     let question = args.get("question").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let choices: Vec<UserChoice> = args
@@ -951,8 +953,8 @@ async fn handle_ask_user(
                 Err(_) => ToolResult::Error { message: "回答通道关闭".into() },
             }
         }
-        _ = tokio::time::sleep(std::time::Duration::from_secs(300)) => {
-            ToolResult::Error { message: "提问超时（5分钟）".into() }
+        _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs as u64)) => {
+            ToolResult::Error { message: format!("提问超时（{timeout_secs}s）") }
         }
         _ = abort.changed() => {
             ToolResult::Error { message: "已中止".into() }
@@ -967,6 +969,7 @@ async fn handle_read_terminal(
     state: &SessionState,
     tx: &Channel<AgentEvent>,
     abort: &mut watch::Receiver<bool>,
+    timeout_secs: u32,
 ) -> ToolResult {
     let request_id = format!(
         "rt_{}",
@@ -992,8 +995,8 @@ async fn handle_read_terminal(
                 Err(_) => ToolResult::Error { message: "终端数据通道关闭".into() },
             }
         }
-        _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
-            ToolResult::Error { message: "读取终端超时（5s）".into() }
+        _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs as u64)) => {
+            ToolResult::Error { message: format!("读取终端超时（{timeout_secs}s）") }
         }
         _ = abort.changed() => {
             ToolResult::Error { message: "已中止".into() }

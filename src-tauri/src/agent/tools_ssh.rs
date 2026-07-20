@@ -207,13 +207,38 @@ pub async fn file_stat(conn: &Arc<Connection>, path: &str) -> ToolResult {
                 else if meta.is_link { "symlink" }
                 else { "file" };
 
+            // mtime → "Xs ago"（与本地版风格一致，避免时区问题）
+            let modified = meta.mtime.map(|m| {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let m = m as u64;
+                if m <= now {
+                    format!("{}s ago", now - m)
+                } else {
+                    "unknown".to_string()
+                }
+            }).unwrap_or_else(|| "unknown".to_string());
+
+            let owner = meta.owner.as_deref().filter(|s| !s.is_empty())
+                .map(|o| o.to_string())
+                .unwrap_or_else(|| meta.uid.map(|u| format!("uid:{u}")).unwrap_or_else(|| "unknown".into()));
+            let group = meta.group.as_deref().filter(|s| !s.is_empty())
+                .map(|g| g.to_string())
+                .unwrap_or_else(|| meta.gid.map(|g| format!("gid:{g}")).unwrap_or_else(|| "unknown".into()));
+
+            let perms_str = if meta.perms.is_empty() { String::new() } else { format!("{} ", meta.perms) };
+
             let output = format!(
-                "path: {}\ntype: {}\nsize: {} bytes\nperms: {}{}",
+                "path: {}\ntype: {}\nsize: {} bytes\nmodified: {}\nperms: {}\nowner: {}\ngroup: {}",
                 meta.path,
                 kind,
                 meta.size.unwrap_or(0),
-                if meta.perms.is_empty() { "".to_string() } else { format!("{} ", meta.perms) },
-                "",
+                modified,
+                perms_str,
+                owner,
+                group,
             );
 
             success(output, false)
