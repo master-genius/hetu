@@ -172,6 +172,19 @@ pub struct ExecutionConfig {
     /// 防止 LLM 调用 tail -f 等不退出命令导致 session 永久阻塞。
     #[serde(default = "default_command_timeout")]
     pub command_timeout: u32,
+    /// Ask 模式工具调用确认超时（秒）。
+    #[serde(default = "default_ask_approval_timeout")]
+    pub ask_approval_timeout: u32,
+    /// Plan 模式计划确认超时（秒）。
+    #[serde(default = "default_plan_confirm_timeout")]
+    pub plan_confirm_timeout: u32,
+    /// ask_user 工具提问超时（秒）。
+    #[serde(default = "default_ask_user_timeout")]
+    pub ask_user_timeout: u32,
+    /// read_terminal 工具读取终端 buffer 超时（秒）。
+    /// 前端繁忙时回调可能延迟，默认给充足时间。
+    #[serde(default = "default_read_terminal_timeout")]
+    pub read_terminal_timeout: u32,
 }
 
 fn default_mode() -> String {
@@ -191,6 +204,18 @@ fn default_always_ask_for() -> Vec<String> {
 }
 fn default_command_timeout() -> u32 {
     DEFAULT_COMMAND_TIMEOUT
+}
+fn default_ask_approval_timeout() -> u32 {
+    300
+}
+fn default_plan_confirm_timeout() -> u32 {
+    600
+}
+fn default_ask_user_timeout() -> u32 {
+    300
+}
+fn default_read_terminal_timeout() -> u32 {
+    10
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -219,6 +244,10 @@ impl Default for AiConfig {
                 dangerous_commands: default_dangerous_commands(),
                 always_ask_for: default_always_ask_for(),
                 command_timeout: default_command_timeout(),
+                ask_approval_timeout: default_ask_approval_timeout(),
+                plan_confirm_timeout: default_plan_confirm_timeout(),
+                ask_user_timeout: default_ask_user_timeout(),
+                read_terminal_timeout: default_read_terminal_timeout(),
             },
             roles: HashMap::new(),
         }

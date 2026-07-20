@@ -37,7 +37,6 @@ pub enum AgentEvent {
 
     /// Plan 模式：提出执行计划
     ProposedPlan {
-        steps: Vec<PlanStep>,
         summary: String,
     },
 
@@ -101,14 +100,6 @@ impl ToolResult {
             ToolResult::UserRejected => "用户拒绝了此操作".into(),
         }
     }
-}
-
-/// 计划步骤（Plan 模式）
-#[derive(Serialize, Clone)]
-pub struct PlanStep {
-    pub tool: String,
-    pub args: Value,
-    pub target_pane: usize,
 }
 
 /// 用户选择项（AskUser 工具）

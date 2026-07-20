@@ -7,7 +7,7 @@ export type AgentEvent =
   | { type: "toolOutput"; output: string }
   | { type: "toolEnd"; result: ToolResult }
   | { type: "askApproval"; tool: string; args: any; targetPane: number; reason: string }
-  | { type: "proposedPlan"; steps: PlanStep[]; summary: string }
+  | { type: "proposedPlan"; summary: string }
   | { type: "userQuestion"; question: string; choices: UserChoice[] }
   | { type: "readTerminalRequest"; requestId: string; paneId: string; lines: number }
   | { type: "error"; message: string }
@@ -39,13 +39,6 @@ export type ToolResult =
   | { status: "success"; output: string; truncated: boolean }
   | { status: "error"; message: string }
   | { status: "userRejected" };
-
-/** 计划步骤 */
-export interface PlanStep {
-  tool: string;
-  args: any;
-  targetPane: number;
-}
 
 /** 用户选择项 */
 export interface UserChoice {
