@@ -629,25 +629,22 @@ export class AgentModal {
   private async addModel(): Promise<void> {
     const provider = (this.overlay.querySelector(".hai-cfg-provider") as HTMLSelectElement).value;
     this.showPrompt("输入模型 ID", "deepseek-v3", (modelKey) => {
-
-    if (!this.config) this.config = { providers: {}, default_provider: provider };
-    if (!this.config.providers[provider]) {
-      this.config.providers[provider] = { default_model: "", models: {} };
-    }
-    if (this.config.providers[provider].models[modelKey]) {
-      toast("模型已存在");
-      return;
-    }
-
-    this.config.providers[provider].models[modelKey] = {
-      endpoints: [{ key: "", options: { max_tokens: 8192, temperature: 0.7 } }],
-    };
-
-    if (!this.config.providers[provider].default_model) {
-      this.config.providers[provider].default_model = modelKey;
-    }
-
-    this.renderModelList();
+      if (!this.config) this.config = { providers: {}, default_provider: provider };
+      if (!this.config.providers[provider]) {
+        this.config.providers[provider] = { default_model: "", models: {} };
+      }
+      if (this.config.providers[provider].models[modelKey]) {
+        toast("模型已存在");
+        return;
+      }
+      this.config.providers[provider].models[modelKey] = {
+        endpoints: [{ key: "", options: { max_tokens: 8192, temperature: 0.7 } }],
+      };
+      if (!this.config.providers[provider].default_model) {
+        this.config.providers[provider].default_model = modelKey;
+      }
+      this.renderModelList();
+    });
   }
 
   /** 新增 endpoint */
