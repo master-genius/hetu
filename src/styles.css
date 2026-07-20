@@ -3278,6 +3278,249 @@ input[type="checkbox"] {
   -webkit-backdrop-filter: blur(20px);
 }
 
+/* ===== Empty State ===== */
+
+.hai-empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.hai-empty-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--term-fg);
+  margin-bottom: 8px;
+}
+
+.hai-empty-desc {
+  font-size: 13px;
+  color: color-mix(in srgb, var(--term-fg) 50%, transparent);
+  margin-bottom: 20px;
+}
+
+.hai-empty-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.hai-suggestion-chip {
+  font-size: 12px;
+  padding: 6px 14px;
+  border: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--term-bg) 40%, transparent);
+  color: color-mix(in srgb, var(--term-fg) 75%, transparent);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.hai-suggestion-chip:hover {
+  border-color: color-mix(in srgb, var(--term-blue) 40%, transparent);
+  background: color-mix(in srgb, var(--term-blue) 10%, transparent);
+  color: var(--term-fg);
+}
+
+/* ===== Scroll-to-bottom Button ===== */
+
+.hai-scroll-btn {
+  position: absolute;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%) rotate(180deg);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
+  background: color-mix(in srgb, var(--term-bg) 80%, transparent);
+  color: color-mix(in srgb, var(--term-fg) 60%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 5;
+  transition: all 0.15s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.hai-scroll-btn:hover {
+  border-color: color-mix(in srgb, var(--term-blue) 30%, transparent);
+  color: var(--term-fg);
+  background: color-mix(in srgb, var(--term-bg) 95%, transparent);
+}
+
+.hai-scroll-btn svg { width: 14px; height: 14px; }
+
+/* ===== Message Copy Button ===== */
+
+.hai-msg-assistant {
+  position: relative;
+}
+
+.hai-msg-copy {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--term-fg) 8%, transparent);
+  color: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.hai-msg-assistant:hover .hai-msg-copy {
+  opacity: 1;
+  color: color-mix(in srgb, var(--term-fg) 50%, transparent);
+}
+
+.hai-msg-copy:hover {
+  background: color-mix(in srgb, var(--term-fg) 15%, transparent);
+  color: var(--term-fg) !important;
+}
+
+.hai-msg-copy.copied {
+  color: var(--term-green, #4caf50) !important;
+  opacity: 1;
+}
+
+.hai-msg-copy svg { width: 12px; height: 12px; }
+
+/* ===== Model Badge on Assistant Message ===== */
+
+.hai-msg-model-badge {
+  font-size: 10px;
+  color: color-mix(in srgb, var(--term-fg) 40%, transparent);
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--term-fg) 6%, transparent);
+}
+
+/* ===== Code Block Copy Button ===== */
+
+.hai-code-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-family: var(--ui-font, "JetBrains Mono NL", monospace);
+  border: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--term-bg) 60%, transparent);
+  color: color-mix(in srgb, var(--term-fg) 50%, transparent);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.hai-msg-content pre:hover .hai-code-copy {
+  opacity: 1;
+}
+
+.hai-code-copy:hover {
+  background: color-mix(in srgb, var(--term-bg) 90%, transparent);
+  color: var(--term-fg);
+}
+
+/* ===== Tool Collapse ===== */
+
+.hai-tool-header {
+  cursor: pointer;
+}
+
+.hai-tool-collapsed .hai-tool-args,
+.hai-tool-collapsed .hai-tool-output,
+.hai-tool-collapsed .hai-tool-truncated {
+  display: none;
+}
+
+/* ===== Custom Dialog (replaces prompt/confirm) ===== */
+
+.hai-dialog-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  backdrop-filter: blur(2px);
+}
+
+.hai-dialog {
+  background: color-mix(in srgb, var(--term-bg) 95%, transparent);
+  border: 1px solid color-mix(in srgb, var(--term-fg) 12%, transparent);
+  border-radius: 10px;
+  padding: 20px;
+  min-width: 280px;
+  max-width: 400px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+}
+
+.hai-dialog-msg {
+  font-size: 13px;
+  color: var(--term-fg);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.hai-dialog-label {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--term-fg) 60%, transparent);
+  margin-bottom: 8px;
+}
+
+.hai-dialog-input {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: var(--ui-font, "JetBrains Mono NL", monospace);
+  background: color-mix(in srgb, var(--term-bg) 50%, transparent);
+  color: var(--term-fg);
+  border: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
+  border-radius: 6px;
+  outline: none;
+  margin-bottom: 16px;
+  box-sizing: border-box;
+}
+
+.hai-dialog-input:focus {
+  border-color: color-mix(in srgb, var(--term-blue) 50%, transparent);
+}
+
+.hai-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.hai-dialog-ok {
+  background: color-mix(in srgb, var(--term-blue) 25%, transparent);
+  border-color: color-mix(in srgb, var(--term-blue) 35%, transparent);
+  color: var(--term-blue);
+  font-size: 12px;
+}
+
+.hai-dialog-cancel {
+  font-size: 12px;
+  background: color-mix(in srgb, var(--term-fg) 8%, transparent);
+  border-color: color-mix(in srgb, var(--term-fg) 15%, transparent);
+  color: color-mix(in srgb, var(--term-fg) 70%, transparent);
+}
+
 /* ===== Utility ===== */
 
 .hidden {
