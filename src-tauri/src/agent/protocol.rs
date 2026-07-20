@@ -21,8 +21,7 @@ pub enum AgentEvent {
         target_pane: usize,
     },
 
-    /// 工具实时输出（如 run_command 的 stdout/stderr 行，Phase 1b 预留）
-    #[allow(dead_code)]
+    /// 工具实时输出（如 run_command 的 stdout/stderr 行）
     ToolOutput { output: String },
 
     /// 工具调用结束

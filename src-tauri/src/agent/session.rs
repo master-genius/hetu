@@ -695,7 +695,6 @@ pub async fn session_loop(
                     // Plan 模式：LLM 输出了文字计划（无 tool_calls），推送 ProposedPlan 等待确认
                     if !plan_confirmed && result.tool_calls.is_empty() {
                         emit(&event_tx, AgentEvent::ProposedPlan {
-                            steps: Vec::new(),
                             summary: content_clone,
                         });
 
