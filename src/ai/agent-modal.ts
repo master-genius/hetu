@@ -619,9 +619,7 @@ export class AgentModal {
 
     // 删除
     card.querySelector(".hai-endpoint-delete-btn")!.addEventListener("click", () => {
-      if (confirm(`确定删除 Endpoint ${idx + 1}？`)) {
-        this.deleteEndpoint(provider, model, idx);
-      }
+      this.showConfirm(`确定删除 Endpoint ${idx + 1}？`, () => this.deleteEndpoint(provider, model, idx));
     });
 
     return card;
@@ -629,10 +627,8 @@ export class AgentModal {
 
   /** 新增模型 */
   private async addModel(): Promise<void> {
-    const modelKey = prompt("输入模型 ID（如 deepseek-v3）：");
-    if (!modelKey) return;
-
     const provider = (this.overlay.querySelector(".hai-cfg-provider") as HTMLSelectElement).value;
+    this.showPrompt("输入模型 ID", "deepseek-v3", (modelKey) => {
 
     if (!this.config) this.config = { providers: {}, default_provider: provider };
     if (!this.config.providers[provider]) {
