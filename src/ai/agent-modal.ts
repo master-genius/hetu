@@ -1406,6 +1406,49 @@ export class AgentModal {
     });
   }
 
+  // ---------- 自定义对话框（替换 prompt/confirm） ----------
+
+  private showConfirm(message: string, onConfirm: () => void): HTMLElement {
+    const overlay = document.createElement("div");
+    overlay.className = "hai-dialog-overlay";
+    overlay.innerHTML = `
+      <div class="hai-dialog">
+        <div class="hai-dialog-msg">${message}</div>
+        <div class="hai-dialog-actions">
+          <button class="btn hai-dialog-cancel">取消</button>
+          <button class="btn hai-dialog-ok">确定</button>
+        </div>
+      </div>`;
+    overlay.querySelector(".hai-dialog-ok")!.addEventListener("click", () => { overlay.remove(); onConfirm(); });
+    overlay.querySelector(".hai-dialog-cancel")!.addEventListener("click", () => overlay.remove());
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+    this.overlay.querySelector(".hai-modal")!.appendChild(overlay);
+    return overlay;
+  }
+
+  private showPrompt(label: string, defaultValue: string, onConfirm: (value: string) => void): HTMLElement {
+    const overlay = document.createElement("div");
+    overlay.className = "hai-dialog-overlay";
+    overlay.innerHTML = `
+      <div class="hai-dialog">
+        <div class="hai-dialog-label">${label}</div>
+        <input type="text" class="hai-dialog-input" value="${defaultValue}" />
+        <div class="hai-dialog-actions">
+          <button class="btn hai-dialog-cancel">取消</button>
+          <button class="btn hai-dialog-ok">确定</button>
+        </div>
+      </div>`;
+    const input = overlay.querySelector(".hai-dialog-input") as HTMLInputElement;
+    const confirmDialog = () => { const v = input.value.trim(); if (v) { overlay.remove(); onConfirm(v); } };
+    overlay.querySelector(".hai-dialog-ok")!.addEventListener("click", confirmDialog);
+    overlay.querySelector(".hai-dialog-cancel")!.addEventListener("click", () => overlay.remove());
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") confirmDialog(); });
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+    this.overlay.querySelector(".hai-modal")!.appendChild(overlay);
+    requestAnimationFrame(() => input.focus());
+    return overlay;
+  }
+
   // ---------- 历史恢复 / 清除 ----------
 
   private onHistoryRestored(messages: HistoryEntry[]): void {
