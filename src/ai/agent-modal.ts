@@ -890,17 +890,18 @@ export class AgentModal {
 
     const migrateBtn = el.querySelector(".hai-hist-migrate");
     if (migrateBtn) {
-      migrateBtn.addEventListener("click", async () => {
-        const newCwd = prompt(`迁移 ${entry.cwd} 的历史到新目录：`, entry.cwd);
-        if (newCwd && newCwd !== entry.cwd) {
-          try {
-            await api.agentMigrateHistory(entry.cwd, newCwd);
-            toast("迁移成功");
-            void this.loadHistoryList();
-          } catch (e: any) {
-            toast(`迁移失败: ${e?.message || e}`);
+      migrateBtn.addEventListener("click", () => {
+        this.showPrompt("迁移历史到新目录", entry.cwd, async (newCwd) => {
+          if (newCwd !== entry.cwd) {
+            try {
+              await api.agentMigrateHistory(entry.cwd, newCwd);
+              toast("迁移成功");
+              void this.loadHistoryList();
+            } catch (e: any) {
+              toast(`迁移失败: ${e?.message || e}`);
+            }
           }
-        }
+        });
       });
     }
 
