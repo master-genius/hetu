@@ -31,7 +31,6 @@ export class StreamingMarkdown {
   }
 
   done(): void {
-    // 如果有 pending 的 rAF，等它执行完
     if (this.pending) {
       requestAnimationFrame(() => this.finalize());
     } else {
@@ -42,8 +41,8 @@ export class StreamingMarkdown {
   private finalize(): void {
     this.pending = false;
     this.rerender();
-    // 最后一块也冻结
     this.highlightIfCode(this.activeEl);
+    this.addCopyButtons(this.activeEl);
     this.frozenCount++;
     this.activeEl = document.createElement("div");
     this.container.appendChild(this.activeEl);
@@ -52,29 +51,26 @@ export class StreamingMarkdown {
 
   private rerender(): void {
     if (!this.buffer) return;
-    // marked 是静态 import，全局可用
     const html = (window as any).__marked_parse?.(this.buffer) ?? this.buffer;
     const temp = document.createElement("div");
     temp.innerHTML = html;
     const total = temp.children.length;
     if (total === 0) return;
 
-    // 新完成的块：freeze
     const newFrozen = total - 1;
     while (this.frozenCount < newFrozen) {
       const el = temp.children[this.frozenCount].cloneNode(true) as HTMLElement;
       this.container.insertBefore(el, this.activeEl);
       this.highlightIfCode(el);
+      this.addCopyButtons(el);
       this.frozenCount++;
     }
-    // 防御：块数减少（marked 版本变化等）
     while (this.frozenCount > newFrozen) {
       const el = this.activeEl.previousElementSibling;
       if (el) this.container.removeChild(el);
       this.frozenCount--;
     }
 
-    // 更新活跃块
     const lastChild = temp.children[total - 1];
     this.activeEl.innerHTML = lastChild.innerHTML;
     this.activeEl.className = lastChild.className;
@@ -83,12 +79,30 @@ export class StreamingMarkdown {
   private highlightIfCode(el: HTMLElement): void {
     el.querySelectorAll("pre code:not([data-hl])").forEach((code) => {
       const el = code as HTMLElement;
-      // highlight.js 动态加载后可用
       const hljs = (window as any).__hljs;
       if (hljs) {
         hljs.highlightElement(el);
         el.dataset.hl = "done";
       }
+    });
+  }
+
+  private addCopyButtons(el: HTMLElement): void {
+    el.querySelectorAll("pre").forEach((pre) => {
+      if (pre.querySelector(".hai-code-copy")) return;
+      const btn = document.createElement("button");
+      btn.className = "hai-code-copy";
+      btn.textContent = "Copy";
+      btn.addEventListener("click", () => {
+        const code = pre.querySelector("code");
+        if (code) {
+          navigator.clipboard.writeText(code.textContent || "").then(() => {
+            btn.textContent = "Copied!";
+            setTimeout(() => { btn.textContent = "Copy"; }, 2000);
+          }).catch(() => {});
+        }
+      });
+      pre.appendChild(btn);
     });
   }
 
