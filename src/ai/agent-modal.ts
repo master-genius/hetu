@@ -192,12 +192,23 @@ export class AgentModal {
         </div>
         <div class="hai-body">
           <div class="hai-view hai-view-chat active">
-            <div class="hai-messages"></div>
+            <div class="hai-messages">
+              <div class="hai-empty-state">
+                <div class="hai-empty-title">AI 助手已就绪</div>
+                <div class="hai-empty-desc">输入问题，或试试：</div>
+                <div class="hai-empty-suggestions">
+                  <button class="hai-suggestion-chip">分析当前目录结构</button>
+                  <button class="hai-suggestion-chip">查看 git 状态</button>
+                  <button class="hai-suggestion-chip">读取文件并解释</button>
+                </div>
+              </div>
+            </div>
+            <button class="hai-scroll-btn hidden" title="滚动到底部">${ICONS.chevron}</button>
             <div class="hai-model-bar">
               <select class="hai-model-select" title="切换模型"></select>
             </div>
             <div class="hai-input-container">
-              <textarea class="hai-input" rows="1" placeholder="Send a message…"></textarea>
+              <textarea class="hai-input" rows="1" placeholder="输入消息…  (Enter 发送 · Shift+Enter 换行)"></textarea>
               <button class="hai-send-btn" title="发送 (Enter)">${ICONS.send}</button>
               <button class="hai-abort-btn hidden" title="中止 (ESC)">${ICONS.abort}</button>
             </div>
@@ -325,6 +336,24 @@ export class AgentModal {
       const provider = value.slice(0, slashIdx);
       const model = value.slice(slashIdx + 1);
       void this.switchModel(provider, model);
+    });
+
+    // scroll-to-bottom 按钮
+    const scrollBtn = this.overlay.querySelector(".hai-scroll-btn") as HTMLElement;
+    scrollBtn.addEventListener("click", () => this.scrollToBottom());
+    this.messagesEl.addEventListener("scroll", () => {
+      const atBottom = this.messagesEl.scrollHeight - this.messagesEl.scrollTop - this.messagesEl.clientHeight < 80;
+      scrollBtn.classList.toggle("hidden", atBottom);
+    });
+
+    // 空状态建议芯片
+    this.overlay.querySelectorAll<HTMLElement>(".hai-suggestion-chip").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        this.inputEl.value = chip.textContent || "";
+        this.inputEl.focus();
+        this.inputEl.style.height = "auto";
+        this.inputEl.style.height = Math.min(this.inputEl.scrollHeight, 200) + "px";
+      });
     });
   }
 
@@ -1074,6 +1103,7 @@ export class AgentModal {
   // ---------- DOM 构建 ----------
 
   private appendUserMessage(text: string): void {
+    this.hideEmptyState();
     const el = document.createElement("div");
     el.className = "hai-msg hai-msg-user";
     el.textContent = text;
@@ -1083,16 +1113,48 @@ export class AgentModal {
   }
 
   private appendAssistantBubble(): { el: HTMLElement; renderer: StreamingMarkdown } {
+    this.hideEmptyState();
     const el = document.createElement("div");
     el.className = "hai-msg hai-msg-assistant";
+
+    // 模型标识
+    const modelSelect = this.overlay.querySelector(".hai-model-select") as HTMLSelectElement;
+    const modelName = modelSelect?.selectedOptions[0]?.text;
+    if (modelName) {
+      const badge = document.createElement("div");
+      badge.className = "hai-msg-model-badge";
+      badge.textContent = modelName;
+      el.appendChild(badge);
+    }
+
     const contentEl = document.createElement("div");
     contentEl.className = "hai-msg-content";
     el.appendChild(contentEl);
+
+    // 复制按钮
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "hai-msg-copy";
+    copyBtn.innerHTML = `${ICONS.check}`;
+    copyBtn.title = "复制";
+    copyBtn.addEventListener("click", () => {
+      const text = contentEl.textContent || "";
+      navigator.clipboard.writeText(text).then(() => {
+        copyBtn.classList.add("copied");
+        setTimeout(() => copyBtn.classList.remove("copied"), 2000);
+      }).catch(() => {});
+    });
+    el.appendChild(copyBtn);
+
     this.messagesEl.appendChild(el);
 
     const renderer = new StreamingMarkdown(contentEl);
     this.turns.push({ role: "assistant", el, renderer });
     return { el, renderer };
+  }
+
+  private hideEmptyState(): void {
+    const empty = this.messagesEl.querySelector(".hai-empty-state");
+    if (empty) empty.remove();
   }
 
   private appendError(message: string): void {
@@ -1141,6 +1203,11 @@ export class AgentModal {
       <div class="hai-tool-output hidden"></div>`;
 
     el.querySelector(".hai-tool-args")!.textContent = formatArgs(args);
+
+    // header 点击折叠/展开
+    el.querySelector(".hai-tool-header")!.addEventListener("click", () => {
+      el.classList.toggle("hai-tool-collapsed");
+    });
 
     this.messagesEl.appendChild(el);
     this.currentToolEl = el;
