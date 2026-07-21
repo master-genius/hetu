@@ -1709,6 +1709,7 @@ export class AgentModal {
         this.appendCopyBar(last.el, last);
       }
       this.currentRenderer = null;
+      this.sending = false;
       this.setStatus("执行中…");
     }
 
