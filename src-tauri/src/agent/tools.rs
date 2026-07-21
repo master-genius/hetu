@@ -16,7 +16,7 @@ use crate::ssh::conn::Connection;
 /// 文件/命令类工具自动附带 target_pane 参数；特殊工具（ask_user/list_panes/read_terminal）
 /// 由 session.rs 特殊处理，不在此返回。
 pub fn definitions() -> Vec<ToolDef> {
-    let mut defs = vec![
+    let defs = vec![
         ToolDef {
             def_type: "function".into(),
             function: ToolFunction {

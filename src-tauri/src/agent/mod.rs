@@ -9,6 +9,7 @@ mod config;
 mod openai;
 mod provider;
 mod protocol;
+mod roles;
 mod session;
 mod tools;
 mod tools_ssh;
@@ -96,7 +97,7 @@ pub async fn agent_spawn(
     *session_state.panes.lock().await = panes;
 
     // 首次运行时生成默认角色模板
-    session::ensure_default_roles(&app);
+    roles::ensure_defaults(&app);
 
     let abort_rx = session_state.abort_tx.subscribe();
 
@@ -317,4 +318,48 @@ pub async fn agent_load_history(
             .map_err(|_| crate::error::Error::msg("Agent session 已关闭"))?;
     }
     Ok(())
+}
+
+// ---------- 角色管理 ----------
+
+/// 列出所有角色
+#[tauri::command]
+pub async fn agent_list_roles(app: tauri::AppHandle) -> Result<Vec<roles::RoleMeta>> {
+    roles::list_roles(&app)
+}
+
+/// 获取角色完整内容
+#[tauri::command]
+pub async fn agent_get_role(app: tauri::AppHandle, id: String) -> Result<roles::RoleFull> {
+    roles::get_role(&app, &id)
+}
+
+/// 保存角色（新建或覆盖）
+#[tauri::command]
+pub async fn agent_save_role(
+    app: tauri::AppHandle,
+    id: String,
+    name: String,
+    category: String,
+    description: String,
+    content: String,
+) -> Result<()> {
+    roles::save_role(&app, &id, &name, &category, &description, &content)
+}
+
+/// 删除角色
+#[tauri::command]
+pub async fn agent_delete_role(app: tauri::AppHandle, id: String) -> Result<()> {
+    roles::delete_role(&app, &id)
+}
+
+/// 设置默认角色（写入 ai-config.json 的 default_role 字段）
+#[tauri::command]
+pub async fn agent_set_default_role(
+    app: tauri::AppHandle,
+    role_id: Option<String>,
+) -> Result<()> {
+    let mut config = config::load_config(&app)?;
+    config.default_role = role_id.unwrap_or_default();
+    config::save_config(&app, &config)
 }

@@ -113,6 +113,16 @@ export const api = {
     invoke<void>("agent_migrate_history", { oldCwd, newCwd }),
   agentLoadHistory: (tabId: string, cwd: string) =>
     invoke<void>("agent_load_history", { tabId, cwd }),
+  agentListRoles: () =>
+    invoke<any[]>("agent_list_roles"),
+  agentGetRole: (id: string) =>
+    invoke<any>("agent_get_role", { id }),
+  agentSaveRole: (id: string, name: string, category: string, description: string, content: string) =>
+    invoke<void>("agent_save_role", { id, name, category, description, content }),
+  agentDeleteRole: (id: string) =>
+    invoke<void>("agent_delete_role", { id }),
+  agentSetDefaultRole: (roleId: string | null) =>
+    invoke<void>("agent_set_default_role", { roleId }),
   paneSetCwd: (paneId: string, cwd: string) =>
     invoke<void>("pane_set_cwd", { paneId, cwd }),
 };

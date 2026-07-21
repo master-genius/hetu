@@ -791,6 +791,11 @@ pub fn run() {
             agent::agent_delete_history,
             agent::agent_migrate_history,
             agent::agent_load_history,
+            agent::agent_list_roles,
+            agent::agent_get_role,
+            agent::agent_save_role,
+            agent::agent_delete_role,
+            agent::agent_set_default_role,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

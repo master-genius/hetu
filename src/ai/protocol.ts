@@ -57,6 +57,26 @@ export interface PaneInfo {
   os: string;
 }
 
+/** 角色元数据（列表用） */
+export interface RoleMeta {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+}
+
+/** 角色完整信息（编辑用） */
+export interface RoleFull {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  content: string;
+}
+
+/** 全部分类（固定列表） */
+export const ROLE_CATEGORIES = ["默认", "编程", "办公", "游戏", "创意", "设计", "教育", "玄学", "生活"];
+
 /** OSC 1733 载荷解析结果 */
 export interface HaiSpec {
   tok: string;

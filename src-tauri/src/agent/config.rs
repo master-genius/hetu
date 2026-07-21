@@ -228,6 +228,9 @@ pub struct AiConfig {
     pub execution: ExecutionConfig,
     #[serde(default)]
     pub roles: HashMap<String, RoleBinding>,
+    /// 默认角色 ID（用户选择的角色系统提示词）。hai 命令未指定 role 时使用。
+    #[serde(default)]
+    pub default_role: String,
 }
 
 fn default_provider() -> String {
@@ -250,6 +253,7 @@ impl Default for AiConfig {
                 read_terminal_timeout: default_read_terminal_timeout(),
             },
             roles: HashMap::new(),
+            default_role: String::new(),
         }
     }
 }

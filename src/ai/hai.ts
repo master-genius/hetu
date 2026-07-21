@@ -29,7 +29,7 @@ export function parseHai(data: string): HaiSpec | null {
   return {
     tok,
     op: b64utf8(f.op ?? ""),
-    role: b64utf8(f.role ?? "") || "general",
+    role: b64utf8(f.role ?? ""),
     mode: b64utf8(f.mode ?? "") || "auto",
     msg: b64utf8(f.msg ?? ""),
     w: f.w === "1",

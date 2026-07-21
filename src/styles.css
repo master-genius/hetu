@@ -3521,6 +3521,277 @@ input[type="checkbox"] {
   color: color-mix(in srgb, var(--term-fg) 70%, transparent);
 }
 
+/* ===== Role Management ===== */
+
+.hai-view-roles {
+  flex: 1;
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+}
+.hai-view-roles.active {
+  display: flex;
+}
+
+.hai-roles-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.hai-roles-list {
+  width: 260px;
+  border-right: 1px solid var(--hai-border, color-mix(in srgb, var(--term-fg) 10%, transparent));
+  overflow-y: auto;
+  padding: 8px;
+  flex-shrink: 0;
+}
+
+.hai-btn-new-role {
+  width: 100%;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background: color-mix(in srgb, var(--term-blue) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--term-blue) 30%, transparent);
+  border-radius: 6px;
+  color: var(--term-blue);
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.hai-btn-new-role:hover {
+  background: color-mix(in srgb, var(--term-blue) 25%, transparent);
+}
+
+.hai-role-group {
+  margin-bottom: 12px;
+}
+
+.hai-role-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.5;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+}
+
+.hai-role-item {
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  transition: background 0.15s;
+}
+.hai-role-item:hover {
+  background: color-mix(in srgb, var(--term-fg) 8%, transparent);
+}
+.hai-role-item.selected {
+  background: color-mix(in srgb, var(--term-blue) 20%, transparent);
+}
+.hai-role-item-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+.hai-role-default-mark {
+  display: inline-flex;
+  color: var(--term-yellow, #e5c07b);
+}
+.hai-role-item-desc {
+  font-size: 11px;
+  opacity: 0.5;
+  width: 100%;
+}
+
+.hai-role-editor {
+  flex: 1;
+  padding: 16px 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hai-role-editor .hai-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.hai-role-editor .hai-form-row label {
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0.7;
+}
+.hai-role-editor .hai-form-row input,
+.hai-role-editor .hai-form-row select,
+.hai-role-editor .hai-form-row textarea {
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--term-fg) 5%, transparent);
+  border: 1px solid var(--hai-border, color-mix(in srgb, var(--term-fg) 15%, transparent));
+  border-radius: 6px;
+  color: var(--term-fg);
+  font-size: 13px;
+  font-family: inherit;
+}
+.hai-form-row-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.hai-form-row-content textarea {
+  flex: 1;
+  min-height: 200px;
+  resize: vertical;
+  font-family: var(--term-font-family, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.hai-role-actions {
+  display: flex;
+  gap: 8px;
+}
+.hai-role-actions .btn {
+  padding: 6px 14px;
+  font-size: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.hai-btn-role-save {
+  background: var(--term-blue);
+  color: var(--term-bg);
+  border: none;
+}
+.hai-btn-role-default {
+  background: color-mix(in srgb, var(--term-yellow, #e5c07b) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--term-yellow, #e5c07b) 40%, transparent);
+  color: var(--term-yellow, #e5c07b);
+}
+.hai-btn-role-delete {
+  background: color-mix(in srgb, var(--term-red, #e06c75) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--term-red, #e06c75) 30%, transparent);
+  color: var(--term-red, #e06c75);
+}
+
+.hai-role-hint {
+  font-size: 12px;
+  opacity: 0.7;
+  min-height: 16px;
+}
+.hai-role-hint.error {
+  opacity: 1;
+  color: var(--term-red, #e06c75);
+}
+
+/* ===== Role Picker (startup selector) ===== */
+
+.hai-role-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.hai-role-picker {
+  width: 560px;
+  max-width: 90vw;
+  max-height: 80vh;
+  background: var(--term-bg, #1e1e2e);
+  border: 1px solid var(--hai-border, color-mix(in srgb, var(--term-fg) 15%, transparent));
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+
+.hai-role-picker-title {
+  padding: 16px 20px;
+  font-size: 16px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--hai-border, color-mix(in srgb, var(--term-fg) 10%, transparent));
+}
+
+.hai-role-picker-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 20px;
+}
+
+.hai-role-picker-group {
+  margin-bottom: 16px;
+}
+
+.hai-role-picker-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.5;
+  margin-bottom: 6px;
+}
+
+.hai-role-picker-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: 10px 14px;
+  margin-bottom: 4px;
+  background: color-mix(in srgb, var(--term-fg) 5%, transparent);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--term-fg);
+  transition: all 0.15s;
+}
+.hai-role-picker-item:hover {
+  background: color-mix(in srgb, var(--term-blue) 15%, transparent);
+  border-color: color-mix(in srgb, var(--term-blue) 30%, transparent);
+}
+
+.hai-role-picker-name {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.hai-role-picker-desc {
+  font-size: 12px;
+  opacity: 0.6;
+  margin-top: 2px;
+}
+
+.hai-role-picker-actions {
+  padding: 12px 20px;
+  border-top: 1px solid var(--hai-border, color-mix(in srgb, var(--term-fg) 10%, transparent));
+  display: flex;
+  justify-content: flex-end;
+}
+.hai-role-picker-skip {
+  padding: 6px 16px;
+  font-size: 13px;
+  background: color-mix(in srgb, var(--term-fg) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
+  border-radius: 6px;
+  color: color-mix(in srgb, var(--term-fg) 70%, transparent);
+  cursor: pointer;
+}
+.hai-role-picker-skip:hover {
+  background: color-mix(in srgb, var(--term-fg) 12%, transparent);
+}
+
 /* ===== Utility ===== */
 
 .hidden {

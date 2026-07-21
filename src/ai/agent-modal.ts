@@ -12,7 +12,8 @@
 import { Channel } from "@tauri-apps/api/core";
 import { api } from "../ipc";
 import { toast } from "../ui";
-import type { AgentEvent, HaiSpec, HistoryEntry, PaneInfo, ToolResult, UserChoice } from "./protocol";
+import type { AgentEvent, HaiSpec, HistoryEntry, PaneInfo, RoleMeta, RoleFull, ToolResult, UserChoice } from "./protocol";
+import { ROLE_CATEGORIES } from "./protocol";
 import { StreamingMarkdown } from "./renderer";
 
 // ---------- marked + highlight.js 懒初始化 ----------
@@ -75,6 +76,8 @@ const ICONS = {
   trash: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   chevron: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   check: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  role: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.5"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+  star: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>`,
 };
 
 // ---------- 类型 ----------
@@ -117,8 +120,13 @@ interface AiConfig {
     dangerous_commands?: string[];
     always_ask_for?: string[];
     command_timeout?: number;
+    ask_approval_timeout?: number;
+    plan_confirm_timeout?: number;
+    ask_user_timeout?: number;
+    read_terminal_timeout?: number;
   };
   roles?: Record<string, { model?: string }>;
+  default_role?: string;
 }
 
 // ---------- AgentModal ----------
@@ -139,10 +147,12 @@ export class AgentModal {
   private closeBtn: HTMLElement;
   private chatView: HTMLElement;
   private settingsView: HTMLElement;
+  private rolesView: HTMLElement;
   private glassBtn: HTMLElement;
   private themeBtn: HTMLElement;
   private clearBtn: HTMLElement;
   private settingsBtn: HTMLElement;
+  private rolesBtn: HTMLElement;
   private historyBtn: HTMLElement;
   private historyDrawer: HTMLElement;
 
@@ -156,6 +166,11 @@ export class AgentModal {
   /** 设置面板缓存的配置 */
   private config: AiConfig | null = null;
   private configLoaded = false;
+
+  /** 角色管理状态 */
+  private rolesLoaded = false;
+  private editingRoleId: string | null = null;
+  private defaultRoleId: string = "";
 
   /** 外部设置的终端读取回调（main.ts 注入，用于 read_terminal 工具） */
   onReadTerminal: ((paneId: string, lines: number) => Promise<string>) | null = null;
@@ -180,6 +195,7 @@ export class AgentModal {
         <div class="hai-header">
           <div class="hai-header-left">
             <button class="hai-icon-btn hai-btn-history" title="历史对话">${ICONS.history}</button>
+            <button class="hai-icon-btn hai-btn-roles" title="角色管理">${ICONS.role}</button>
             <span class="hai-mode-badge">Auto</span>
           </div>
           <div class="hai-header-right">
@@ -242,6 +258,38 @@ export class AgentModal {
               <span class="hai-settings-hint"></span>
             </div>
           </div>
+          <div class="hai-view hai-view-roles">
+            <div class="hai-roles-body">
+              <div class="hai-roles-list">
+                <button class="hai-btn-new-role">${ICONS.plus} 新建角色</button>
+                <div class="hai-roles-groups"></div>
+              </div>
+              <div class="hai-role-editor">
+                <div class="hai-form-row">
+                  <label>名称</label>
+                  <input type="text" class="hai-role-name" placeholder="角色名称" />
+                </div>
+                <div class="hai-form-row">
+                  <label>分类</label>
+                  <select class="hai-role-category"></select>
+                </div>
+                <div class="hai-form-row">
+                  <label>描述</label>
+                  <input type="text" class="hai-role-desc" placeholder="简短描述" />
+                </div>
+                <div class="hai-form-row hai-form-row-content">
+                  <label>提示词</label>
+                  <textarea class="hai-role-content" rows="12" placeholder="系统提示词内容...&#10;可用占位符: {cwd} {pane_table}"></textarea>
+                </div>
+                <div class="hai-role-actions">
+                  <button class="btn hai-btn-role-save">保存</button>
+                  <button class="btn hai-btn-role-default">设为默认</button>
+                  <button class="btn hai-btn-role-delete">删除</button>
+                </div>
+                <span class="hai-role-hint"></span>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="hai-history-drawer hidden">
           <div class="hai-history-drawer-header">
@@ -265,7 +313,9 @@ export class AgentModal {
     this.themeBtn = this.overlay.querySelector(".hai-btn-theme")!;
     this.clearBtn = this.overlay.querySelector(".hai-btn-clear")!;
     this.settingsBtn = this.overlay.querySelector(".hai-btn-settings")!;
+    this.rolesBtn = this.overlay.querySelector(".hai-btn-roles")!;
     this.historyBtn = this.overlay.querySelector(".hai-btn-history")!;
+    this.rolesView = this.overlay.querySelector(".hai-view-roles")!;
 
     // 从 localStorage 恢复偏好
     this.glassMode = localStorage.getItem("hai-glass") === "true";
@@ -297,8 +347,15 @@ export class AgentModal {
       });
     });
     this.settingsBtn.addEventListener("click", () => this.switchView("settings"));
+    this.rolesBtn.addEventListener("click", () => this.switchView("roles"));
     this.historyBtn.addEventListener("click", () => this.toggleHistoryDrawer());
     this.overlay.querySelector(".hai-history-drawer-close")!.addEventListener("click", () => this.toggleHistoryDrawer(false));
+
+    // 角色管理
+    this.overlay.querySelector(".hai-btn-new-role")!.addEventListener("click", () => this.newRole());
+    this.overlay.querySelector(".hai-btn-role-save")!.addEventListener("click", () => void this.saveRole());
+    this.overlay.querySelector(".hai-btn-role-default")!.addEventListener("click", () => void this.setRoleDefault());
+    this.overlay.querySelector(".hai-btn-role-delete")!.addEventListener("click", () => void this.deleteRole());
 
     this.sendBtn.addEventListener("click", () => this.send());
     this.abortBtn.addEventListener("click", () => this.abort());
@@ -359,16 +416,282 @@ export class AgentModal {
 
   // ---------- 视图切换 ----------
 
-  private switchView(view: "chat" | "settings"): void {
+  private switchView(view: "chat" | "settings" | "roles"): void {
     this.chatView.classList.toggle("active", view === "chat");
     this.settingsView.classList.toggle("active", view === "settings");
+    this.rolesView.classList.toggle("active", view === "roles");
     this.settingsBtn.classList.toggle("active", view === "settings");
+    this.rolesBtn.classList.toggle("active", view === "roles");
     if (view === "settings" && !this.configLoaded) {
       void this.loadSettings();
+    }
+    if (view === "roles" && !this.rolesLoaded) {
+      void this.loadRoles();
     }
     if (view === "chat") {
       this.inputEl.focus();
     }
+  }
+
+  // ---------- 角色管理 ----------
+
+  private async loadRoles(): Promise<void> {
+    // 初始化分类下拉
+    const catSelect = this.overlay.querySelector(".hai-role-category") as HTMLSelectElement;
+    if (catSelect.children.length === 0) {
+      for (const cat of ROLE_CATEGORIES) {
+        const opt = document.createElement("option");
+        opt.value = cat;
+        opt.textContent = cat;
+        catSelect.appendChild(opt);
+      }
+    }
+
+    // 读取默认角色
+    try {
+      const config = await api.agentLoadConfig() as AiConfig;
+      this.defaultRoleId = config.default_role || "";
+    } catch { /* ignore */ }
+
+    // 加载角色列表
+    try {
+      const roles = await api.agentListRoles() as RoleMeta[];
+      this.renderRolesList(roles);
+      this.rolesLoaded = true;
+    } catch (err: any) {
+      this.setRoleHint(String(err?.message ?? err), true);
+    }
+  }
+
+  private renderRolesList(roles: RoleMeta[]): void {
+    const container = this.overlay.querySelector(".hai-roles-groups")!;
+    container.innerHTML = "";
+
+    // 按分类分组
+    const groups = new Map<string, RoleMeta[]>();
+    for (const role of roles) {
+      const cat = role.category || "默认";
+      if (!groups.has(cat)) groups.set(cat, []);
+      groups.get(cat)!.push(role);
+    }
+
+    // 按 ROLE_CATEGORIES 顺序渲染，未列出的分类放最后
+    const orderedCats = [...ROLE_CATEGORIES];
+    for (const [cat] of groups) {
+      if (!orderedCats.includes(cat)) orderedCats.push(cat);
+    }
+
+    for (const cat of orderedCats) {
+      const items = groups.get(cat);
+      if (!items || items.length === 0) continue;
+
+      const groupEl = document.createElement("div");
+      groupEl.className = "hai-role-group";
+      groupEl.innerHTML = `<div class="hai-role-group-title">${cat}</div>`;
+      const listEl = document.createElement("div");
+      listEl.className = "hai-role-group-list";
+
+      for (const role of items) {
+        const itemEl = document.createElement("div");
+        itemEl.className = "hai-role-item";
+        if (role.id === this.editingRoleId) itemEl.classList.add("selected");
+        itemEl.dataset.roleId = role.id;
+
+        const isDefault = role.id === this.defaultRoleId;
+        itemEl.innerHTML = `
+          <span class="hai-role-item-name">${this.escapeHtml(role.name || role.id)}</span>
+          ${isDefault ? `<span class="hai-role-default-mark" title="默认角色">${ICONS.star}</span>` : ""}
+          ${role.description ? `<span class="hai-role-item-desc">${this.escapeHtml(role.description)}</span>` : ""}
+        `;
+        itemEl.addEventListener("click", () => void this.selectRole(role.id));
+        listEl.appendChild(itemEl);
+      }
+      groupEl.appendChild(listEl);
+      container.appendChild(groupEl);
+    }
+  }
+
+  private async selectRole(id: string): Promise<void> {
+    try {
+      const role = await api.agentGetRole(id) as RoleFull;
+      this.editingRoleId = id;
+      (this.overlay.querySelector(".hai-role-name") as HTMLInputElement).value = role.name;
+      (this.overlay.querySelector(".hai-role-category") as HTMLSelectElement).value = role.category || "默认";
+      (this.overlay.querySelector(".hai-role-desc") as HTMLInputElement).value = role.description;
+      (this.overlay.querySelector(".hai-role-content") as HTMLTextAreaElement).value = role.content;
+
+      // 高亮选中项
+      this.overlay.querySelectorAll(".hai-role-item").forEach((el) => {
+        el.classList.toggle("selected", (el as HTMLElement).dataset.roleId === id);
+      });
+      this.setRoleHint("");
+    } catch (err: any) {
+      this.setRoleHint(String(err?.message ?? err), true);
+    }
+  }
+
+  private newRole(): void {
+    this.editingRoleId = null;
+    (this.overlay.querySelector(".hai-role-name") as HTMLInputElement).value = "";
+    (this.overlay.querySelector(".hai-role-category") as HTMLSelectElement).value = "默认";
+    (this.overlay.querySelector(".hai-role-desc") as HTMLInputElement).value = "";
+    (this.overlay.querySelector(".hai-role-content") as HTMLTextAreaElement).value = "";
+    this.overlay.querySelectorAll(".hai-role-item").forEach((el) => el.classList.remove("selected"));
+    this.setRoleHint("新建角色：填写名称和提示词后保存");
+    (this.overlay.querySelector(".hai-role-name") as HTMLInputElement).focus();
+  }
+
+  private async saveRole(): Promise<void> {
+    const name = (this.overlay.querySelector(".hai-role-name") as HTMLInputElement).value.trim();
+    const category = (this.overlay.querySelector(".hai-role-category") as HTMLSelectElement).value;
+    const description = (this.overlay.querySelector(".hai-role-desc") as HTMLInputElement).value.trim();
+    const content = (this.overlay.querySelector(".hai-role-content") as HTMLTextAreaElement).value;
+
+    if (!name) {
+      this.setRoleHint("请填写角色名称", true);
+      return;
+    }
+    if (!content.trim()) {
+      this.setRoleHint("请填写提示词内容", true);
+      return;
+    }
+
+    // 从名称生成 ID（编辑已有角色时保持原 ID）
+    const id = this.editingRoleId || this.slugify(name);
+
+    try {
+      await api.agentSaveRole(id, name, category, description, content);
+      this.editingRoleId = id;
+      this.setRoleHint("已保存");
+      // 刷新列表
+      const roles = await api.agentListRoles() as RoleMeta[];
+      this.renderRolesList(roles);
+    } catch (err: any) {
+      this.setRoleHint(String(err?.message ?? err), true);
+    }
+  }
+
+  private async deleteRole(): Promise<void> {
+    if (!this.editingRoleId) {
+      this.setRoleHint("未选择角色", true);
+      return;
+    }
+    const roleName = (this.overlay.querySelector(".hai-role-name") as HTMLInputElement).value || this.editingRoleId;
+    this.showConfirm(`确定删除角色「${roleName}」？`, async () => {
+      try {
+        await api.agentDeleteRole(this.editingRoleId!);
+        // 若删除的是默认角色，清除默认设置
+        if (this.editingRoleId === this.defaultRoleId) {
+          await api.agentSetDefaultRole(null);
+          this.defaultRoleId = "";
+        }
+        this.newRole();
+        const roles = await api.agentListRoles() as RoleMeta[];
+        this.renderRolesList(roles);
+        this.setRoleHint("已删除");
+      } catch (err: any) {
+        this.setRoleHint(String(err?.message ?? err), true);
+      }
+    });
+  }
+
+  private async setRoleDefault(): Promise<void> {
+    if (!this.editingRoleId) {
+      this.setRoleHint("未选择角色", true);
+      return;
+    }
+    try {
+      await api.agentSetDefaultRole(this.editingRoleId);
+      this.defaultRoleId = this.editingRoleId;
+      // 刷新列表显示星标
+      const roles = await api.agentListRoles() as RoleMeta[];
+      this.renderRolesList(roles);
+      this.setRoleHint(`已将「${(this.overlay.querySelector(".hai-role-name") as HTMLInputElement).value}」设为默认角色`);
+    } catch (err: any) {
+      this.setRoleHint(String(err?.message ?? err), true);
+    }
+  }
+
+  private setRoleHint(msg: string, isError = false): void {
+    const hint = this.overlay.querySelector(".hai-role-hint") as HTMLElement;
+    hint.textContent = msg;
+    hint.classList.toggle("error", isError);
+  }
+
+  private slugify(name: string): string {
+    return name.trim()
+      .replace(/\s+/g, "-")
+      .replace(/[\/\\:*?"<>|]/g, "")
+      .toLowerCase();
+  }
+
+  private escapeHtml(s: string): string {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  /** 角色选择器（hai 命令未指定 role 且无默认角色时弹出） */
+  private showRolePicker(): Promise<string | null> {
+    return new Promise((resolve) => {
+      const picker = document.createElement("div");
+      picker.className = "hai-role-picker-overlay";
+      picker.innerHTML = `
+        <div class="hai-role-picker">
+          <div class="hai-role-picker-title">选择角色</div>
+          <div class="hai-role-picker-body"></div>
+          <div class="hai-role-picker-actions">
+            <button class="btn hai-role-picker-skip">跳过（用通用助手）</button>
+          </div>
+        </div>`;
+      document.body.appendChild(picker);
+
+      const cleanup = () => picker.remove();
+
+      picker.querySelector(".hai-role-picker-skip")!.addEventListener("click", () => {
+        cleanup();
+        resolve("general");
+      });
+
+      // 加载角色列表
+      void (async () => {
+        try {
+          const roles = await api.agentListRoles() as RoleMeta[];
+          const body = picker.querySelector(".hai-role-picker-body")!;
+          const groups = new Map<string, RoleMeta[]>();
+          for (const role of roles) {
+            const cat = role.category || "默认";
+            if (!groups.has(cat)) groups.set(cat, []);
+            groups.get(cat)!.push(role);
+          }
+          const orderedCats = [...ROLE_CATEGORIES];
+          for (const [cat] of groups) {
+            if (!orderedCats.includes(cat)) orderedCats.push(cat);
+          }
+          for (const cat of orderedCats) {
+            const items = groups.get(cat);
+            if (!items || items.length === 0) continue;
+            const groupEl = document.createElement("div");
+            groupEl.className = "hai-role-picker-group";
+            groupEl.innerHTML = `<div class="hai-role-picker-group-title">${cat}</div>`;
+            for (const role of items) {
+              const itemEl = document.createElement("button");
+              itemEl.className = "hai-role-picker-item";
+              itemEl.innerHTML = `
+                <span class="hai-role-picker-name">${this.escapeHtml(role.name || role.id)}</span>
+                ${role.description ? `<span class="hai-role-picker-desc">${this.escapeHtml(role.description)}</span>` : ""}`;
+              itemEl.addEventListener("click", () => {
+                cleanup();
+                resolve(role.id);
+              });
+              groupEl.appendChild(itemEl);
+            }
+            body.appendChild(groupEl);
+          }
+        } catch {
+          cleanup();
+          resolve("general");
+        }
+      })();
+    });
   }
 
   // ---------- 模型选择器 ----------
@@ -911,7 +1234,19 @@ export class AgentModal {
   // ---------- 显示 / 隐藏 / 销毁 ----------
 
   async show(spec: HaiSpec, cwd: string, panes: PaneInfo[], paneRect?: DOMRect): Promise<void> {
-    this.role = spec.role || "general";
+    // role 解析优先级：OSC 指定 → config.default_role → 弹角色选择器
+    let role = spec.role;
+    if (!role) {
+      try {
+        const config = await api.agentLoadConfig() as AiConfig;
+        this.defaultRoleId = config.default_role || "";
+        role = this.defaultRoleId;
+      } catch { /* ignore */ }
+    }
+    if (!role) {
+      role = (await this.showRolePicker()) || "general";
+    }
+    this.role = role;
     this.mode = spec.mode || "auto";
     this.currentCwd = cwd;
 

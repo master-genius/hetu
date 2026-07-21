@@ -138,6 +138,7 @@ struct StreamChoice {
     #[serde(default)]
     delta: StreamDelta,
     #[serde(default)]
+    #[allow(dead_code)]
     finish_reason: Option<String>,
 }
 

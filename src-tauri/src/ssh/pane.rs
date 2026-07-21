@@ -58,7 +58,7 @@ pub async fn open(
     mut rx: mpsc::UnboundedReceiver<PaneCmd>,
     on_event: Channel<PaneEvent>,
 ) -> Result<()> {
-    let mut channel = {
+    let channel = {
         let guard = conn.handle.lock().await;
         let handle = guard.as_ref().ok_or_else(|| Error::msg("连接未建立"))?;
         handle.channel_open_session().await?
