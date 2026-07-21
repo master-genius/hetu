@@ -112,6 +112,7 @@ pub struct UserChoice {
 
 /// Pane 信息（list_panes 工具 + agent_update_panes 命令）
 #[derive(Serialize, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PaneInfo {
     pub id: String,
     pub is_local: bool,

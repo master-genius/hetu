@@ -2276,6 +2276,12 @@ input[type="checkbox"] {
 
 .hai-overlay {
   z-index: 160;
+  /* 比通用 .modal-overlay 更通透，让终端内容透出 */
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.hai-overlay:has(.hai-modal[data-theme="light"]) {
+  background: rgba(0, 0, 0, 0.06);
 }
 
 .hai-overlay.hai-floating {
@@ -2474,7 +2480,10 @@ input[type="checkbox"] {
   text-align: center;
 }
 
-.hai-error-hint {
+.hai-msg-error-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
   margin-top: 8px;
 }
 
@@ -2486,6 +2495,65 @@ input[type="checkbox"] {
   padding: 4px 10px;
   border-radius: 6px;
   cursor: pointer;
+}
+
+.hai-msg-retry-btn {
+  background: color-mix(in srgb, var(--term-fg) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--term-fg) 20%, transparent);
+  color: var(--term-fg);
+  font-size: 12px;
+  padding: 4px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.hai-msg-retry-btn:hover {
+  background: color-mix(in srgb, var(--term-fg) 20%, transparent);
+}
+
+/* ===== Thinking Indicator ===== */
+
+.hai-msg-thinking {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  align-self: flex-start;
+}
+
+.hai-thinking-avatar {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--term-blue) 15%, transparent);
+  color: var(--term-blue);
+  animation: hai-thinking-bounce 1.2s ease-in-out infinite;
+}
+
+.hai-thinking-dots {
+  display: flex;
+  gap: 4px;
+}
+.hai-thinking-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--term-fg) 40%, transparent);
+  animation: hai-thinking-dot 1.4s ease-in-out infinite;
+}
+.hai-thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+.hai-thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes hai-thinking-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+@keyframes hai-thinking-dot {
+  0%, 60%, 100% { opacity: 0.3; transform: scale(0.8); }
+  30% { opacity: 1; transform: scale(1.2); }
 }
 
 /* ===== Model Selector Bar ===== */
@@ -2641,14 +2709,60 @@ input[type="checkbox"] {
 
 /* ===== Settings View ===== */
 
-.hai-settings-body {
+.hai-settings-layout {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.hai-settings-nav {
+  width: 160px;
+  flex-shrink: 0;
+  border-right: 1px solid color-mix(in srgb, var(--term-fg) 8%, transparent);
+  padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.hai-settings-nav-item {
+  padding: 8px 16px;
+  text-align: left;
+  font-size: 13px;
+  color: color-mix(in srgb, var(--term-fg) 60%, transparent);
+  cursor: pointer;
+  border: none;
+  background: none;
+  border-left: 2px solid transparent;
+  transition: all 0.15s;
+}
+.hai-settings-nav-item:hover {
+  color: var(--term-fg);
+  background: color-mix(in srgb, var(--term-fg) 5%, transparent);
+}
+.hai-settings-nav-item.active {
+  color: var(--term-fg);
+  border-left-color: var(--term-blue, #61afef);
+  background: color-mix(in srgb, var(--term-fg) 8%, transparent);
+}
+
+.hai-settings-content {
   flex: 1;
   overflow-y: auto;
+}
+
+.hai-settings-pane {
+  display: none;
+  height: 100%;
+}
+.hai-settings-pane.active {
+  display: block;
+}
+
+.hai-settings-body {
   padding: 12px 20px;
-  /* 限制最大宽度，避免在宽面板上内容过度拉伸 */
   max-width: 620px;
   width: 100%;
-  align-self: center;
+  margin: 0 auto;
 }
 
 .hai-settings-top {
@@ -2775,42 +2889,54 @@ input[type="checkbox"] {
   color: color-mix(in srgb, var(--term-fg) 45%, transparent);
 }
 
-.hai-model-expand {
-  transition: transform 0.15s;
-}
-
-.hai-model-expand.expanded svg {
-  transform: rotate(180deg);
-}
-
 .hai-model-card-body {
   padding: 8px 10px 10px;
   border-top: 1px solid color-mix(in srgb, var(--term-fg) 6%, transparent);
 }
 
-.hai-model-card-footer {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid color-mix(in srgb, var(--term-fg) 6%, transparent);
+.hai-model-delete-inline,
+.hai-endpoint-delete-inline {
+  opacity: 0.5;
+  transition: opacity 0.15s;
 }
-
-.hai-model-set-default-btn {
-  font-size: 11px;
-  background: color-mix(in srgb, var(--term-blue) 15%, transparent);
-  border-color: color-mix(in srgb, var(--term-blue) 25%, transparent);
-  color: var(--term-blue);
-}
-
-.hai-model-delete-btn {
-  font-size: 11px;
-  background: color-mix(in srgb, var(--term-red, #e5484d) 12%, transparent);
-  border-color: color-mix(in srgb, var(--term-red, #e5484d) 20%, transparent);
+.hai-model-delete-inline:hover,
+.hai-endpoint-delete-inline:hover {
+  opacity: 1;
   color: var(--term-red, #e5484d);
+}
+
+.hai-endpoint-section {
+  margin-top: 8px;
+}
+
+.hai-endpoint-section-title {
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: color-mix(in srgb, var(--term-fg) 50%, transparent);
+}
+
+.hai-btn-add-endpoint {
+  font-size: 11px;
+  padding: 3px 8px;
+  background: color-mix(in srgb, var(--term-fg) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--term-fg) 12%, transparent);
+  border-radius: 4px;
+  color: var(--term-fg);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.hai-btn-add-endpoint:hover {
+  background: color-mix(in srgb, var(--term-fg) 14%, transparent);
 }
 
 /* ===== Endpoint Cards ===== */
@@ -2826,20 +2952,35 @@ input[type="checkbox"] {
 .hai-endpoint-card-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 6px 8px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.hai-endpoint-card-header:hover {
-  background: color-mix(in srgb, var(--term-fg) 4%, transparent);
+  gap: 8px;
+  padding: 5px 8px;
+  background: color-mix(in srgb, var(--term-fg) 3%, transparent);
 }
 
 .hai-endpoint-label {
   font-size: 11px;
   font-weight: 600;
   color: color-mix(in srgb, var(--term-fg) 60%, transparent);
+  white-space: nowrap;
+}
+
+.hai-endpoint-url-preview {
+  flex: 1;
+  font-size: 11px;
+  font-family: var(--ui-font, "JetBrains Mono NL", monospace);
+  color: color-mix(in srgb, var(--term-fg) 45%, transparent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hai-endpoint-weight-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--term-blue) 15%, transparent);
+  color: var(--term-blue);
+  white-space: nowrap;
 }
 
 .hai-endpoint-card-body {
@@ -2862,22 +3003,6 @@ input[type="checkbox"] {
 
 .hai-advanced-params[open] summary {
   border-bottom: 1px solid color-mix(in srgb, var(--term-fg) 8%, transparent);
-}
-
-.hai-endpoint-card-footer {
-  display: flex;
-  gap: 8px;
-  margin-top: 6px;
-}
-
-.hai-endpoint-delete-btn {
-  font-size: 11px;
-  background: color-mix(in srgb, var(--term-red, #e5484d) 12%, transparent);
-  border-color: color-mix(in srgb, var(--term-red, #e5484d) 20%, transparent);
-  color: var(--term-red, #e5484d);
-  display: flex;
-  align-items: center;
-  gap: 4px;
 }
 
 /* ===== Settings Actions ===== */
@@ -3232,173 +3357,137 @@ input[type="checkbox"] {
 .hai-uq-input:focus { border-color: color-mix(in srgb, var(--term-blue) 50%, transparent); }
 
 /* ===== Themes ===== */
-
-.hai-modal[data-theme="light"] {
-  --hai-bg: #f5f5f5;
-  --hai-fg: #1a1a1a;
-  --hai-border: rgba(0, 0, 0, 0.12);
-  background: var(--hai-bg);
-  color: var(--hai-fg);
-}
-
-/* light: 覆盖所有使用 var(--term-fg)/var(--term-bg)/var(--term-blue) 的元素 */
-.hai-modal[data-theme="light"] .hai-header { border-color: var(--hai-border); }
-.hai-modal[data-theme="light"] .hai-input-container { border-color: var(--hai-border); background: rgba(0, 0, 0, 0.03); }
-.hai-modal[data-theme="light"] .hai-input { color: var(--hai-fg); }
-.hai-modal[data-theme="light"] .hai-input::placeholder { color: rgba(0, 0, 0, 0.3); }
-.hai-modal[data-theme="light"] .hai-status-bar { border-color: var(--hai-border); }
-.hai-modal[data-theme="light"] .hai-status { color: rgba(0, 0, 0, 0.45); }
-.hai-modal[data-theme="light"] .hai-msg-user { background: rgba(0, 100, 200, 0.12); border-color: rgba(0, 100, 200, 0.2); }
-.hai-modal[data-theme="light"] .hai-msg-assistant { background: rgba(0, 0, 0, 0.04); border-color: var(--hai-border); }
-.hai-modal[data-theme="light"] .hai-msg-assistant .hai-msg-content pre { background: rgba(0, 0, 0, 0.06); }
-/* icon buttons */
-.hai-modal[data-theme="light"] .hai-icon-btn { color: rgba(0, 0, 0, 0.45); }
-.hai-modal[data-theme="light"] .hai-icon-btn:hover { color: rgba(0, 0, 0, 0.8); background: rgba(0, 0, 0, 0.06); }
-.hai-modal[data-theme="light"] .hai-icon-btn.active { background: rgba(0, 0, 0, 0.08); color: rgba(0, 0, 0, 0.8); }
-.hai-modal[data-theme="light"] .hai-btn-close { color: rgba(0, 0, 0, 0.35); }
-.hai-modal[data-theme="light"] .hai-btn-close:hover { color: rgba(0, 0, 0, 0.7); }
-/* mode badge: 暗色系 */
-.hai-modal[data-theme="light"] .hai-mode-badge { background: rgba(0, 0, 0, 0.06); color: rgba(0, 0, 0, 0.7); }
-/* model selector */
-.hai-modal[data-theme="light"] .hai-model-select { color: rgba(0, 0, 0, 0.6); border-color: rgba(0, 0, 0, 0.15); }
-/* settings */
-.hai-modal[data-theme="light"] .hai-settings-section h4 { color: rgba(0, 0, 0, 0.45); }
-.hai-modal[data-theme="light"] .hai-settings-hint { color: rgba(0, 0, 0, 0.4); }
-.hai-modal[data-theme="light"] .hai-form-row label { color: rgba(0, 0, 0, 0.55); }
-.hai-modal[data-theme="light"] .hai-form-row input,
-.hai-modal[data-theme="light"] .hai-form-row select { color: rgba(0, 0, 0, 0.85); background: rgba(0, 0, 0, 0.04); border-color: rgba(0, 0, 0, 0.15); }
-.hai-modal[data-theme="light"] .hai-form-row input:focus,
-.hai-modal[data-theme="light"] .hai-form-row select:focus { border-color: rgba(0, 0, 0, 0.35); }
-/* model cards */
-.hai-modal[data-theme="light"] .hai-model-card { border-color: rgba(0, 0, 0, 0.1); background: rgba(0, 0, 0, 0.02); }
-.hai-modal[data-theme="light"] .hai-model-card-header:hover { background: rgba(0, 0, 0, 0.04); }
-.hai-modal[data-theme="light"] .hai-model-key { color: rgba(0, 0, 0, 0.85); }
-.hai-modal[data-theme="light"] .hai-model-name { color: rgba(0, 0, 0, 0.5); }
-.hai-modal[data-theme="light"] .hai-model-sep { color: rgba(0, 0, 0, 0.3); }
-.hai-modal[data-theme="light"] .hai-btn-add-model { border-color: rgba(0, 0, 0, 0.12); color: rgba(0, 0, 0, 0.5); }
-.hai-modal[data-theme="light"] .hai-btn-add-model:hover { border-color: rgba(0, 0, 0, 0.25); color: rgba(0, 0, 0, 0.7); background: rgba(0, 0, 0, 0.04); }
-/* endpoint cards */
-.hai-modal[data-theme="light"] .hai-endpoint-card { border-color: rgba(0, 0, 0, 0.1); background: rgba(0, 0, 0, 0.02); }
-.hai-modal[data-theme="light"] .hai-endpoint-card-header:hover { background: rgba(0, 0, 0, 0.04); }
-.hai-modal[data-theme="light"] .hai-endpoint-label { color: rgba(0, 0, 0, 0.5); }
-/* empty state */
-.hai-modal[data-theme="light"] .hai-empty-title { color: rgba(0, 0, 0, 0.7); }
-.hai-modal[data-theme="light"] .hai-empty-desc { color: rgba(0, 0, 0, 0.4); }
-.hai-modal[data-theme="light"] .hai-suggestion-chip { color: rgba(0, 0, 0, 0.65); border-color: rgba(0, 0, 0, 0.15); background: rgba(0, 0, 0, 0.04); }
-.hai-modal[data-theme="light"] .hai-suggestion-chip:hover { color: rgba(0, 0, 0, 0.85); border-color: rgba(0, 0, 0, 0.3); background: rgba(0, 0, 0, 0.08); }
-/* roles */
-.hai-modal[data-theme="light"] .hai-btn-new-role { background: rgba(0, 0, 0, 0.06); border-color: rgba(0, 0, 0, 0.15); color: rgba(0, 0, 0, 0.7); }
-.hai-modal[data-theme="light"] .hai-btn-new-role:hover { background: rgba(0, 0, 0, 0.1); }
-.hai-modal[data-theme="light"] .hai-role-group-title { color: rgba(0, 0, 0, 0.4); }
-.hai-modal[data-theme="light"] .hai-role-item:hover { background: rgba(0, 0, 0, 0.06); }
-.hai-modal[data-theme="light"] .hai-role-item.selected { background: rgba(0, 0, 0, 0.08); }
-.hai-modal[data-theme="light"] .hai-role-item-name { color: rgba(0, 0, 0, 0.85); }
-.hai-modal[data-theme="light"] .hai-role-item-desc { color: rgba(0, 0, 0, 0.4); }
-.hai-modal[data-theme="light"] .hai-role-editor label { color: rgba(0, 0, 0, 0.55); }
-.hai-modal[data-theme="light"] .hai-role-editor input,
-.hai-modal[data-theme="light"] .hai-role-editor select,
-.hai-modal[data-theme="light"] .hai-role-editor textarea { color: rgba(0, 0, 0, 0.85); background: rgba(0, 0, 0, 0.03); border-color: rgba(0, 0, 0, 0.15); }
-/* history drawer */
-.hai-modal[data-theme="light"] .hai-history-drawer { background: rgba(245, 245, 245, 0.92); }
-.hai-modal[data-theme="light"] .hai-history-cwd { color: rgba(0, 0, 0, 0.7); }
-.hai-modal[data-theme="light"] .hai-history-meta { color: rgba(0, 0, 0, 0.4); }
-.hai-modal[data-theme="light"] .hai-history-preview { color: rgba(0, 0, 0, 0.6); }
-.hai-modal[data-theme="light"] .hai-history-card { border-color: rgba(0, 0, 0, 0.08); background: rgba(0, 0, 0, 0.02); }
-.hai-modal[data-theme="light"] .hai-history-card:hover { border-color: rgba(0, 0, 0, 0.2); }
-/* tool calls */
-.hai-modal[data-theme="light"] .hai-tool-call { background: rgba(0, 0, 0, 0.02); border-color: rgba(0, 0, 0, 0.1); }
-.hai-modal[data-theme="light"] .hai-tool-header { background: rgba(0, 0, 0, 0.03); border-color: rgba(0, 0, 0, 0.08); }
-.hai-modal[data-theme="light"] .hai-tool-name { color: rgba(0, 0, 0, 0.7); }
-/* message content */
-.hai-modal[data-theme="light"] .hai-msg-assistant .hai-msg-content blockquote { color: rgba(0, 0, 0, 0.55); border-color: rgba(0, 0, 0, 0.2); }
-.hai-modal[data-theme="light"] .hai-msg-assistant .hai-msg-content p code,
-.hai-modal[data-theme="light"] .hai-msg-assistant .hai-msg-content li code { background: rgba(0, 0, 0, 0.08); }
-.hai-modal[data-theme="light"] .hai-msg-assistant .hai-msg-content th,
-.hai-modal[data-theme="light"] .hai-msg-assistant .hai-msg-content td { border-color: rgba(0, 0, 0, 0.12); }
-/* confirm */
-.hai-modal[data-theme="light"] .hai-confirm-overlay { background: rgba(0, 0, 0, 0.15); }
-.hai-modal[data-theme="light"] .hai-confirm-box { background: rgba(245, 245, 245, 0.92); border-color: rgba(0, 0, 0, 0.1); }
-.hai-modal[data-theme="light"] .hai-send-btn { background: rgba(0, 0, 0, 0.08); color: rgba(0, 0, 0, 0.7); border-color: rgba(0, 0, 0, 0.15); }
-.hai-modal[data-theme="light"] .hai-send-btn:hover { background: rgba(0, 0, 0, 0.15); }
-.hai-modal[data-theme="light"] .hai-btn-save-settings { background: rgba(0, 0, 0, 0.08); color: rgba(0, 0, 0, 0.7); border-color: rgba(0, 0, 0, 0.15); }
-.hai-modal[data-theme="light"] .hai-btn-save-settings:hover { background: rgba(0, 0, 0, 0.15); }
-.hai-modal[data-theme="light"] .hai-btn-role-save { background: rgba(0, 0, 0, 0.75); color: #fff; }
-.hai-modal[data-theme="light"] .hai-btn-role-save:hover { background: rgba(0, 0, 0, 0.85); }
+/* 核心设计：在 .hai-modal 层级覆盖终端 CSS 变量（--term-fg / --term-bg 等）。
+   所有 HAI 子元素引用 var(--term-fg) 等时，自动取到正确的主题色，
+   不再需要逐元素写 [data-theme="light"] override。auto 模式不覆盖，继承终端。 */
 
 .hai-modal[data-theme="dark"] {
-  --hai-bg: #1e1e1e;
-  --hai-fg: #e0e0e0;
-  --hai-border: rgba(255, 255, 255, 0.12);
-  background: var(--hai-bg);
-  color: var(--hai-fg);
+  --term-fg: #e0e0e0;
+  --term-bg: #1e1e1e;
+  --term-blue: #5b9dff;
+  --term-red: #e5484d;
+  --term-yellow: #e5c07b;
+  --term-green: #4caf50;
+  --hai-border: rgba(255, 255, 255, 0.1);
+  background: var(--term-bg);
+  color: var(--term-fg);
 }
 
-.hai-modal[data-theme="dark"] .hai-header { border-color: var(--hai-border); }
-.hai-modal[data-theme="dark"] .hai-input-container { border-color: var(--hai-border); background: rgba(255, 255, 255, 0.04); }
-.hai-modal[data-theme="dark"] .hai-input { color: var(--hai-fg); }
-.hai-modal[data-theme="dark"] .hai-status-bar { border-color: var(--hai-border); }
-.hai-modal[data-theme="dark"] .hai-msg-assistant .hai-msg-content pre { background: rgba(0, 0, 0, 0.4); }
+.hai-modal[data-theme="light"] {
+  --term-fg: #1a1a1a;
+  --term-bg: #f8f8f8;
+  --term-blue: #0066cc;
+  --term-red: #d32f2f;
+  --term-yellow: #e5a100;
+  --term-green: #2e7d32;
+  --hai-border: rgba(0, 0, 0, 0.1);
+  background: var(--term-bg);
+  color: var(--term-fg);
+}
 
 /* ===== Glass Mode ===== */
+/* 三态：off（不透明） / shell（跟随终端透明） / glass（AI 独立高透模糊）
+   参数全部抽为独立变量，方便单独调整：
+   --hai-glass-opacity  : 本体遮盖不透明度（越高越不透明）
+   --hai-glass-blur     : backdrop-filter 模糊半径
+   --hai-glass-saturate : 饱和度提升倍数
+   --hai-glass-child-opacity : 子区域（header/input等）遮盖不透明度
+   --hai-glass-child-blur   : 子区域模糊半径
+*/
 
-.hai-modal[data-glass="true"] {
-  --hai-bg-rgb: 30, 30, 30;
-  --hai-fg-rgb: 224, 224, 224;
-  background: rgba(var(--hai-bg-rgb), 0.12);
-  backdrop-filter: blur(30px) saturate(1.2);
-  -webkit-backdrop-filter: blur(30px) saturate(1.2);
+/* off：完全不透明，纯色背景，无模糊 */
+.hai-modal[data-glass="off"] {
+  background: var(--term-bg);
 }
 
-.hai-modal[data-glass="true"][data-theme="light"] {
-  --hai-bg-rgb: 245, 245, 245;
+/* shell：跟随终端窗口本身的透明度，不加额外模糊 */
+.hai-modal[data-glass="shell"] {
+  background: transparent;
+}
+
+/* glass：AI 独立高透 + 强模糊 */
+.hai-modal[data-glass="glass"] {
+  --hai-bg-rgb: 30, 30, 30;
+  --hai-fg-rgb: 224, 224, 224;
+  --hai-glass-opacity: 0.12;
+  --hai-glass-blur: 40px;
+  --hai-glass-saturate: 1.6;
+  --hai-glass-child-opacity: 0.4;
+  --hai-glass-child-blur: 20px;
+  background: rgba(var(--hai-bg-rgb), var(--hai-glass-opacity));
+  backdrop-filter: blur(var(--hai-glass-blur)) saturate(var(--hai-glass-saturate));
+  -webkit-backdrop-filter: blur(var(--hai-glass-blur)) saturate(var(--hai-glass-saturate));
+}
+
+.hai-modal[data-glass="glass"][data-theme="light"] {
+  --hai-bg-rgb: 248, 248, 248;
   --hai-fg-rgb: 26, 26, 26;
+  --hai-glass-opacity: 0.31;
+  --hai-glass-child-opacity: 0.45;
 }
 
-.hai-modal[data-glass="true"][data-theme="dark"] {
+.hai-modal[data-glass="glass"][data-theme="dark"] {
   --hai-bg-rgb: 30, 30, 30;
   --hai-fg-rgb: 224, 224, 224;
 }
 
-.hai-modal[data-glass="true"] .hai-header,
-.hai-modal[data-glass="true"] .hai-input-container,
-.hai-modal[data-glass="true"] .hai-status-bar {
-  background: rgba(var(--hai-bg-rgb), 0.55);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+/* glass 模式下子区域遮盖 */
+.hai-modal[data-glass="glass"] .hai-header,
+.hai-modal[data-glass="glass"] .hai-input-container,
+.hai-modal[data-glass="glass"] .hai-status-bar {
+  background: rgba(var(--hai-bg-rgb), var(--hai-glass-child-opacity));
+  backdrop-filter: blur(var(--hai-glass-child-blur));
+  -webkit-backdrop-filter: blur(var(--hai-glass-child-blur));
   border-color: rgba(var(--hai-fg-rgb), 0.08);
 }
 
-.hai-modal[data-glass="true"] .hai-messages { background: transparent; }
+.hai-modal[data-glass="glass"] .hai-messages { background: transparent; }
 
-.hai-modal[data-glass="true"] .hai-msg-user {
+.hai-modal[data-glass="glass"] .hai-msg-user {
   background: rgba(var(--hai-fg-rgb), 0.08);
   border: 1px solid rgba(var(--hai-fg-rgb), 0.1);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
-.hai-modal[data-glass="true"] .hai-msg-assistant {
-  background: rgba(var(--hai-bg-rgb), 0.55);
+.hai-modal[data-glass="glass"] .hai-msg-assistant {
+  background: rgba(var(--hai-bg-rgb), 0.4);
   border: 1px solid rgba(var(--hai-fg-rgb), 0.08);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
-.hai-modal[data-glass="true"] .hai-tool-call {
-  background: rgba(var(--hai-bg-rgb), 0.45);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+.hai-modal[data-glass="glass"] .hai-tool-call {
+  background: rgba(var(--hai-bg-rgb), 0.35);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border-color: rgba(var(--hai-fg-rgb), 0.1);
 }
 
-.hai-modal[data-glass="true"] .hai-input-container {
-  background: rgba(var(--hai-bg-rgb), 0.5);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+.hai-modal[data-glass="glass"] .hai-input-container {
+  background: rgba(var(--hai-bg-rgb), 0.4);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
-.hai-modal[data-glass="true"] .hai-history-drawer {
-  background: rgba(var(--hai-bg-rgb), 0.75);
-  backdrop-filter: blur(26px);
-  -webkit-backdrop-filter: blur(26px);
+.hai-modal[data-glass="glass"] .hai-history-drawer {
+  background: rgba(var(--hai-bg-rgb), 0.7);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+}
+
+/* glass 模式下提升文字清晰度：文字加微弱阴影对抗模糊背景 */
+.hai-modal[data-glass="glass"][data-theme="dark"] {
+  --hai-text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+.hai-modal[data-glass="glass"][data-theme="light"] {
+  --hai-text-shadow: 0 1px 1px rgba(255, 255, 255, 0.5);
+}
+.hai-modal[data-glass="glass"] .hai-msg-user,
+.hai-modal[data-glass="glass"] .hai-msg-assistant,
+.hai-modal[data-glass="glass"] .hai-tool-call,
+.hai-modal[data-glass="glass"] .hai-input-container,
+.hai-modal[data-glass="glass"] .hai-header,
+.hai-modal[data-glass="glass"] .hai-status-bar {
+  text-shadow: var(--hai-text-shadow, none);
 }
 
 /* ===== Empty State ===== */
@@ -3739,13 +3828,13 @@ input[type="checkbox"] {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-width: 560px;
-  min-width: 260px;
+  min-width: 300px;
 }
 
 .hai-role-editor .hai-form-row {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 4px;
 }
 .hai-role-editor .hai-form-row label {
@@ -3756,6 +3845,7 @@ input[type="checkbox"] {
 .hai-role-editor .hai-form-row input,
 .hai-role-editor .hai-form-row select,
 .hai-role-editor .hai-form-row textarea {
+  width: 100%;
   padding: 8px 10px;
   background: color-mix(in srgb, var(--term-fg) 5%, transparent);
   border: 1px solid var(--hai-border, color-mix(in srgb, var(--term-fg) 15%, transparent));

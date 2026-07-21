@@ -76,7 +76,7 @@ const ICONS = {
   trash: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   chevron: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   check: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-  role: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20.59 12.59L12.8 4.8A2 2 0 0011.4 4H5a1 1 0 00-1 1v6.4a2 2 0 00.59 1.41l7.79 7.79a2 2 0 002.83 0l5.38-5.38a2 2 0 000-2.83zM8.5 9.5a1 1 0 111.41-1.41A1 1 0 018.5 9.5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  role: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="4" y="7" width="16" height="12" rx="3" stroke="currentColor" stroke-width="1.5"/><circle cx="9" cy="13" r="1.5" fill="currentColor"/><circle cx="15" cy="13" r="1.5" fill="currentColor"/><path d="M12 3v4M8.5 5.5L10 7M15.5 5.5L14 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M2 12v3M22 12v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
   star: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>`,
   maximize: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" stroke-width="1.5"/></svg>`,
   restore: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="3" y="7" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M7 7V5a2 2 0 012-2h10a2 2 0 012 2v10a2 2 0 01-2 2h-2" stroke="currentColor" stroke-width="1.5"/></svg>`,
@@ -164,10 +164,13 @@ export class AgentModal {
   private tabId: string;
   private role: string;
   private mode: string;
-  private glassMode = false;
+  private glassMode: "off" | "shell" | "glass" = "off";
   private themeMode: "auto" | "light" | "dark" = "auto";
   private currentCwd = "";
+  private lastPanes: PaneInfo[] = [];
   private maximized = false;
+  private lastUserText = "";
+  private thinkingEl: HTMLElement | null = null;
 
   /** 设置面板缓存的配置 */
   private config: AiConfig | null = null;
@@ -199,7 +202,7 @@ export class AgentModal {
     this.overlay = document.createElement("div");
     this.overlay.className = "modal-overlay hai-overlay";
     this.overlay.innerHTML = `
-      <div class="modal hai-modal">
+      <div class="modal hai-modal" data-glass="off">
         <div class="hai-header">
           <div class="hai-header-left">
             <button class="hai-icon-btn hai-btn-history" title="历史对话">${ICONS.history}</button>
@@ -243,23 +246,73 @@ export class AgentModal {
             </div>
           </div>
           <div class="hai-view hai-view-settings">
-            <div class="hai-settings-body">
-              <div class="hai-settings-top">
-                <div class="hai-form-row">
-                  <label>默认 Provider</label>
-                  <select class="hai-cfg-provider">
-                    <option value="openai">openai</option>
-                    <option value="anthropic">anthropic</option>
-                  </select>
-                </div>
+            <div class="hai-settings-layout">
+              <div class="hai-settings-nav">
+                <button class="hai-settings-nav-item active" data-section="models">AI 模型</button>
+                <button class="hai-settings-nav-item" data-section="execution">执行策略</button>
               </div>
-              <div class="hai-model-list"></div>
-              <button class="hai-btn-add-model">${ICONS.plus} 新增模型</button>
-              <div class="hai-settings-section">
-                <h4>执行策略</h4>
-                <div class="hai-form-row">
-                  <label>命令超时(秒)</label>
-                  <input type="number" class="hai-cfg-command-timeout" placeholder="留空=120" min="5" />
+              <div class="hai-settings-content">
+                <!-- AI 模型 -->
+                <div class="hai-settings-pane active" data-pane="models">
+                  <div class="hai-settings-body">
+                    <div class="hai-settings-top">
+                      <div class="hai-form-row">
+                        <label>默认 Provider</label>
+                        <input type="text" class="hai-cfg-provider" list="hai-provider-list" placeholder="openai" />
+                        <datalist id="hai-provider-list">
+                          <option value="openai">
+                          <option value="anthropic">
+                          <option value="deepseek">
+                          <option value="openrouter">
+                        </datalist>
+                      </div>
+                    </div>
+                    <div class="hai-model-list"></div>
+                    <button class="hai-btn-add-model">${ICONS.plus} 新增模型</button>
+                  </div>
+                </div>
+                <!-- 执行策略 -->
+                <div class="hai-settings-pane" data-pane="execution">
+                  <div class="hai-settings-body">
+                    <div class="hai-settings-section">
+                      <div class="hai-form-row">
+                        <label>默认模式</label>
+                        <select class="hai-cfg-default-mode">
+                          <option value="auto">auto — 自动执行</option>
+                          <option value="ask">ask — 每步确认</option>
+                          <option value="plan">plan — 先规划再执行</option>
+                        </select>
+                      </div>
+                      <div class="hai-form-row">
+                        <label>命令超时(秒)</label>
+                        <input type="number" class="hai-cfg-command-timeout" placeholder="留空=120" min="5" />
+                      </div>
+                      <div class="hai-form-row">
+                        <label>确认超时(秒)</label>
+                        <input type="number" class="hai-cfg-ask-approval-timeout" placeholder="留空=300" min="10" />
+                      </div>
+                      <div class="hai-form-row">
+                        <label>计划确认超时(秒)</label>
+                        <input type="number" class="hai-cfg-plan-confirm-timeout" placeholder="留空=600" min="30" />
+                      </div>
+                      <div class="hai-form-row">
+                        <label>提问超时(秒)</label>
+                        <input type="number" class="hai-cfg-ask-user-timeout" placeholder="留空=300" min="10" />
+                      </div>
+                      <div class="hai-form-row">
+                        <label>读终端超时(秒)</label>
+                        <input type="number" class="hai-cfg-read-terminal-timeout" placeholder="留空=10" min="3" />
+                      </div>
+                    </div>
+                    <div class="hai-settings-section">
+                      <h4>危险命令（逗号分隔）</h4>
+                      <input type="text" class="hai-cfg-dangerous-commands" placeholder="rm, dd, mkfs, shutdown, reboot" />
+                    </div>
+                    <div class="hai-settings-section">
+                      <h4>始终需确认的工具（逗号分隔）</h4>
+                      <input type="text" class="hai-cfg-always-ask-for" placeholder="run_command" />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -330,7 +383,9 @@ export class AgentModal {
     this.rolesView = this.overlay.querySelector(".hai-view-roles")!;
 
     // 从 localStorage 恢复偏好
-    this.glassMode = localStorage.getItem("hai-glass") === "true";
+    const savedGlass = localStorage.getItem("hai-glass") as "off" | "shell" | "glass" | null;
+    if (savedGlass) this.glassMode = savedGlass;
+    else this.glassMode = "off";
     const savedTheme = localStorage.getItem("hai-theme") as "auto" | "light" | "dark" | null;
     if (savedTheme) this.themeMode = savedTheme;
     this.applyGlass();
@@ -364,6 +419,18 @@ export class AgentModal {
     this.rolesBtn.addEventListener("click", () => this.switchView("roles"));
     this.historyBtn.addEventListener("click", () => this.toggleHistoryDrawer());
     this.overlay.querySelector(".hai-history-drawer-close")!.addEventListener("click", () => this.toggleHistoryDrawer(false));
+
+    // 设置导航切换
+    this.overlay.querySelectorAll<HTMLElement>(".hai-settings-nav-item").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const section = btn.dataset.section!;
+        this.overlay.querySelectorAll(".hai-settings-nav-item").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        this.overlay.querySelectorAll<HTMLElement>(".hai-settings-pane").forEach((p) => {
+          p.classList.toggle("active", p.dataset.pane === section);
+        });
+      });
+    });
 
     // 角色管理
     this.overlay.querySelector(".hai-btn-new-role")!.addEventListener("click", () => this.newRole());
@@ -781,12 +848,109 @@ export class AgentModal {
     const cmdTimeoutEl = this.overlay.querySelector(".hai-cfg-command-timeout") as HTMLInputElement;
     cmdTimeoutEl.value = exec.command_timeout != null ? String(exec.command_timeout) : "";
 
-    const providerEl = this.overlay.querySelector(".hai-cfg-provider") as HTMLSelectElement;
+    const providerEl = this.overlay.querySelector(".hai-cfg-provider") as HTMLInputElement;
     providerEl.value = this.config?.default_provider || "openai";
+
+    const modeEl = this.overlay.querySelector(".hai-cfg-default-mode") as HTMLSelectElement;
+    modeEl.value = exec.default_mode || "auto";
+
+    const askApprovalEl = this.overlay.querySelector(".hai-cfg-ask-approval-timeout") as HTMLInputElement;
+    askApprovalEl.value = exec.ask_approval_timeout != null ? String(exec.ask_approval_timeout) : "";
+
+    const planConfirmEl = this.overlay.querySelector(".hai-cfg-plan-confirm-timeout") as HTMLInputElement;
+    planConfirmEl.value = exec.plan_confirm_timeout != null ? String(exec.plan_confirm_timeout) : "";
+
+    const askUserEl = this.overlay.querySelector(".hai-cfg-ask-user-timeout") as HTMLInputElement;
+    askUserEl.value = exec.ask_user_timeout != null ? String(exec.ask_user_timeout) : "";
+
+    const readTermEl = this.overlay.querySelector(".hai-cfg-read-terminal-timeout") as HTMLInputElement;
+    readTermEl.value = exec.read_terminal_timeout != null ? String(exec.read_terminal_timeout) : "";
+
+    const dangerousEl = this.overlay.querySelector(".hai-cfg-dangerous-commands") as HTMLInputElement;
+    dangerousEl.value = (exec.dangerous_commands ?? []).join(", ");
+
+    const alwaysAskEl = this.overlay.querySelector(".hai-cfg-always-ask-for") as HTMLInputElement;
+    alwaysAskEl.value = (exec.always_ask_for ?? []).join(", ");
+  }
+
+  /** 从 DOM 收集当前编辑状态到 this.config（渲染前调用，避免丢失用户输入） */
+  private collectModelsFromDOM(): void {
+    if (!this.config) return;
+    const provider = (this.overlay.querySelector(".hai-cfg-provider") as HTMLInputElement).value.trim() || "openai";
+    this.config.default_provider = provider;
+
+    const modelCards = this.overlay.querySelectorAll<HTMLElement>(".hai-model-card");
+    for (const card of modelCards) {
+      const p = card.dataset.provider!;
+      const m = card.dataset.model!;
+
+      if (!this.config.providers[p]) {
+        this.config.providers[p] = { default_model: "", models: {} };
+      }
+      const isDefault = card.querySelector(".hai-default-badge") !== null;
+      if (isDefault) {
+        this.config.default_provider = p;
+        this.config.providers[p].default_model = m;
+      }
+
+      const showNameEl = card.querySelector(".hai-cfg-showname") as HTMLInputElement | null;
+      const group: ModelGroup = { endpoints: [] };
+      if (showNameEl?.value.trim()) group.show_name = showNameEl.value.trim();
+
+      const epCards = card.querySelectorAll<HTMLElement>(".hai-endpoint-card");
+      for (const epCard of epCards) {
+        const url = (epCard.querySelector(".hai-cfg-url") as HTMLInputElement)?.value.trim() ?? "";
+        const endpointId = (epCard.querySelector(".hai-cfg-endpoint-id") as HTMLInputElement)?.value.trim() ?? "";
+        const key = (epCard.querySelector(".hai-cfg-key") as HTMLInputElement)?.value.trim() ?? "";
+        const weightStr = (epCard.querySelector(".hai-cfg-weight") as HTMLInputElement)?.value ?? "1";
+        const maxTokensStr = (epCard.querySelector(".hai-cfg-max-tokens") as HTMLInputElement)?.value ?? "8192";
+        const temperatureStr = (epCard.querySelector(".hai-cfg-temperature") as HTMLInputElement)?.value ?? "0.7";
+        const topPStr = (epCard.querySelector(".hai-cfg-top-p") as HTMLInputElement)?.value.trim() ?? "";
+        const freqPenaltyStr = (epCard.querySelector(".hai-cfg-freq-penalty") as HTMLInputElement)?.value.trim() ?? "";
+        const presPenaltyStr = (epCard.querySelector(".hai-cfg-pres-penalty") as HTMLInputElement)?.value.trim() ?? "";
+        const stopStr = (epCard.querySelector(".hai-cfg-stop") as HTMLInputElement)?.value.trim() ?? "";
+        const seedStr = (epCard.querySelector(".hai-cfg-seed") as HTMLInputElement)?.value.trim() ?? "";
+        const reqTimeoutStr = (epCard.querySelector(".hai-cfg-request-timeout") as HTMLInputElement)?.value.trim() ?? "";
+        const streamTimeoutStr = (epCard.querySelector(".hai-cfg-stream-timeout") as HTMLInputElement)?.value.trim() ?? "";
+
+        const options: GenOptions = {
+          max_tokens: parseInt(maxTokensStr, 10) || 8192,
+          temperature: parseFloat(temperatureStr) || 0.7,
+        };
+        if (topPStr) options.top_p = parseFloat(topPStr);
+        if (freqPenaltyStr) options.frequency_penalty = parseFloat(freqPenaltyStr);
+        if (presPenaltyStr) options.presence_penalty = parseFloat(presPenaltyStr);
+        if (stopStr) options.stop = stopStr.split(",").map(s => s.trim()).filter(Boolean);
+        if (seedStr) options.seed = parseInt(seedStr, 10);
+        if (reqTimeoutStr) options.request_timeout = parseInt(reqTimeoutStr, 10);
+        if (streamTimeoutStr) options.stream_chunk_timeout = parseInt(streamTimeoutStr, 10);
+
+        const endpoint: EndpointConfig = { key, options };
+        if (url) endpoint.url = url;
+        if (endpointId) endpoint.id = endpointId;
+        const w = parseInt(weightStr, 10);
+        if (w && w > 0) endpoint.weight = w;
+
+        group.endpoints.push(endpoint);
+      }
+
+      this.config.providers[p].models[m] = group;
+    }
+
+    // 默认模型回退
+    for (const pc of Object.values(this.config.providers)) {
+      if (!pc.default_model) {
+        const first = Object.keys(pc.models)[0];
+        if (first) pc.default_model = first;
+      }
+    }
   }
 
   /** 渲染模型卡片列表 */
   private renderModelList(): void {
+    // 渲染前先把 DOM 中的编辑值收集回 config，避免用户输入丢失
+    this.collectModelsFromDOM();
+
     const listEl = this.overlay.querySelector(".hai-model-list") as HTMLElement;
     listEl.innerHTML = "";
 
@@ -826,32 +990,25 @@ export class AgentModal {
         </div>
         <div class="hai-model-actions">
           ${isDefault ? '<span class="hai-default-badge">默认</span>' : `<button class="hai-icon-btn hai-model-set-default" title="设为默认">${ICONS.check}</button>`}
-          <span class="hai-ep-count">${epCount} endpoint${epCount !== 1 ? "s" : ""}</span>
-          <button class="hai-icon-btn hai-model-expand" title="展开/折叠">${ICONS.chevron}</button>
+          <button class="hai-icon-btn hai-model-delete-inline" title="删除模型">${ICONS.trash}</button>
         </div>
       </div>
-      <div class="hai-model-card-body hidden">
+      <div class="hai-model-card-body">
         <div class="hai-form-row">
           <label>显示名称</label>
           <input type="text" class="hai-cfg-showname" value="${showName}" placeholder="留空则用模型 ID" />
         </div>
-        <div class="hai-endpoint-list"></div>
-        <button class="hai-btn-add-endpoint">${ICONS.plus} 新增 Endpoint</button>
-        <div class="hai-model-card-footer">
-          ${!isDefault ? `<button class="btn hai-model-set-default-btn">设为默认模型</button>` : ""}
-          <button class="btn hai-model-delete-btn">${ICONS.trash} 删除模型</button>
+        <div class="hai-endpoint-section">
+          <div class="hai-endpoint-section-title">
+            <span>Endpoints (${epCount})</span>
+            <button class="hai-btn-add-endpoint">${ICONS.plus} 新增</button>
+          </div>
+          <div class="hai-endpoint-list"></div>
         </div>
       </div>`;
 
-    // 展开/折叠
-    const expandBtn = card.querySelector(".hai-model-expand")!;
-    expandBtn.addEventListener("click", () => {
-      card.querySelector(".hai-model-card-body")!.classList.toggle("hidden");
-      expandBtn.classList.toggle("expanded");
-    });
-
     // 设为默认
-    const setDefaultBtn = card.querySelector(".hai-model-set-default, .hai-model-set-default-btn");
+    const setDefaultBtn = card.querySelector(".hai-model-set-default");
     if (setDefaultBtn) {
       setDefaultBtn.addEventListener("click", () => {
         this.setDefaultModel(provider, model);
@@ -859,7 +1016,7 @@ export class AgentModal {
     }
 
     // 删除模型
-    card.querySelector(".hai-model-delete-btn")!.addEventListener("click", () => {
+    card.querySelector(".hai-model-delete-inline")!.addEventListener("click", () => {
       this.showConfirm(`确定删除模型 ${model}？`, () => this.deleteModel(provider, model));
     });
 
@@ -889,11 +1046,14 @@ export class AgentModal {
     card.dataset.idx = String(idx);
 
     const opts = ep.options ?? {};
+    const urlPreview = ep.url ? ep.url.replace(/^https?:\/\//, "").slice(0, 40) : "(默认)";
 
     card.innerHTML = `
       <div class="hai-endpoint-card-header">
         <span class="hai-endpoint-label">Endpoint ${idx + 1}</span>
-        <button class="hai-icon-btn hai-endpoint-expand" title="展开/折叠">${ICONS.chevron}</button>
+        <span class="hai-endpoint-url-preview">${this.escapeHtml(urlPreview)}</span>
+        <span class="hai-endpoint-weight-badge">w:${ep.weight ?? 1}</span>
+        <button class="hai-icon-btn hai-endpoint-delete-inline" title="删除">${ICONS.trash}</button>
       </div>
       <div class="hai-endpoint-card-body">
         <div class="hai-form-row">
@@ -951,18 +1111,10 @@ export class AgentModal {
             <input type="number" class="hai-cfg-stream-timeout" value="${opts.stream_chunk_timeout ?? ""}" placeholder="留空=60" min="5" />
           </div>
         </details>
-        <div class="hai-endpoint-card-footer">
-          <button class="btn hai-endpoint-delete-btn">${ICONS.trash} 删除 Endpoint</button>
-        </div>
       </div>`;
 
-    // 展开/折叠
-    card.querySelector(".hai-endpoint-expand")!.addEventListener("click", () => {
-      card.querySelector(".hai-endpoint-card-body")!.classList.toggle("hidden");
-    });
-
     // 删除
-    card.querySelector(".hai-endpoint-delete-btn")!.addEventListener("click", () => {
+    card.querySelector(".hai-endpoint-delete-inline")!.addEventListener("click", () => {
       this.showConfirm(`确定删除 Endpoint ${idx + 1}？`, () => this.deleteEndpoint(provider, model, idx));
     });
 
@@ -971,7 +1123,7 @@ export class AgentModal {
 
   /** 新增模型 */
   private async addModel(): Promise<void> {
-    const provider = (this.overlay.querySelector(".hai-cfg-provider") as HTMLSelectElement).value;
+    const provider = (this.overlay.querySelector(".hai-cfg-provider") as HTMLInputElement).value.trim() || "openai";
     this.showPrompt("输入模型 ID", "deepseek-v3", (modelKey) => {
       if (!this.config) this.config = { providers: {}, default_provider: provider };
       if (!this.config.providers[provider]) {
@@ -988,6 +1140,12 @@ export class AgentModal {
         this.config.providers[provider].default_model = modelKey;
       }
       this.renderModelList();
+      const newCard = this.overlay.querySelector(
+        `.hai-model-card[data-provider="${provider}"][data-model="${modelKey}"]`,
+      );
+      if (newCard) {
+        newCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
     });
   }
 
@@ -1003,10 +1161,9 @@ export class AgentModal {
     });
 
     this.renderModelList();
-    // 重新展开刚操作的卡片
     const card = this.overlay.querySelector(`.hai-model-card[data-provider="${provider}"][data-model="${model}"]`);
     if (card) {
-      card.querySelector(".hai-model-card-body")!.classList.remove("hidden");
+      card.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
   }
 
@@ -1143,11 +1300,30 @@ export class AgentModal {
     }
 
     // 执行策略
+    if (!config.execution) config.execution = {};
     const cmdTimeoutStr = (this.overlay.querySelector(".hai-cfg-command-timeout") as HTMLInputElement).value.trim();
-    if (cmdTimeoutStr) {
-      if (!config.execution) config.execution = {};
-      config.execution.command_timeout = parseInt(cmdTimeoutStr, 10);
-    }
+    if (cmdTimeoutStr) config.execution.command_timeout = parseInt(cmdTimeoutStr, 10);
+
+    const modeVal = (this.overlay.querySelector(".hai-cfg-default-mode") as HTMLSelectElement).value;
+    config.execution.default_mode = modeVal;
+
+    const askApprovalStr = (this.overlay.querySelector(".hai-cfg-ask-approval-timeout") as HTMLInputElement).value.trim();
+    if (askApprovalStr) config.execution.ask_approval_timeout = parseInt(askApprovalStr, 10);
+
+    const planConfirmStr = (this.overlay.querySelector(".hai-cfg-plan-confirm-timeout") as HTMLInputElement).value.trim();
+    if (planConfirmStr) config.execution.plan_confirm_timeout = parseInt(planConfirmStr, 10);
+
+    const askUserStr = (this.overlay.querySelector(".hai-cfg-ask-user-timeout") as HTMLInputElement).value.trim();
+    if (askUserStr) config.execution.ask_user_timeout = parseInt(askUserStr, 10);
+
+    const readTermStr = (this.overlay.querySelector(".hai-cfg-read-terminal-timeout") as HTMLInputElement).value.trim();
+    if (readTermStr) config.execution.read_terminal_timeout = parseInt(readTermStr, 10);
+
+    const dangerousStr = (this.overlay.querySelector(".hai-cfg-dangerous-commands") as HTMLInputElement).value.trim();
+    if (dangerousStr) config.execution.dangerous_commands = dangerousStr.split(",").map(s => s.trim()).filter(Boolean);
+
+    const alwaysAskStr = (this.overlay.querySelector(".hai-cfg-always-ask-for") as HTMLInputElement).value.trim();
+    if (alwaysAskStr) config.execution.always_ask_for = alwaysAskStr.split(",").map(s => s.trim()).filter(Boolean);
 
     this.config = config;
 
@@ -1270,6 +1446,7 @@ export class AgentModal {
     this.role = role;
     this.mode = spec.mode || "auto";
     this.currentCwd = cwd;
+    this.lastPanes = panes;
 
     const modeBadge = this.overlay.querySelector(".hai-mode-badge")!;
     modeBadge.textContent = this.mode.charAt(0).toUpperCase() + this.mode.slice(1);
@@ -1305,7 +1482,6 @@ export class AgentModal {
     this.inputEl.focus();
 
     if (!this.spawned) {
-      this.spawned = true;
       this.channel = new Channel<AgentEvent>();
       this.channel.onmessage = (event) => this.onEvent(event);
 
@@ -1313,9 +1489,10 @@ export class AgentModal {
 
       try {
         await api.agentSpawn(this.tabId, this.mode, this.role, spec.msg || null, cwd, panes, this.channel);
+        this.spawned = true;
       } catch (err: any) {
         this.setStatus("错误");
-        this.appendError(String(err?.message ?? err));
+        this.appendError(String(err?.message ?? err), spec.msg || undefined);
       }
 
       if (spec.msg) {
@@ -1354,9 +1531,42 @@ export class AgentModal {
 
     const atts = this.attachments.splice(0); // 取出并清空
     this.appendUserMessage(text);
-    api.agentSendMessage(this.tabId, text, atts).catch((err) => {
-      this.appendError(String(err?.message ?? err));
-    });
+    this.lastUserText = text;
+    this.showThinking();
+
+    const doSend = () => {
+      api.agentSendMessage(this.tabId, text, atts).catch(async (err) => {
+        const msg = String(err?.message ?? err);
+        if (msg.includes("不存在") || msg.includes("已关闭")) {
+          this.spawned = false;
+          this.setStatus("重新连接…");
+          try {
+            this.channel = new Channel<AgentEvent>();
+            this.channel.onmessage = (event) => this.onEvent(event);
+            await api.agentSpawn(this.tabId, this.mode, this.role, text, this.currentCwd, this.lastPanes, this.channel);
+            this.spawned = true;
+          } catch (e: any) {
+            this.hideThinking();
+            this.setStatus("错误");
+            this.appendError(String(e?.message ?? e), text, atts);
+          }
+        } else {
+          this.hideThinking();
+          this.appendError(msg, text, atts);
+        }
+      });
+    };
+
+    if (!this.spawned) {
+      this.setStatus("连接中…");
+      this.channel = new Channel<AgentEvent>();
+      this.channel.onmessage = (event) => this.onEvent(event);
+      api.agentSpawn(this.tabId, this.mode, this.role, text, this.currentCwd, this.lastPanes, this.channel)
+        .then(() => { this.spawned = true; this.setStatus("就绪"); })
+        .catch((err) => { this.hideThinking(); this.setStatus("错误"); this.appendError(String(err?.message ?? err), text, atts); });
+    } else {
+      doSend();
+    }
   }
 
   private abort(): void {
@@ -1404,10 +1614,12 @@ export class AgentModal {
         this.onHistoryCleared();
         break;
       case "error":
-        this.appendError(event.message);
+        this.hideThinking();
+        this.appendError(event.message, this.lastUserText);
         this.setProcessing(false);
         break;
       case "aborted":
+        this.hideThinking();
         if (this.currentRenderer) {
           this.currentRenderer.done();
           this.currentRenderer = null;
@@ -1416,6 +1628,7 @@ export class AgentModal {
         this.setStatus("已中止");
         break;
       case "done":
+        this.hideThinking();
         if (this.currentRenderer) {
           this.currentRenderer.done();
           this.currentRenderer = null;
@@ -1430,6 +1643,7 @@ export class AgentModal {
     if (!content && done && !this.currentRenderer) return;
 
     if (!this.currentRenderer) {
+      this.hideThinking();
       const { renderer } = this.appendAssistantBubble();
       this.currentRenderer = renderer;
       this.setProcessing(true);
@@ -1506,29 +1720,65 @@ export class AgentModal {
     if (empty) empty.remove();
   }
 
-  private appendError(message: string): void {
+  private appendError(message: string, retryText?: string, retryAttachments?: Attachment[]): void {
+    this.hideEmptyState();
     const el = document.createElement("div");
     el.className = "hai-msg hai-msg-error";
 
-    if (message.includes("未配置") || message.includes("未找到模型配置") || message.includes("ai-config.json")) {
-      el.innerHTML = "";
-      const text = document.createElement("div");
-      text.textContent = `⚠ ${message}`;
-      el.appendChild(text);
-      const hint = document.createElement("div");
-      hint.className = "hai-error-hint";
+    const isConfigError = message.includes("未配置") || message.includes("未找到模型配置") || message.includes("ai-config.json");
+
+    const textEl = document.createElement("div");
+    textEl.textContent = `⚠ ${message}`;
+    el.appendChild(textEl);
+
+    const actionsEl = document.createElement("div");
+    actionsEl.className = "hai-msg-error-actions";
+
+    if (isConfigError) {
       const settingsBtn = document.createElement("button");
       settingsBtn.className = "hai-error-settings-btn";
       settingsBtn.textContent = "打开设置 →";
       settingsBtn.addEventListener("click", () => this.switchView("settings"));
-      hint.appendChild(settingsBtn);
-      el.appendChild(hint);
-    } else {
-      el.textContent = `⚠ ${message}`;
+      actionsEl.appendChild(settingsBtn);
+    }
+
+    if (retryText) {
+      const retryBtn = document.createElement("button");
+      retryBtn.className = "hai-msg-retry-btn";
+      retryBtn.textContent = "重试";
+      retryBtn.addEventListener("click", () => {
+        el.remove();
+        this.inputEl.value = retryText;
+        this.attachments = retryAttachments ?? [];
+        this.send();
+      });
+      actionsEl.appendChild(retryBtn);
+    }
+
+    if (actionsEl.children.length > 0) {
+      el.appendChild(actionsEl);
     }
 
     this.messagesEl.appendChild(el);
     this.scrollToBottom();
+  }
+
+  private showThinking(): void {
+    this.hideThinking();
+    this.hideEmptyState();
+    const el = document.createElement("div");
+    el.className = "hai-msg hai-msg-thinking";
+    el.innerHTML = `<div class="hai-thinking-avatar">${ICONS.role}</div><div class="hai-thinking-dots"><span></span><span></span><span></span></div>`;
+    this.messagesEl.appendChild(el);
+    this.thinkingEl = el;
+    this.scrollToBottom();
+  }
+
+  private hideThinking(): void {
+    if (this.thinkingEl) {
+      this.thinkingEl.remove();
+      this.thinkingEl = null;
+    }
   }
 
   // ---------- 工具调用渲染 ----------
@@ -1831,15 +2081,23 @@ export class AgentModal {
   // ---------- 玻璃模式 / 主题 ----------
 
   private toggleGlass(): void {
-    this.glassMode = !this.glassMode;
-    localStorage.setItem("hai-glass", String(this.glassMode));
+    const order: ("off" | "shell" | "glass")[] = ["off", "shell", "glass"];
+    const idx = order.indexOf(this.glassMode);
+    this.glassMode = order[(idx + 1) % order.length];
+    localStorage.setItem("hai-glass", this.glassMode);
     this.applyGlass();
   }
 
   private applyGlass(): void {
     const modal = this.overlay.querySelector(".hai-modal") as HTMLElement;
-    modal.dataset.glass = String(this.glassMode);
-    this.glassBtn.classList.toggle("active", this.glassMode);
+    modal.dataset.glass = this.glassMode;
+    this.glassBtn.classList.toggle("active", this.glassMode !== "off");
+    const labels: Record<string, string> = {
+      off: "玻璃：关闭",
+      shell: "玻璃：跟随终端",
+      glass: "玻璃：高透模糊",
+    };
+    this.glassBtn.title = labels[this.glassMode];
   }
 
   private cycleTheme(): void {
