@@ -121,6 +121,17 @@ pub struct PaneInfo {
     pub os: String,
 }
 
+/// 附件（图片等文件，base64 内联传递给 LLM）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Attachment {
+    /// 文件名（含扩展名）
+    pub name: String,
+    /// MIME 类型（如 "image/png"）
+    pub mime_type: String,
+    /// base64 编码的文件数据
+    pub data: String,
+}
+
 /// 全局历史索引条目（app_data_dir/ai-sessions.json）
 #[derive(Serialize, Clone, Deserialize)]
 pub struct HistoryIndex {

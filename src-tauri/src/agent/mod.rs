@@ -126,7 +126,7 @@ pub async fn agent_spawn(
         if !msg.is_empty() {
             let sessions = state.sessions.lock().await;
             if let Some(handle) = sessions.get(&tab_id) {
-                let _ = handle.tx.send(SessionCmd::Message(msg));
+                let _ = handle.tx.send(SessionCmd::Message { text: msg, attachments: vec![] });
             }
         }
     }
@@ -140,13 +140,14 @@ pub async fn agent_send_message(
     state: tauri::State<'_, AgentManager>,
     tab_id: String,
     message: String,
+    attachments: Vec<crate::agent::protocol::Attachment>,
 ) -> Result<()> {
     let sessions = state.sessions.lock().await;
     match sessions.get(&tab_id) {
         Some(handle) => {
             handle
                 .tx
-                .send(SessionCmd::Message(message))
+                .send(SessionCmd::Message { text: message, attachments })
                 .map_err(|_| crate::error::Error::msg("Agent session 已关闭"))?;
         }
         None => {

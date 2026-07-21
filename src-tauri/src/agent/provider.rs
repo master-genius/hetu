@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tokio::sync::watch;
 
-use crate::agent::protocol::AgentEvent;
+use crate::agent::protocol::{AgentEvent, Attachment};
 use crate::error::Result;
 
 /// 对话历史中的单条消息。
@@ -18,6 +18,9 @@ pub struct Message {
     pub tool_calls: Vec<ToolCall>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub tool_call_id: String,
+    /// 多模态附件（图片 base64 等），仅 user 消息使用
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<Attachment>,
 }
 
 /// LLM 发起的工具调用
@@ -58,6 +61,17 @@ impl Message {
             content: content.into(),
             tool_calls: vec![],
             tool_call_id: String::new(),
+            attachments: vec![],
+        }
+    }
+
+    pub fn user_with_attachments(content: impl Into<String>, attachments: Vec<Attachment>) -> Self {
+        Self {
+            role: "user".into(),
+            content: content.into(),
+            tool_calls: vec![],
+            tool_call_id: String::new(),
+            attachments,
         }
     }
 
@@ -68,6 +82,7 @@ impl Message {
             content: content.into(),
             tool_calls: vec![],
             tool_call_id: String::new(),
+            attachments: vec![],
         }
     }
 
@@ -77,6 +92,7 @@ impl Message {
             content: content.into(),
             tool_calls,
             tool_call_id: String::new(),
+            attachments: vec![],
         }
     }
 
@@ -86,6 +102,7 @@ impl Message {
             content: content.into(),
             tool_calls: vec![],
             tool_call_id: tool_call_id.into(),
+            attachments: vec![],
         }
     }
 }

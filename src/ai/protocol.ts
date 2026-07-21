@@ -57,6 +57,13 @@ export interface PaneInfo {
   os: string;
 }
 
+/** 附件（图片等文件，base64 内联传递给 LLM） */
+export interface Attachment {
+  name: string;
+  mime_type: string;
+  data: string; // base64
+}
+
 /** 角色元数据（列表用） */
 export interface RoleMeta {
   id: string;

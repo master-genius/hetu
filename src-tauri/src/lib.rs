@@ -619,6 +619,22 @@ fn read_feed_file(path: String) -> Result<String> {
     Ok(result?)
 }
 
+/// 以 base64 读取任意文件内容（供 Agent 图片上传等场景使用）。
+/// 限制 max_bytes（默认建议 10MB），返回 data: URL 格式的字符串。
+#[tauri::command]
+fn read_file_base64(path: String, max_bytes: u64) -> Result<String> {
+    let meta = std::fs::metadata(&path)?;
+    if meta.len() > max_bytes {
+        return Err(Error::msg(format!(
+            "文件过大（{}MB，上限 {}MB）",
+            meta.len() / 1024 / 1024,
+            max_bytes / 1024 / 1024
+        )));
+    }
+    let data = std::fs::read(&path)?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&data))
+}
+
 /// 用系统默认浏览器打开外部链接（终端里 Ctrl+单击 URL 触发）。
 /// 仅放行 http/https，杜绝把任意字符串当命令参数注入到系统 opener。
 #[tauri::command]
@@ -774,6 +790,7 @@ pub fn run() {
             local_tab_info,
             read_key_file,
             read_feed_file,
+            read_file_base64,
             open_external,
             restore_window_size,
             agent::agent_spawn,

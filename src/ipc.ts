@@ -81,12 +81,15 @@ export const api = {
   /** 从最大化还原窗口尺寸（后端直接获取屏幕尺寸 + 设置窗口） */
   restoreWindowSize: () => invoke<void>("restore_window_size"),
 
+  /** 以 base64 读取文件内容（供 Agent 图片上传使用） */
+  readFileBase64: (path: string, maxBytes: number) => invoke<string>("read_file_base64", { path, maxBytes }),
+
   // ---------- Agent ----------
 
   agentSpawn: (tabId: string, mode: string, role: string, initialMessage: string | null, cwd: string, panes: any[], onEvent: Channel<any>) =>
     invoke<void>("agent_spawn", { tabId, mode, role, initialMessage, cwd, panes, onEvent }),
-  agentSendMessage: (tabId: string, message: string) =>
-    invoke<void>("agent_send_message", { tabId, message }),
+  agentSendMessage: (tabId: string, message: string, attachments?: any[]) =>
+    invoke<void>("agent_send_message", { tabId, message, attachments: attachments || [] }),
   agentAbort: (tabId: string) =>
     invoke<void>("agent_abort", { tabId }),
   agentDestroy: (tabId: string) =>

@@ -78,8 +78,8 @@ struct ChatRequest<'a> {
 #[derive(Serialize)]
 struct ChatMessage<'a> {
     role: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    content: Option<&'a str>,
+    /// 纯文本时为 string，多模态时为 content parts 数组
+    content: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_calls: Option<Vec<ChatToolCall<'a>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -101,11 +101,28 @@ struct ChatToolFunction<'a> {
 }
 
 fn to_chat_message(msg: &Message) -> ChatMessage<'_> {
-    let content = if msg.content.is_empty() && !msg.tool_calls.is_empty() {
-        None
+    let content: serde_json::Value = if !msg.attachments.is_empty() {
+        // 多模态：构建 content parts 数组
+        let mut parts: Vec<serde_json::Value> = Vec::new();
+        if !msg.content.is_empty() {
+            parts.push(serde_json::json!({ "type": "text", "text": msg.content }));
+        }
+        for att in &msg.attachments {
+            let data_url = format!("data:{};base64,{}", att.mime_type, att.data);
+            parts.push(serde_json::json!({
+                "type": "image_url",
+                "image_url": { "url": data_url, "detail": "auto" }
+            }));
+        }
+        serde_json::Value::Array(parts)
+    } else if msg.content.is_empty() && !msg.tool_calls.is_empty() {
+        // 纯工具调用（无文本）：content 为 null
+        serde_json::Value::Null
     } else {
-        Some(msg.content.as_str())
+        // 纯文本
+        serde_json::Value::String(msg.content.clone())
     };
+
     let tool_calls = if msg.tool_calls.is_empty() {
         None
     } else {
@@ -184,7 +201,7 @@ impl LlmProvider for OpenAiProvider {
         // 构建请求消息：system prompt + history
         let mut api_messages = vec![ChatMessage {
             role: "system",
-            content: Some(system_prompt),
+            content: serde_json::Value::String(system_prompt.to_string()),
             tool_calls: None,
             tool_call_id: None,
         }];

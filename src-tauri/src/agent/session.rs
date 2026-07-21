@@ -15,7 +15,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::agent::config::{load_config, AiConfig, Endpoint};
 use crate::agent::openai::OpenAiProvider;
-use crate::agent::protocol::{emit, AgentEvent, HistoryEntry, HistoryIndex, PaneInfo, ToolResult, UserChoice};
+use crate::agent::protocol::{emit, AgentEvent, Attachment, HistoryEntry, HistoryIndex, PaneInfo, ToolResult, UserChoice};
 use crate::agent::provider::{LlmProvider, Message, StreamResult};
 use crate::agent::tools;
 use crate::agent::SessionState;
@@ -23,7 +23,7 @@ use crate::error::Error;
 
 /// Session 控制命令
 pub enum SessionCmd {
-    Message(String),
+    Message { text: String, attachments: Vec<Attachment> },
     #[allow(dead_code)]
     Abort,
     ClearHistory,
@@ -477,12 +477,12 @@ pub async fn session_loop(
 
     loop {
         match rx.recv().await {
-            Some(SessionCmd::Message(text)) => {
-                if text.trim().is_empty() {
+            Some(SessionCmd::Message { text, attachments }) => {
+                if text.trim().is_empty() && attachments.is_empty() {
                     continue;
                 }
 
-                history.push(Message::user(text));
+                history.push(Message::user_with_attachments(text, attachments));
 
                 let config: AiConfig = match load_config(&app) {
                     Ok(c) => c,

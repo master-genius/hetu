@@ -12,7 +12,7 @@
 import { Channel } from "@tauri-apps/api/core";
 import { api } from "../ipc";
 import { toast } from "../ui";
-import type { AgentEvent, HaiSpec, HistoryEntry, PaneInfo, RoleMeta, RoleFull, ToolResult, UserChoice } from "./protocol";
+import type { AgentEvent, Attachment, HaiSpec, HistoryEntry, PaneInfo, RoleMeta, RoleFull, ToolResult, UserChoice } from "./protocol";
 import { ROLE_CATEGORIES } from "./protocol";
 import { StreamingMarkdown } from "./renderer";
 
@@ -76,8 +76,11 @@ const ICONS = {
   trash: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   chevron: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   check: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-  role: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.5"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+  role: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20.59 12.59L12.8 4.8A2 2 0 0011.4 4H5a1 1 0 00-1 1v6.4a2 2 0 00.59 1.41l7.79 7.79a2 2 0 002.83 0l5.38-5.38a2 2 0 000-2.83zM8.5 9.5a1 1 0 111.41-1.41A1 1 0 018.5 9.5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   star: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>`,
+  maximize: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" stroke-width="1.5"/></svg>`,
+  restore: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="3" y="7" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M7 7V5a2 2 0 012-2h10a2 2 0 012 2v10a2 2 0 01-2 2h-2" stroke="currentColor" stroke-width="1.5"/></svg>`,
+  attach: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
 };
 
 // ---------- 类型 ----------
@@ -155,6 +158,8 @@ export class AgentModal {
   private rolesBtn: HTMLElement;
   private historyBtn: HTMLElement;
   private historyDrawer: HTMLElement;
+  private maximizeBtn: HTMLElement;
+  private attachBtn: HTMLElement;
 
   private tabId: string;
   private role: string;
@@ -162,6 +167,7 @@ export class AgentModal {
   private glassMode = false;
   private themeMode: "auto" | "light" | "dark" = "auto";
   private currentCwd = "";
+  private maximized = false;
 
   /** 设置面板缓存的配置 */
   private config: AiConfig | null = null;
@@ -180,6 +186,8 @@ export class AgentModal {
   private processing = false;
   private currentRenderer: StreamingMarkdown | null = null;
   private turns: ChatTurn[] = [];
+  /** 当前待发送的附件（图片 base64 等） */
+  private attachments: Attachment[] = [];
 
   private onKey: (e: KeyboardEvent) => void;
 
@@ -203,6 +211,7 @@ export class AgentModal {
             <button class="hai-icon-btn hai-btn-glass" title="玻璃模式">${ICONS.glass}</button>
             <button class="hai-icon-btn hai-btn-theme" title="主题切换">${ICONS.theme}</button>
             <button class="hai-icon-btn hai-btn-clear" title="清除对话历史">${ICONS.clear}</button>
+            <button class="hai-icon-btn hai-btn-maximize" title="最大化">${ICONS.maximize}</button>
             <button class="hai-icon-btn hai-btn-close" title="隐藏 (Alt+H)">${ICONS.close}</button>
           </div>
         </div>
@@ -224,6 +233,7 @@ export class AgentModal {
               <select class="hai-model-select" title="切换模型"></select>
             </div>
             <div class="hai-input-container">
+              <button class="hai-attach-btn" title="上传文件">${ICONS.attach}</button>
               <textarea class="hai-input" rows="1" placeholder="输入消息…  (Enter 发送 · Shift+Enter 换行)"></textarea>
               <button class="hai-send-btn" title="发送 (Enter)">${ICONS.send}</button>
               <button class="hai-abort-btn hidden" title="中止 (ESC)">${ICONS.abort}</button>
@@ -309,6 +319,8 @@ export class AgentModal {
     this.abortBtn = this.overlay.querySelector(".hai-abort-btn")!;
     this.statusEl = this.overlay.querySelector(".hai-status")!;
     this.closeBtn = this.overlay.querySelector(".hai-btn-close")!;
+    this.maximizeBtn = this.overlay.querySelector(".hai-btn-maximize")!;
+    this.attachBtn = this.overlay.querySelector(".hai-attach-btn")!;
     this.glassBtn = this.overlay.querySelector(".hai-btn-glass")!;
     this.themeBtn = this.overlay.querySelector(".hai-btn-theme")!;
     this.clearBtn = this.overlay.querySelector(".hai-btn-clear")!;
@@ -339,6 +351,8 @@ export class AgentModal {
     };
 
     this.closeBtn.addEventListener("click", () => this.hide());
+    this.maximizeBtn.addEventListener("click", () => this.toggleMaximize());
+    this.attachBtn.addEventListener("click", () => void this.attachFile());
     this.glassBtn.addEventListener("click", () => this.toggleGlass());
     this.themeBtn.addEventListener("click", () => this.cycleTheme());
     this.clearBtn.addEventListener("click", () => {
@@ -417,6 +431,13 @@ export class AgentModal {
   // ---------- 视图切换 ----------
 
   private switchView(view: "chat" | "settings" | "roles"): void {
+    // 如果已在目标视图，回到对话
+    const cur = this.settingsView.classList.contains("active") ? "settings"
+              : this.rolesView.classList.contains("active") ? "roles"
+              : "chat";
+    if (cur === view && view !== "chat") {
+      view = "chat";
+    }
     this.chatView.classList.toggle("active", view === "chat");
     this.settingsView.classList.toggle("active", view === "settings");
     this.rolesView.classList.toggle("active", view === "roles");
@@ -1327,12 +1348,13 @@ export class AgentModal {
 
   private send(): void {
     const text = this.inputEl.value.trim();
-    if (!text || this.processing) return;
+    if ((!text && this.attachments.length === 0) || this.processing) return;
     this.inputEl.value = "";
     this.inputEl.style.height = "auto";
 
+    const atts = this.attachments.splice(0); // 取出并清空
     this.appendUserMessage(text);
-    api.agentSendMessage(this.tabId, text).catch((err) => {
+    api.agentSendMessage(this.tabId, text, atts).catch((err) => {
       this.appendError(String(err?.message ?? err));
     });
   }
@@ -1832,6 +1854,68 @@ export class AgentModal {
     const modal = this.overlay.querySelector(".hai-modal") as HTMLElement;
     modal.dataset.theme = this.themeMode;
     this.themeBtn.classList.toggle("active", this.themeMode !== "auto");
+  }
+
+  private toggleMaximize(): void {
+    this.maximized = !this.maximized;
+    const modal = this.overlay.querySelector(".hai-modal") as HTMLElement;
+    modal.classList.toggle("hai-maximized", this.maximized);
+    this.maximizeBtn.innerHTML = this.maximized ? ICONS.restore : ICONS.maximize;
+    this.maximizeBtn.setAttribute("title", this.maximized ? "还原" : "最大化");
+  }
+
+  private async attachFile(): Promise<void> {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: "所有文件", extensions: ["*"] }],
+    });
+    if (!selected) return;
+    const path = selected as string;
+    if (!path) return;
+
+    // 检测图片类型（按扩展名）
+    const ext = path.split(".").pop()?.toLowerCase() || "";
+    const imageExts = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico", "tiff", "tif"]);
+    const isImage = imageExts.has(ext);
+
+    if (isImage) {
+      // 图片：base64 编码，供 LLM Vision API 使用
+      const maxBytes = 10 * 1024 * 1024; // 10MB
+      try {
+        const b64 = await api.readFileBase64(path, maxBytes);
+        const mimeMap: Record<string, string> = {
+          png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+          gif: "image/gif", webp: "image/webp", bmp: "image/bmp",
+          svg: "image/svg+xml", ico: "image/x-icon",
+          tiff: "image/tiff", tif: "image/tiff",
+        };
+        const mime = mimeMap[ext] || "image/png";
+        this.attachments.push({ name: path.split("/").pop() || path, mime_type: mime, data: b64 });
+        const existing = this.inputEl.value.trim();
+        this.inputEl.value = (existing ? existing + "\n" : "") + `[已附加图片: ${path.split("/").pop()}]`;
+        toast(`已附加图片 (${(b64.length / 1024).toFixed(0)} KB base64)`);
+      } catch (e: any) {
+        toast(`读取图片失败: ${e?.message || e}`);
+        return;
+      }
+    } else {
+      // 文本：读文件内容
+      try {
+        const content = await api.readKeyFile(path);
+        const preview = content.length > 2000
+          ? content.slice(0, 2000) + `\n... (${content.length - 2000} 字符已截断)`
+          : content;
+        const existing = this.inputEl.value.trim();
+        this.inputEl.value = (existing ? existing + "\n" : "") + `文件: ${path}\n\`\`\`\n${preview}\n\`\`\`\n`;
+      } catch {
+        const existing = this.inputEl.value.trim();
+        this.inputEl.value = (existing ? existing + "\n" : "") + `文件: ${path}\n(二进制文件，无法预览内容)\n`;
+      }
+    }
+    this.inputEl.style.height = "auto";
+    this.inputEl.style.height = Math.min(this.inputEl.scrollHeight, 200) + "px";
+    this.inputEl.focus();
   }
 
   static preload(): void {
