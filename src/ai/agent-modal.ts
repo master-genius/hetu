@@ -138,6 +138,7 @@ interface ChatTurn {
   role: "user" | "assistant";
   el: HTMLElement;
   renderer?: StreamingMarkdown;
+  rawText?: string;
 }
 
 export class AgentModal {
@@ -187,7 +188,11 @@ export class AgentModal {
   private channel: Channel<AgentEvent> | null = null;
   private spawned = false;
   private processing = false;
+  private sending = false;
+  /** re-spawn 时抑制 HistoryRestored 清空当前 DOM */
+  private suppressHistoryRestore = false;
   private currentRenderer: StreamingMarkdown | null = null;
+  private currentRawText = "";
   private turns: ChatTurn[] = [];
   /** 当前待发送的附件（图片 base64 等） */
   private attachments: Attachment[] = [];
@@ -220,6 +225,7 @@ export class AgentModal {
         </div>
         <div class="hai-body">
           <div class="hai-view hai-view-chat active">
+            <div class="hai-error-banner hidden"></div>
             <div class="hai-messages">
               <div class="hai-empty-state">
                 <div class="hai-empty-title">AI 助手已就绪</div>
@@ -1485,18 +1491,22 @@ export class AgentModal {
       this.channel = new Channel<AgentEvent>();
       this.channel.onmessage = (event) => this.onEvent(event);
 
-      this.setStatus("连接中…");
+      // 先显示用户消息和 thinking 动画，再 spawn（避免响应先于用户消息出现）
+      if (spec.msg) {
+        this.appendUserMessage(spec.msg);
+        this.lastUserText = spec.msg;
+        this.showThinking();
+        // 有初始消息时抑制 HistoryRestored 清空当前 DOM
+        this.suppressHistoryRestore = true;
+      }
 
       try {
         await api.agentSpawn(this.tabId, this.mode, this.role, spec.msg || null, cwd, panes, this.channel);
         this.spawned = true;
       } catch (err: any) {
+        this.hideThinking();
         this.setStatus("错误");
         this.appendError(String(err?.message ?? err), spec.msg || undefined);
-      }
-
-      if (spec.msg) {
-        this.appendUserMessage(spec.msg);
       }
     }
   }
@@ -1525,7 +1535,8 @@ export class AgentModal {
 
   private send(): void {
     const text = this.inputEl.value.trim();
-    if ((!text && this.attachments.length === 0) || this.processing) return;
+    if ((!text && this.attachments.length === 0) || this.processing || this.sending) return;
+    this.sending = true;
     this.inputEl.value = "";
     this.inputEl.style.height = "auto";
 
@@ -1539,6 +1550,7 @@ export class AgentModal {
         const msg = String(err?.message ?? err);
         if (msg.includes("不存在") || msg.includes("已关闭")) {
           this.spawned = false;
+          this.suppressHistoryRestore = true;
           this.setStatus("重新连接…");
           try {
             this.channel = new Channel<AgentEvent>();
@@ -1547,11 +1559,15 @@ export class AgentModal {
             this.spawned = true;
           } catch (e: any) {
             this.hideThinking();
+            this.sending = false;
+            this.setProcessing(false);
             this.setStatus("错误");
             this.appendError(String(e?.message ?? e), text, atts);
           }
         } else {
           this.hideThinking();
+          this.sending = false;
+          this.setProcessing(false);
           this.appendError(msg, text, atts);
         }
       });
@@ -1559,12 +1575,16 @@ export class AgentModal {
 
     if (!this.spawned) {
       this.setStatus("连接中…");
+      this.setProcessing(true);
+      this.suppressHistoryRestore = true;
       this.channel = new Channel<AgentEvent>();
       this.channel.onmessage = (event) => this.onEvent(event);
       api.agentSpawn(this.tabId, this.mode, this.role, text, this.currentCwd, this.lastPanes, this.channel)
-        .then(() => { this.spawned = true; this.setStatus("就绪"); })
-        .catch((err) => { this.hideThinking(); this.setStatus("错误"); this.appendError(String(err?.message ?? err), text, atts); });
+        .then(() => { this.spawned = true; this.sending = false; this.setStatus("就绪"); })
+        .catch((err) => { this.hideThinking(); this.sending = false; this.setProcessing(false); this.setStatus("错误"); this.appendError(String(err?.message ?? err), text, atts); });
     } else {
+      this.sending = false;
+      this.setProcessing(true);
       doSend();
     }
   }
@@ -1614,12 +1634,14 @@ export class AgentModal {
         this.onHistoryCleared();
         break;
       case "error":
-        this.hideThinking();
+        this.collapseThinking();
+        this.sending = false;
         this.appendError(event.message, this.lastUserText);
         this.setProcessing(false);
         break;
       case "aborted":
-        this.hideThinking();
+        this.collapseThinking();
+        this.sending = false;
         if (this.currentRenderer) {
           this.currentRenderer.done();
           this.currentRenderer = null;
@@ -1628,10 +1650,25 @@ export class AgentModal {
         this.setStatus("已中止");
         break;
       case "done":
-        this.hideThinking();
+        this.collapseThinking();
+        this.sending = false;
         if (this.currentRenderer) {
           this.currentRenderer.done();
+          const last = this.turns[this.turns.length - 1];
+          if (last && last.role === "assistant") {
+            last.rawText = this.currentRawText;
+            this.appendCopyBar(last.el, last);
+          }
           this.currentRenderer = null;
+        }
+        // done 事件到达但没有任何消息内容 → 后端可能返回了空响应
+        const hasAssistant = this.turns.some(t => t.role === "assistant" && t.rawText);
+        if (!hasAssistant && !this.currentRawText) {
+          // 检查是否已有错误横幅显示，没有则显示诊断信息
+          const banner = this.overlay.querySelector(".hai-error-banner") as HTMLElement;
+          if (banner && banner.classList.contains("hidden")) {
+            this.showErrorBanner("AI 未返回任何内容，请检查模型配置、API Key 和网络连接");
+          }
         }
         this.setProcessing(false);
         this.setStatus("就绪");
@@ -1640,22 +1677,37 @@ export class AgentModal {
   }
 
   private onMessage(content: string, done: boolean): void {
-    if (!content && done && !this.currentRenderer) return;
+    // LLM 返回空内容 + 流结束 + 无已有 renderer → 显示空响应提示
+    if (!content && done && !this.currentRenderer) {
+      this.collapseThinking();
+      this.sending = false;
+      this.setProcessing(false);
+      this.setStatus("就绪");
+      this.appendEmptyResponse();
+      return;
+    }
 
     if (!this.currentRenderer) {
-      this.hideThinking();
+      this.collapseThinking();
       const { renderer } = this.appendAssistantBubble();
       this.currentRenderer = renderer;
+      this.currentRawText = "";
       this.setProcessing(true);
       this.setStatus("思考中…");
     }
 
     if (content) {
       this.currentRenderer!.push(content);
+      this.currentRawText += content;
     }
 
     if (done) {
       this.currentRenderer?.done();
+      const last = this.turns[this.turns.length - 1];
+      if (last && last.role === "assistant") {
+        last.rawText = this.currentRawText;
+        this.appendCopyBar(last.el, last);
+      }
       this.currentRenderer = null;
       this.setStatus("执行中…");
     }
@@ -1680,33 +1732,14 @@ export class AgentModal {
     const el = document.createElement("div");
     el.className = "hai-msg hai-msg-assistant";
 
-    // 模型标识
-    const modelSelect = this.overlay.querySelector(".hai-model-select") as HTMLSelectElement;
-    const modelName = modelSelect?.selectedOptions[0]?.text;
-    if (modelName) {
-      const badge = document.createElement("div");
-      badge.className = "hai-msg-model-badge";
-      badge.textContent = modelName;
-      el.appendChild(badge);
-    }
+    const avatar = document.createElement("div");
+    avatar.className = "hai-msg-avatar";
+    avatar.innerHTML = ICONS.role;
+    el.appendChild(avatar);
 
     const contentEl = document.createElement("div");
     contentEl.className = "hai-msg-content";
     el.appendChild(contentEl);
-
-    // 复制按钮
-    const copyBtn = document.createElement("button");
-    copyBtn.className = "hai-msg-copy";
-    copyBtn.innerHTML = `${ICONS.check}`;
-    copyBtn.title = "复制";
-    copyBtn.addEventListener("click", () => {
-      const text = contentEl.textContent || "";
-      navigator.clipboard.writeText(text).then(() => {
-        copyBtn.classList.add("copied");
-        setTimeout(() => copyBtn.classList.remove("copied"), 2000);
-      }).catch(() => {});
-    });
-    el.appendChild(copyBtn);
 
     this.messagesEl.appendChild(el);
 
@@ -1720,8 +1753,25 @@ export class AgentModal {
     if (empty) empty.remove();
   }
 
+  private showErrorBanner(message: string): void {
+    const banner = this.overlay.querySelector(".hai-error-banner") as HTMLElement;
+    if (!banner) return;
+    banner.innerHTML = "";
+    const text = document.createElement("span");
+    text.className = "hai-error-banner-text";
+    text.textContent = "⚠ " + message;
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "hai-error-banner-close";
+    closeBtn.textContent = "×";
+    closeBtn.addEventListener("click", () => banner.classList.add("hidden"));
+    banner.appendChild(text);
+    banner.appendChild(closeBtn);
+    banner.classList.remove("hidden");
+  }
+
   private appendError(message: string, retryText?: string, retryAttachments?: Attachment[]): void {
     this.hideEmptyState();
+    this.showErrorBanner(message);
     const el = document.createElement("div");
     el.className = "hai-msg hai-msg-error";
 
@@ -1763,15 +1813,52 @@ export class AgentModal {
     this.scrollToBottom();
   }
 
+  private appendEmptyResponse(): void {
+    this.hideEmptyState();
+    const el = document.createElement("div");
+    el.className = "hai-msg hai-msg-empty";
+    el.textContent = "AI 未返回内容";
+    this.messagesEl.appendChild(el);
+    this.scrollToBottom();
+  }
+
+  /** 在 assistant 消息底部添加复制栏，复制原始文本（不含思考块） */
+  private appendCopyBar(msgEl: HTMLElement, turn: ChatTurn): void {
+    if (msgEl.querySelector(".hai-msg-copy-bar")) return;
+    const bar = document.createElement("div");
+    bar.className = "hai-msg-copy-bar";
+    const btn = document.createElement("button");
+    btn.className = "hai-msg-copy-btn";
+    btn.textContent = "复制";
+    btn.addEventListener("click", () => {
+      const text = turn.rawText || msgEl.querySelector(".hai-msg-content")?.textContent || "";
+      navigator.clipboard.writeText(text).then(() => {
+        btn.textContent = "已复制";
+        btn.classList.add("copied");
+        setTimeout(() => { btn.textContent = "复制"; btn.classList.remove("copied"); }, 2000);
+      }).catch(() => {});
+    });
+    bar.appendChild(btn);
+    msgEl.appendChild(bar);
+  }
+
   private showThinking(): void {
     this.hideThinking();
     this.hideEmptyState();
     const el = document.createElement("div");
-    el.className = "hai-msg hai-msg-thinking";
-    el.innerHTML = `<div class="hai-thinking-avatar">${ICONS.role}</div><div class="hai-thinking-dots"><span></span><span></span><span></span></div>`;
+    el.className = "hai-msg-thinking";
+    el.innerHTML = `<div class="hai-thinking-avatar">${ICONS.role}</div><span class="hai-thinking-label">thinking</span><div class="hai-thinking-dots"><span></span><span></span><span></span></div>`;
+    el.addEventListener("click", () => { el.classList.toggle("collapsed"); });
     this.messagesEl.appendChild(el);
     this.thinkingEl = el;
     this.scrollToBottom();
+  }
+
+  private collapseThinking(): void {
+    if (this.thinkingEl) {
+      this.thinkingEl.classList.add("collapsed");
+      this.thinkingEl = null;
+    }
   }
 
   private hideThinking(): void {
@@ -1786,8 +1873,16 @@ export class AgentModal {
   private currentToolEl: HTMLElement | null = null;
 
   private onToolStart(tool: string, args: any): void {
+    // 工具开始意味着 LLM 已返回结果，折叠思考块
+    this.collapseThinking();
+
     if (this.currentRenderer) {
       this.currentRenderer.done();
+      const last = this.turns[this.turns.length - 1];
+      if (last && last.role === "assistant") {
+        last.rawText = this.currentRawText;
+        this.appendCopyBar(last.el, last);
+      }
       this.currentRenderer = null;
     }
 
@@ -2051,6 +2146,11 @@ export class AgentModal {
   // ---------- 历史恢复 / 清除 ----------
 
   private onHistoryRestored(messages: HistoryEntry[]): void {
+    // re-spawn 时抑制 HistoryRestored 清空当前 DOM
+    if (this.suppressHistoryRestore) {
+      this.suppressHistoryRestore = false;
+      return;
+    }
     // 清空旧消息（用于 LoadHistory 场景）
     this.messagesEl.innerHTML = "";
     this.turns = [];
@@ -2061,9 +2161,14 @@ export class AgentModal {
       if (msg.role === "user") {
         this.appendUserMessage(msg.content);
       } else if (msg.role === "assistant") {
-        const { renderer } = this.appendAssistantBubble();
+        const { el, renderer } = this.appendAssistantBubble();
         renderer.push(msg.content);
         renderer.done();
+        const turn = this.turns[this.turns.length - 1];
+        if (turn && turn.role === "assistant") {
+          turn.rawText = msg.content;
+          this.appendCopyBar(el, turn);
+        }
       }
     }
     this.scrollToBottom();

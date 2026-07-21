@@ -482,11 +482,14 @@ pub async fn session_loop(
                     continue;
                 }
 
+                eprintln!("[HAI] session_loop: 收到消息, role={}, text={:?}...", role, &text[..text.len().min(60)]);
+
                 history.push(Message::user_with_attachments(text, attachments));
 
                 let config: AiConfig = match load_config(&app) {
-                    Ok(c) => c,
+                    Ok(c) => { eprintln!("[HAI] config 加载成功, default_provider={}", c.default_provider); c }
                     Err(e) => {
+                        eprintln!("[HAI] config 加载失败: {e}");
                         emit(&event_tx, AgentEvent::Error { message: e.to_string() });
                         emit(&event_tx, AgentEvent::Done);
                         continue;
@@ -494,8 +497,9 @@ pub async fn session_loop(
                 };
 
                 let (provider_type, model) = match config.resolve_model(&role) {
-                    Ok(v) => v,
+                    Ok(v) => { eprintln!("[HAI] resolve_model: provider={}, model={}", v.0, v.1); v }
                     Err(e) => {
+                        eprintln!("[HAI] resolve_model 失败: {e}");
                         emit(&event_tx, AgentEvent::Error { message: e.to_string() });
                         emit(&event_tx, AgentEvent::Done);
                         continue;
@@ -503,6 +507,7 @@ pub async fn session_loop(
                 };
 
                 if provider_type != "openai" {
+                    eprintln!("[HAI] 不支持的 provider: {provider_type}");
                     emit(&event_tx, AgentEvent::Error {
                         message: format!("暂不支持 provider 类型 '{provider_type}'，仅支持 openai 兼容"),
                     });
@@ -511,8 +516,9 @@ pub async fn session_loop(
                 }
 
                 let endpoints: &[Endpoint] = match config.get_endpoints(provider_type, model) {
-                    Ok(e) => e,
+                    Ok(e) => { eprintln!("[HAI] endpoints: {} 个", e.len()); e }
                     Err(e) => {
+                        eprintln!("[HAI] get_endpoints 失败: {e}");
                         emit(&event_tx, AgentEvent::Error { message: e.to_string() });
                         emit(&event_tx, AgentEvent::Done);
                         continue;
@@ -553,8 +559,12 @@ pub async fn session_loop(
                     )
                     .await
                     {
-                        Ok(r) => r,
+                        Ok(r) => {
+                            eprintln!("[HAI] chat_stream 完成: content_len={}, tool_calls={}", r.content.len(), r.tool_calls.len());
+                            r
+                        }
                         Err(e) => {
+                            eprintln!("[HAI] chat_stream 失败: {e}");
                             let msg = e.to_string();
                             if msg == "已中止" {
                                 emit(&event_tx, AgentEvent::Aborted);

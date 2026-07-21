@@ -2403,6 +2403,31 @@ input[type="checkbox"] {
 
 /* ===== Chat View: Messages ===== */
 
+.hai-error-banner {
+  flex-shrink: 0;
+  padding: 8px 14px;
+  background: color-mix(in srgb, var(--term-red) 15%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--term-red) 30%, transparent);
+  color: var(--term-red);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hai-error-banner.hidden { display: none; }
+.hai-error-banner-text { flex: 1; word-break: break-word; line-height: 1.5; }
+.hai-error-banner-close {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 16px;
+  cursor: pointer;
+  opacity: 0.6;
+  line-height: 1;
+}
+.hai-error-banner-close:hover { opacity: 1; }
+
 .hai-messages {
   flex: 1;
   overflow-y: auto;
@@ -2414,7 +2439,8 @@ input[type="checkbox"] {
 }
 
 .hai-msg {
-  max-width: 85%;
+  width: 100%;
+  box-sizing: border-box;
   padding: 10px 14px;
   border-radius: 10px;
   font-size: 13px;
@@ -2424,21 +2450,35 @@ input[type="checkbox"] {
 }
 
 .hai-msg-user {
-  align-self: flex-end;
-  background: color-mix(in srgb, var(--term-blue) 18%, transparent);
+  background: color-mix(in srgb, var(--term-blue) 12%, transparent);
   color: var(--term-fg);
-  border: 1px solid color-mix(in srgb, var(--term-blue) 25%, transparent);
+  border: 1px solid color-mix(in srgb, var(--term-blue) 18%, transparent);
   white-space: pre-wrap;
 }
 
 .hai-msg-assistant {
-  align-self: flex-start;
-  background: color-mix(in srgb, var(--term-fg) 7%, transparent);
+  display: flex;
+  gap: 10px;
+  background: color-mix(in srgb, var(--term-fg) 5%, transparent);
   color: var(--term-fg);
-  border: 1px solid color-mix(in srgb, var(--term-fg) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--term-fg) 8%, transparent);
 }
 
-.hai-msg-assistant .hai-msg-content { overflow-x: auto; }
+.hai-msg-avatar {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--term-blue) 12%, transparent);
+  color: var(--term-blue);
+  margin-top: 2px;
+}
+.hai-msg-avatar svg { width: 16px; height: 16px; }
+
+.hai-msg-assistant .hai-msg-content { flex: 1; overflow-x: auto; }
 .hai-msg-assistant .hai-msg-content p { margin: 0 0 8px; }
 .hai-msg-assistant .hai-msg-content p:last-child { margin-bottom: 0; }
 .hai-msg-assistant .hai-msg-content pre {
@@ -2511,37 +2551,57 @@ input[type="checkbox"] {
   background: color-mix(in srgb, var(--term-fg) 20%, transparent);
 }
 
-/* ===== Thinking Indicator ===== */
+/* ===== Thinking Block ===== */
 
 .hai-msg-thinking {
+  width: 100%;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 14px;
-  align-self: flex-start;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--term-fg) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--term-fg) 6%, transparent);
+  font-size: 12px;
+  color: color-mix(in srgb, var(--term-fg) 45%, transparent);
+  cursor: pointer;
+  user-select: none;
+}
+
+.hai-msg-thinking.collapsed {
+  opacity: 0.5;
+}
+
+.hai-msg-thinking.collapsed .hai-thinking-avatar,
+.hai-msg-thinking.collapsed .hai-thinking-dots span {
+  animation: none;
 }
 
 .hai-thinking-avatar {
-  width: 28px;
-  height: 28px;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--term-blue) 15%, transparent);
   color: var(--term-blue);
   animation: hai-thinking-bounce 1.2s ease-in-out infinite;
 }
 
+.hai-thinking-label {
+  font-style: italic;
+}
+
 .hai-thinking-dots {
   display: flex;
-  gap: 4px;
+  gap: 3px;
 }
 .hai-thinking-dots span {
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--term-fg) 40%, transparent);
+  background: currentColor;
   animation: hai-thinking-dot 1.4s ease-in-out infinite;
 }
 .hai-thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
@@ -2549,11 +2609,11 @@ input[type="checkbox"] {
 
 @keyframes hai-thinking-bounce {
   0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-4px); }
+  50% { transform: translateY(-3px); }
 }
 @keyframes hai-thinking-dot {
-  0%, 60%, 100% { opacity: 0.3; transform: scale(0.8); }
-  30% { opacity: 1; transform: scale(1.2); }
+  0%, 60%, 100% { opacity: 0.3; }
+  30% { opacity: 1; }
 }
 
 /* ===== Model Selector Bar ===== */
@@ -3483,11 +3543,19 @@ input[type="checkbox"] {
 }
 .hai-modal[data-glass="glass"] .hai-msg-user,
 .hai-modal[data-glass="glass"] .hai-msg-assistant,
+.hai-modal[data-glass="glass"] .hai-msg-empty,
 .hai-modal[data-glass="glass"] .hai-tool-call,
 .hai-modal[data-glass="glass"] .hai-input-container,
 .hai-modal[data-glass="glass"] .hai-header,
 .hai-modal[data-glass="glass"] .hai-status-bar {
   text-shadow: var(--hai-text-shadow, none);
+}
+
+.hai-modal[data-glass="glass"] .hai-msg-empty {
+  background: rgba(var(--hai-bg-rgb), 0.25);
+  border: 1px solid rgba(var(--hai-fg-rgb), 0.06);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 /* ===== Empty State ===== */
@@ -3569,46 +3637,49 @@ input[type="checkbox"] {
 
 .hai-scroll-btn svg { width: 14px; height: 14px; }
 
-/* ===== Message Copy Button ===== */
+/* ===== Message Copy Bar (底部复制栏) ===== */
 
-.hai-msg-assistant {
-  position: relative;
-}
-
-.hai-msg-copy {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 22px;
-  height: 22px;
-  border: none;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--term-fg) 8%, transparent);
-  color: transparent;
+.hai-msg-copy-bar {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s, color 0.15s;
+  justify-content: flex-end;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--term-fg) 6%, transparent);
 }
 
-.hai-msg-assistant:hover .hai-msg-copy {
-  opacity: 1;
+.hai-msg-copy-btn {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--term-fg) 12%, transparent);
   color: color-mix(in srgb, var(--term-fg) 50%, transparent);
+  font-size: 11px;
+  padding: 2px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.hai-msg-copy-btn:hover {
+  background: color-mix(in srgb, var(--term-fg) 8%, transparent);
+  color: var(--term-fg);
+  border-color: color-mix(in srgb, var(--term-fg) 25%, transparent);
+}
+.hai-msg-copy-btn.copied {
+  color: var(--term-green, #4caf50);
+  border-color: color-mix(in srgb, var(--term-green, #4caf50) 30%, transparent);
 }
 
-.hai-msg-copy:hover {
-  background: color-mix(in srgb, var(--term-fg) 15%, transparent);
-  color: var(--term-fg) !important;
-}
+/* ===== Empty Response ===== */
 
-.hai-msg-copy.copied {
-  color: var(--term-green, #4caf50) !important;
-  opacity: 1;
+.hai-msg-empty {
+  align-self: flex-start;
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--term-fg) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--term-fg) 8%, transparent);
+  color: color-mix(in srgb, var(--term-fg) 50%, transparent);
+  font-size: 12px;
+  font-style: italic;
 }
-
-.hai-msg-copy svg { width: 12px; height: 12px; }
 
 /* ===== Model Badge on Assistant Message ===== */
 

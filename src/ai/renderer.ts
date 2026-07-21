@@ -51,11 +51,25 @@ export class StreamingMarkdown {
 
   private rerender(): void {
     if (!this.buffer) return;
-    const html = (window as any).__marked_parse?.(this.buffer) ?? this.buffer;
+    const parseFn = (window as any).__marked_parse;
+    if (!parseFn) {
+      this.activeEl.textContent = this.buffer;
+      return;
+    }
+    let html: string;
+    try {
+      html = parseFn(this.buffer);
+    } catch {
+      this.activeEl.textContent = this.buffer;
+      return;
+    }
     const temp = document.createElement("div");
     temp.innerHTML = html;
     const total = temp.children.length;
-    if (total === 0) return;
+    if (total === 0) {
+      this.activeEl.textContent = this.buffer;
+      return;
+    }
 
     const newFrozen = total - 1;
     while (this.frozenCount < newFrozen) {
