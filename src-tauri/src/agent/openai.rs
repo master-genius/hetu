@@ -237,6 +237,7 @@ impl LlmProvider for OpenAiProvider {
         }
 
         let endpoint = format!("{}/chat/completions", self.url.trim_end_matches('/'));
+        eprintln!("[HAI] chat_stream: POST {endpoint}, model={}", self.model);
 
         let client = shared_client();
         let mut req = client
@@ -254,11 +255,17 @@ impl LlmProvider for OpenAiProvider {
             .timeout(std::time::Duration::from_secs(self.request_timeout))
             .send()
             .await
-            .map_err(|e| Error::msg(format!("LLM 请求失败: {e}")))?;
+            .map_err(|e| {
+                let msg = format!("请求失败 [{endpoint}]: {e}");
+                eprintln!("[HAI] {msg}");
+                Error::msg(msg)
+            })?;
 
         let status = resp.status();
+        eprintln!("[HAI] HTTP 响应状态: {status}");
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
+            eprintln!("[HAI] API 错误响应: {}", text.chars().take(500).collect::<String>());
             return Err(Error::msg(format!(
                 "LLM API 返回 {status}: {}",
                 text.chars().take(500).collect::<String>()
@@ -353,7 +360,9 @@ impl LlmProvider for OpenAiProvider {
                             }
                         }
                     }
-                    Err(_) => { /* 跳过无法解析的行（心跳、注释等） */ }
+                    Err(e) => {
+                        eprintln!("[HAI] SSE 解析失败: {e}, data={}", data.chars().take(200).collect::<String>());
+                    }
                 }
             }
         }
