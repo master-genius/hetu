@@ -8,8 +8,6 @@ mod slot;
 mod ssh;
 mod sshcfg;
 
-mod agent;
-
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -725,7 +723,6 @@ pub fn run() {
             transfers: Mutex::new(HashMap::new()),
             slot: Mutex::new(None),
         })
-        .manage(agent::AgentManager::new())
         .setup(|app| {
             let window = app.get_webview_window("main").expect("main window");
             // 原生毛玻璃：macOS vibrancy / Windows acrylic；Linux 依赖合成器(KDE 等)对
@@ -793,26 +790,6 @@ pub fn run() {
             read_file_base64,
             open_external,
             restore_window_size,
-            agent::agent_spawn,
-            agent::agent_send_message,
-            agent::agent_abort,
-            agent::agent_destroy,
-            agent::agent_load_config,
-            agent::agent_save_config,
-            agent::agent_approve_tool,
-            agent::agent_answer_question,
-            agent::agent_terminal_data,
-            agent::agent_update_panes,
-            agent::agent_clear_history,
-            agent::agent_list_history,
-            agent::agent_delete_history,
-            agent::agent_migrate_history,
-            agent::agent_load_history,
-            agent::agent_list_roles,
-            agent::agent_get_role,
-            agent::agent_save_role,
-            agent::agent_delete_role,
-            agent::agent_set_default_role,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

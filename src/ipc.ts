@@ -84,48 +84,6 @@ export const api = {
   /** 以 base64 读取文件内容（供 Agent 图片上传使用） */
   readFileBase64: (path: string, maxBytes: number) => invoke<string>("read_file_base64", { path, maxBytes }),
 
-  // ---------- Agent ----------
-
-  agentSpawn: (tabId: string, mode: string, role: string, initialMessage: string | null, cwd: string, panes: any[], onEvent: Channel<any>) =>
-    invoke<void>("agent_spawn", { tabId, mode, role, initialMessage, cwd, panes, onEvent }),
-  agentSendMessage: (tabId: string, message: string, attachments?: any[]) =>
-    invoke<void>("agent_send_message", { tabId, message, attachments: attachments || [] }),
-  agentAbort: (tabId: string) =>
-    invoke<void>("agent_abort", { tabId }),
-  agentDestroy: (tabId: string) =>
-    invoke<void>("agent_destroy", { tabId }),
-  agentLoadConfig: () =>
-    invoke<any>("agent_load_config"),
-  agentSaveConfig: (config: any) =>
-    invoke<void>("agent_save_config", { config }),
-  agentApproveTool: (tabId: string, approved: boolean) =>
-    invoke<void>("agent_approve_tool", { tabId, approved }),
-  agentAnswerQuestion: (tabId: string, answer: string) =>
-    invoke<void>("agent_answer_question", { tabId, answer }),
-  agentTerminalData: (tabId: string, requestId: string, data: string) =>
-    invoke<void>("agent_terminal_data", { tabId, requestId, data }),
-  agentUpdatePanes: (tabId: string, panes: any[]) =>
-    invoke<void>("agent_update_panes", { tabId, panes }),
-  agentClearHistory: (tabId: string) =>
-    invoke<void>("agent_clear_history", { tabId }),
-  agentListHistory: (pattern?: string) =>
-    invoke<any[]>("agent_list_history", { pattern: pattern || null }),
-  agentDeleteHistory: (cwd: string) =>
-    invoke<void>("agent_delete_history", { cwd }),
-  agentMigrateHistory: (oldCwd: string, newCwd: string) =>
-    invoke<void>("agent_migrate_history", { oldCwd, newCwd }),
-  agentLoadHistory: (tabId: string, cwd: string) =>
-    invoke<void>("agent_load_history", { tabId, cwd }),
-  agentListRoles: () =>
-    invoke<any[]>("agent_list_roles"),
-  agentGetRole: (id: string) =>
-    invoke<any>("agent_get_role", { id }),
-  agentSaveRole: (id: string, name: string, category: string, description: string, content: string) =>
-    invoke<void>("agent_save_role", { id, name, category, description, content }),
-  agentDeleteRole: (id: string) =>
-    invoke<void>("agent_delete_role", { id }),
-  agentSetDefaultRole: (roleId: string | null) =>
-    invoke<void>("agent_set_default_role", { roleId }),
   paneSetCwd: (paneId: string, cwd: string) =>
     invoke<void>("pane_set_cwd", { paneId, cwd }),
 };

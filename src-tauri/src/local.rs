@@ -479,44 +479,12 @@ _payload="tok=$(b64 "${HSSH_TOKEN:-}");w=$_with_shell;d=$(b64 "$_dir");r=$(b64 "
 emit "$_payload"
 "#;
 
-const HAI_SCRIPT: &str = r#"#!/bin/sh
-# HetuShell 内建命令：启动 AI Agent (HAI) 面板。
-# 用法: hai [-w] [--ask|--plan] [--role <名称>] [消息]
-# - -w: 浮动覆盖层模式（跟随当前终端分屏定位，紧凑布局）
-# - --ask: 每次工具调用前确认
-# - --plan: 先出计划再执行
-# - --role <名称>: 指定角色（默认 general）
-# - 不带消息则打开空对话；带消息则自动发送首条
-OSC=1733
-emit() { printf '\033]%s;%s\007' "$OSC" "$1"; }
-b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
-
-role="general"
-mode="auto"
-message=""
-with_shell=0
-
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -w)        with_shell=1; shift;;
-    --ask)     mode="ask"; shift;;
-    --plan)    mode="plan"; shift;;
-    --role)    [ $# -ge 2 ] || { echo "hai: 选项 $1 缺少参数" >&2; exit 1; }; role="$2"; shift 2;;
-    -h|--help) echo "用法: hai [-w] [--ask|--plan] [--role <名称>] [消息]"; exit 0;;
-    *)         message="$*"; break;;
-  esac
-done
-
-_payload="tok=$(b64 "${HSSH_TOKEN:-}");op=$(b64 "launch");role=$(b64 "$role");mode=$(b64 "$mode");msg=$(b64 "$message");w=$with_shell"
-emit "$_payload"
-"#;
-
 /// 把内建命令脚本落地到 bin 目录并置可执行位，返回该目录用于前置 PATH。
 /// 内容一致则不重写（避免每次 spawn 写盘）；任何失败都返回 None（不影响终端启动）。
 #[cfg(not(windows))]
 fn install_hssh() -> Option<std::path::PathBuf> {
     let dir = crate::settings::bin_dir().ok()?;
-    for (name, content) in [("hssh", HSSH_SCRIPT), ("hsshprod", HSSHPROD_SCRIPT), ("hexit", HEXIT_SCRIPT), ("himage", HIMAGE_SCRIPT), ("hfile", HFILE_SCRIPT), ("hai", HAI_SCRIPT)] {
+    for (name, content) in [("hssh", HSSH_SCRIPT), ("hsshprod", HSSHPROD_SCRIPT), ("hexit", HEXIT_SCRIPT), ("himage", HIMAGE_SCRIPT), ("hfile", HFILE_SCRIPT)] {
         let path = dir.join(name);
         let need = std::fs::read_to_string(&path)
             .map(|c| c != content)

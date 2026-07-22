@@ -22,8 +22,6 @@ import { type Action, matchAction, resolveBindings } from "./keybindings";
 import { showAboutDialog, showConnectDialog, showSettingsDialog } from "./dialogs";
 import { feedPane } from "./feed";
 import { initPanelResize } from "./panelResize";
-import { AgentModal } from "./ai/agent-modal";
-import type { HaiSpec, PaneInfo } from "./ai/protocol";
 import {
   confirmDialog, confirmOverwriteDialog, formatSize, IMAGE_MIME, showFileTooltip, showHimageViewer, showMenu, showPreview,
   toast,
@@ -414,54 +412,6 @@ async function bootstrap() {
     }
   };
 
-  // hai：在终端内弹出 AI Agent 面板（Tab 级 Session，ESC 隐藏不销毁）
-  const agentModals = new Map<string, AgentModal>();
-
-  /** 收集 Tab 内所有 Pane 信息（方案 B：不改 pane.ts，由 Modal 主动收集） */
-  const collectPanes = (tab: Tab): PaneInfo[] => {
-    return tab.layout.panes().map((p) => ({
-      id: p.id,
-      isLocal: p.isLocal,
-      connId: p.connId,
-      host: p.isLocal ? "localhost" : (connMeta.get(p.connId)?.name || p.connId),
-      cwd: p.cwd || "",
-      os: "Linux",
-    }));
-  };
-
-  const handleHai = async (spec: HaiSpec, pane: Pane) => {
-    AgentModal.preload();
-    const found = tabs.findPane(pane.id);
-    const tab = found ? found.tab : tabs.active;
-    const tabId = tab?.id;
-    if (!tabId || !tab) return;
-
-    const panes = collectPanes(tab);
-
-    let modal = agentModals.get(tabId);
-    if (!modal) {
-      modal = new AgentModal(tabId);
-      // read_terminal 回调：通过 pane ID 找到 xterm 实例，读取 buffer
-      modal.onReadTerminal = async (paneId: string, lines: number): Promise<string> => {
-        const target = tabs.findPane(paneId)?.pane;
-        if (!target) return "";
-        const buffer = target.term.buffer.active;
-        const start = Math.max(0, buffer.length - lines);
-        let text = "";
-        for (let i = start; i < buffer.length; i++) {
-          const line = buffer.getLine(i);
-          if (line) text += line.translateToString(true) + "\n";
-        }
-        return text;
-      };
-      agentModals.set(tabId, modal);
-    } else {
-      // 已有 session：更新 pane 列表
-      api.agentUpdatePanes(tabId, collectPanes(tab)).catch(() => {});
-    }
-    await modal.show(spec, pane.cwd || "", panes, pane.element.getBoundingClientRect());
-  };
-
   const requestCloseTab = async (tab: Tab) => {
     if (tabs.hasBusyPane(tab)) {
       const ok = await confirmDialog(
@@ -469,12 +419,6 @@ async function bootstrap() {
         `“${tab.title}”中可能有程序正在运行，确定要关闭吗？`,
       );
       if (!ok) return;
-    }
-    // 销毁 Agent Modal + 后端 Session
-    const modal = agentModals.get(tab.id);
-    if (modal) {
-      agentModals.delete(tab.id);
-      void modal.destroy();
     }
     await tabs.closeTab(tab);
   };
@@ -516,8 +460,6 @@ async function bootstrap() {
     pane.onHimage = (paths, withShell, p) => handleHimage(paths, withShell, p);
     // 内建 hfile 命令：打开文件管理器面板
     pane.onHfile = (spec, p) => handleHfile(spec, p);
-    // 内建 hai 命令：弹出 AI Agent 面板
-    pane.onHai = (spec, p) => void handleHai(spec, p);
     // pane channel 关闭：shell 正常退出→切回本地/关 pane；连接断开→保留等待重连
     pane.onClose = (exited) => {
       if (!exited) return; // 连接断开（exited=false）→ 保留等待重连
@@ -1388,18 +1330,6 @@ async function bootstrap() {
   document.getElementById("btn-split-h")!.addEventListener("click", () => void tabs.splitActive("row"));
   document.getElementById("btn-split-v")!.addEventListener("click", () => void tabs.splitActive("col"));
   document.getElementById("btn-settings")!.addEventListener("click", () => showSettingsDialog());
-
-  // AI 助手按钮：在当前活跃 pane 上打开 Agent Modal
-  document.getElementById("btn-ai")!.addEventListener("click", () => {
-    const tab = tabs.active;
-    if (!tab) return;
-    const pane = tab.layout.panes().find((p) => p.id === tab.activePaneId) ?? tab.layout.panes()[0];
-    if (!pane) return;
-    handleHai(
-      { tok: "", op: "launch", role: "general", mode: "auto", msg: "", w: false },
-      pane,
-    );
-  });
 
   // ---------- 设置热应用到所有终端 ----------
 
