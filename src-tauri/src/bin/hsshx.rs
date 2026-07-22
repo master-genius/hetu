@@ -1,4 +1,4 @@
-//! hsshe — HetuShell SSH exec CLI
+//! hsshx — HetuShell SSH exec CLI
 //! 复用 hetushell_lib SSH 栈，按 profiles.json 连接项执行远程命令。
 //! 纯净输出：仅远程 stdout/stderr，退出码跟随远程命令。
 
@@ -27,7 +27,7 @@ async fn main() -> ExitCode {
     let profile = match load_profiles().into_iter().find(|p| &p.name == name) {
         Some(p) => p,
         None => {
-            eprintln!("hsshe: 未找到连接项「{name}」");
+            eprintln!("hsshx: 未找到连接项「{name}」");
             return ExitCode::from(2);
         }
     };
@@ -39,7 +39,7 @@ async fn main() -> ExitCode {
         match std::io::stdin().read_to_string(&mut buf) {
             Ok(_) => buf,
             Err(_) => {
-                eprintln!("hsshe: 读取 stdin 失败");
+                eprintln!("hsshx: 读取 stdin 失败");
                 return ExitCode::from(2);
             }
         }
@@ -69,7 +69,7 @@ async fn main() -> ExitCode {
     let handle = match establish(&params).await {
         Ok(h) => h,
         Err(e) => {
-            eprintln!("hsshe: {e}");
+            eprintln!("hsshx: {e}");
             return ExitCode::from(255);
         }
     };
@@ -77,13 +77,13 @@ async fn main() -> ExitCode {
     let mut channel = match handle.channel_open_session().await {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("hsshe: {e}");
+            eprintln!("hsshx: {e}");
             return ExitCode::from(255);
         }
     };
 
-    if let Err(e) = channel.exec(true, &command).await {
-        eprintln!("hsshe: {e}");
+    if let Err(e) = channel.exec(true, command.as_str()).await {
+        eprintln!("hsshx: {e}");
         return ExitCode::from(255);
     }
 
@@ -114,7 +114,7 @@ async fn main() -> ExitCode {
 }
 
 fn usage() {
-    eprintln!("用法: hsshe <连接项> <命令>  |  hsshe <连接项>  |  hsshe -l");
+    eprintln!("用法: hsshx <连接项> <命令>  |  hsshx <连接项>  |  hsshx -l");
     eprintln!("  无命令且 stdin 有数据时自动从 stdin 读取命令");
 }
 
@@ -125,7 +125,7 @@ fn list_profiles() -> ExitCode {
         return ExitCode::SUCCESS;
     }
     for p in &profiles {
-        println!("{:20s} {:6s} {}@{}:{}", p.name, p.auth, p.user, p.host, p.port);
+        println!("{:<20} {:<6} {}@{}:{}", p.name, p.auth, p.user, p.host, p.port);
     }
     ExitCode::SUCCESS
 }

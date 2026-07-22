@@ -37,8 +37,8 @@ async-trait = "0.1"
 futures-util = "0.3"
 
 [[bin]]
-name = "hsshe"
-path = "src/bin/hsshe.rs"
+name = "hsshx"
+path = "src/bin/hsshx.rs"
 
 [profile.release]
 lto = true
