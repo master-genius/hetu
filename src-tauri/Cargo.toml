@@ -36,6 +36,10 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "str
 async-trait = "0.1"
 futures-util = "0.3"
 
+[[bin]]
+name = "hsshe"
+path = "src/bin/hsshe.rs"
+
 [profile.release]
 lto = true
 codegen-units = 1

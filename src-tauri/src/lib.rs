@@ -1,11 +1,11 @@
 //! HetuShell Tauri 后端：应用状态、command 注册、窗口毛玻璃效果。
 
+pub mod error;
+pub mod settings;
+pub mod ssh;
 mod cache;
-mod error;
 mod local;
-mod settings;
 mod slot;
-mod ssh;
 mod sshcfg;
 
 use std::collections::HashMap;
