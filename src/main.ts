@@ -186,9 +186,19 @@ async function bootstrap() {
         const connId = await api.sshConnect(params);
         recordConn(connId, params, profileId ?? null);
         try {
-          await tabs.switchPaneConnection(tab, pane, connId, params.name);
+          if (pane.isLocal) {
+            // park 模式：保留本地 shell，用子 ID 开 SSH
+            const oldConn = pane.connId;
+            await pane.parkForSsh(connId);
+            tab.title = params.name;
+            if (tab.layout.panes().length === 1) tab.connId = connId;
+            tabs.setLabel(tab, params.name);
+            tabs.gcConnections([oldConn]);
+            tabs.onLayoutChange?.();
+          } else {
+            await tabs.switchPaneConnection(tab, pane, connId, params.name);
+          }
         } catch (err) {
-          // pane 已关闭或切换失败：回收刚建立的连接，避免泄漏
           void api.sshDisconnect(connId).catch(() => {});
           throw err;
         }
@@ -207,7 +217,12 @@ async function bootstrap() {
         }
       };
       const onLocal = async () => {
-        await tabs.switchPaneConnection(tab, pane, "local", "本地终端");
+        if (pane.isLocal) {
+          // hssh from local shell, 用户取消 → 解锁脚本 read
+          void api.paneInput(pane.id, b64encode("\n")).catch(() => {});
+        } else {
+          await tabs.switchPaneConnection(tab, pane, "local", "本地终端");
+        }
       };
 
       if (spec.mode === "profile") {
@@ -463,9 +478,18 @@ async function bootstrap() {
     // pane channel 关闭：shell 正常退出→切回本地/关 pane；连接断开→保留等待重连
     pane.onClose = (exited) => {
       if (!exited) return; // 连接断开（exited=false）→ 保留等待重连
-      if (!pane.isLocal) {
-        // 远程 shell 正常退出（用户 exit / hsshprod --exit）→ 退回本地终端，不关闭 pane。
-        // preserve=true 保留远程输出不清屏，用户可查看命令执行结果。
+      if (pane.parked) {
+        // hssh park 模式：SSH 退出 → unpark 回到原 shell
+        const oldConn = pane.connId;
+        void pane.unparkFromSsh().then(() => {
+          tab.title = "本地终端";
+          if (tab.layout.panes().length === 1) tab.connId = "local";
+          tabs.setLabel(tab, "本地终端");
+          tabs.gcConnections([oldConn]);
+          tabs.onLayoutChange?.();
+        }).catch(() => {});
+      } else if (!pane.isLocal) {
+        // 远程 shell 正常退出（用户 exit）→ 退回本地终端，不关闭 pane。
         pane.switchConnection("local", true).catch(() => {});
       } else {
         // 本地终端退出 → 收起该分屏
@@ -1213,6 +1237,14 @@ async function bootstrap() {
     if (restoring || !getSettings().restoreSession) return;
     const snap = await Promise.all(tabs.tabs.map(async (tab) => {
       const first = tab.layout.panes()[0];
+      const pane = first;
+      // park 模式：本质是本地终端 + hssh 进入的连接，存为 local + hsshProfile
+      if (pane?.parked) {
+        const info = first ? connMeta.get(first.connId) : undefined;
+        const layout = tab.layout.root.type === "split" ? await snapLayout(tab.layout.root) : undefined;
+        const cwd = await api.localCwd(pane.id).catch(() => null);
+        return { local: true, name: "本地终端", layout, cwd, hsshProfile: info?.profileId ?? null };
+      }
       const info = first ? connMeta.get(first.connId) : undefined;
       // 分屏结构仅在确有切分时记录（单 pane 省略，保持 session.json 精简）
       const layout = tab.layout.root.type === "split" ? await snapLayout(tab.layout.root) : undefined;
@@ -1665,7 +1697,32 @@ async function bootstrap() {
     // order = 会话中的原始序号：后台并行连接完成顺序不定，最后按 order 归位
     capped.forEach((st, order) => {
       if (st.local) {
-        pending.push(openLocalTab(order, st.cwd ?? null).then((tab) => applySessionLayout(tab, st.layout)));
+        pending.push(openLocalTab(order, st.cwd ?? null).then(async (tab) => {
+          await applySessionLayout(tab, st.layout);
+          // hssh park 模式恢复：本地终端就绪后自动重连 SSH
+          if (st.hsshProfile) {
+            try {
+              const hProfiles = await api.profilesList().catch(() => [] as Profile[]);
+              const hp = hProfiles.find((x) => x.id === st.hsshProfile);
+              if (!hp || hp.auth !== "key" || !(hp.keyData || hp.keyPath)) return;
+              const pane = tab.layout.panes()[0];
+              if (!pane || pane.disposed || !pane.isLocal) return;
+              // 等本地 shell 就绪
+              await new Promise(r => setTimeout(r, 500));
+              if (pane.disposed || !pane.isLocal) return;
+              const params = profileToParams(hp);
+              const connId = await api.sshConnect(params);
+              recordConn(connId, params, hp.id);
+              await pane.parkForSsh(connId);
+              tab.title = hp.name;
+              if (tab.layout.panes().length === 1) tab.connId = connId;
+              tabs.setLabel(tab, hp.name);
+              tabs.onLayoutChange?.();
+            } catch (err) {
+              toast(`恢复 hssh 连接「${st.hsshProfile}」失败: ${err}`, true);
+            }
+          }
+        }));
         return;
       }
       if (!st.profileId) return; // 临时/手输连接，未保存为连接项 → 不恢复

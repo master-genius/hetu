@@ -474,6 +474,7 @@ export class TabManager {
       await this.closeTab(tab);
       return;
     }
+    pane.dispose();
     if (tab.activePaneId === pane.id) {
       tab.activePaneId = tab.layout.panes()[0]?.id ?? "";
     }

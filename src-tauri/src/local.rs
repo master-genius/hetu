@@ -331,6 +331,8 @@ else
   emit "v=1;tok=$tok;mode=adhoc;host=$(b64 "$host");user=$(b64 "$user");port=$(b64 "$port");pass=$(b64 "$pass");ident=$(b64 "$ident");feed=$feed_b64;exit=$exit_b64;quiet=$quiet_b64;debug=$debug_b64"
   [ "$quiet" = 1 ] && [ "$debug" = 0 ] || printf '→ 正在连接 %s@%s …\n' "$user" "$host"
 fi
+# 阻塞等待前端信号：SSH 退出后前端发换行符解锁，脚本退出 → bash 回到 prompt
+read _hssh_park_done
 "#;
 
 /// hsshprod 快捷别名：等价于 `hssh --prod --quiet`，静默连接 + 自动执行命令。

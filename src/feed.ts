@@ -47,5 +47,5 @@ export async function feedPane(
     // exit $? 与 feed 命令合并为一次 paneInput，避免分两次发送时 shell echo 已就绪导致 exit $? 被回显
     feed += "exit $?\r";
   }
-  await api.paneInput(pane.id, b64encode(feed));
+  await api.paneInput(pane.backendId, b64encode(feed));
 }

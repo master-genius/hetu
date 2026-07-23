@@ -148,6 +148,12 @@ export class Pane {
   private lastSelection = "";
   /** hssh --debug 标志：进程退出时输出状态码提示。仅 hssh --prod --debug 场景为 true。 */
   debugExit = false;
+  /** hssh park 模式：本地 PTY 仍在运行但被挂起，SSH 子任务在 activeBackendId 上运行 */
+  parked = false;
+  /** park 期间的后端 pane ID（SSH 子任务）；null 表示走 this.id（本地 PTY 或直接 SSH） */
+  activeBackendId: string | null = null;
+  /** 后端路由 ID：park 期间指向 SSH 子任务，否则指向本地 PTY */
+  get backendId(): string { return this.activeBackendId ?? this.id; }
   /** WebGL addon 引用，用于 dispose + 重建（Ctrl+Shift+R / onContextLoss） */
   private webglAddon: { dispose: () => void } | null = null;
   /** WebGL renderer 原型 patch 是否已应用（全局一次性，所有 pane 共享同一原型） */
@@ -316,7 +322,7 @@ export class Pane {
 
     // 输入 → 后端 PTY
     this.term.onData((data) => {
-      void api.paneInput(this.id, b64encode(data)).catch(() => {});
+      void api.paneInput(this.backendId, b64encode(data)).catch(() => {});
     });
 
     // OSC 7：shell 上报 cwd（file://host/path）
@@ -353,25 +359,20 @@ export class Pane {
       return false;
     });
 
-    // 复制即选中（可配置）+ 缓存非空选区供右键/Ctrl+Shift+C 兜底
+    // 缓存非空选区供右键/Ctrl+Shift+C 兜底
     this.term.onSelectionChange(() => {
       const sel = this.term.getSelection();
       if (sel) this.lastSelection = sel;
-      if (sel && getSettings().copyOnSelect) void this.copyText(sel);
     });
 
-    // mouseup 备份选区 + TUI 模式/普通模式松开即复制提示
-    this.element.addEventListener("mouseup", () => {
+    // mouseup：Shift+选择才复制（TUI 模式 Shift+drag 同样复制）
+    this.element.addEventListener("mouseup", (e) => {
       const sel = this.term.getSelection();
       if (!sel) return;
       this.lastSelection = sel;
       const tui = this.term.buffer.active.type === "alternate" && this.mouseMode;
-      if (tui) {
-        // Shift+drag 是明确的复制意图，独立于 copyOnSelect 自动复制
+      if (tui || e.shiftKey) {
         void this.copyText(sel);
-        toast("已复制", false, 3000);
-      } else if (getSettings().copyOnSelect) {
-        // copyOnSelect 已在 onSelectionChange 中复制，仅补充提示
         toast("已复制", false, 3000);
       }
     });
@@ -489,7 +490,7 @@ export class Pane {
           const clamped = Math.max(-this.term.rows, Math.min(total, this.term.rows));
           if (clamped === 0) return; // 终端未渲染/最小化时 rows=0，避免发空
           const key = clamped > 0 ? "\x05" : "\x19"; // <C-E> 下滚 / <C-Y> 上滚
-          void api.paneInput(this.id, b64encode(key.repeat(Math.abs(clamped)))).catch(() => {});
+          void api.paneInput(this.backendId, b64encode(key.repeat(Math.abs(clamped)))).catch(() => {});
         });
       },
       { capture: true, passive: false },
@@ -642,7 +643,7 @@ export class Pane {
     // 稍等 shell 就绪再发，使自清除相对首个提示符生效
     window.setTimeout(() => {
       if (!this.disposed && !this.shellPid) {
-        void api.paneInput(this.id, b64encode(cmd)).catch(() => {});
+        void api.paneInput(this.backendId, b64encode(cmd)).catch(() => {});
       }
     }, 450);
   }
@@ -652,6 +653,12 @@ export class Pane {
    * newConnId 需已建立（SSH）或为 "local"。
    */
   async switchConnection(newConnId: string, preserve = false): Promise<void> {
+    // park 期间被外部调用（右键切换连接等）→ 先关闭 SSH 子任务，退出 park 模式
+    if (this.activeBackendId) {
+      await api.paneClose(this.activeBackendId).catch(() => {});
+      this.activeBackendId = null;
+      this.parked = false;
+    }
     await api.paneClose(this.id).catch(() => {});
     this.connId = newConnId;
     this.cwd = null;
@@ -662,6 +669,47 @@ export class Pane {
     if (!preserve) this.term.reset();
     await this.open();
     this.focus();
+  }
+
+  /**
+   * hssh park 模式：保留本地 PTY（bash 阻塞在 read），用临时子 ID 开 SSH 子任务。
+   * 所有 paneInput/paneResize 路由到 activeBackendId（子 ID），本地 PTY 静默保留。
+   * SSH 退出后调 unparkFromSsh 恢复本地 shell。
+   */
+  async parkForSsh(connId: string): Promise<void> {
+    const sshPaneId = this.id + "__hssh";
+    this.activeBackendId = sshPaneId;
+    this.parked = true;
+    this.connId = connId;
+    this.cwd = null;
+    this.homeDir = null;
+    this.shellPid = null;
+    this.statCache.clear();
+    this.firstOutput = false;
+    this.readyPromise = new Promise<void>((r) => { this._readyResolve = r; });
+    const ch = new Channel<PaneEvent>();
+    ch.onmessage = (e) => this.handlePaneEvent(e);
+    this.term.reset();
+    await api.paneOpen(connId, sshPaneId, this.term.cols, this.term.rows, ch);
+    this.focus();
+  }
+
+  /**
+   * SSH 退出后恢复本地 shell：关闭 SSH 子任务，重置路由到本地 PTY，
+   * 发换行符解锁 hssh 脚本的 read → 脚本 exit → bash 输出 prompt。
+   */
+  async unparkFromSsh(): Promise<void> {
+    if (!this.activeBackendId) return;
+    await api.paneClose(this.activeBackendId).catch(() => {});
+    this.activeBackendId = null;
+    this.parked = false;
+    this.connId = "local";
+    this.cwd = null;
+    this.shellPid = null;
+    this.statCache.clear();
+    this.term.reset();
+    // 解锁 hssh 脚本的 read，bash 回到 prompt
+    void api.paneInput(this.id, b64encode("\n")).catch(() => {});
   }
 
   /** cwd 是否由 shell（OSC7）真实上报，而非 home 兜底猜测 */
@@ -718,6 +766,8 @@ export class Pane {
   /** Channel 事件入口：取代全局 listen 的 pane-output/exit/closed 路由 */
   private handlePaneEvent(e: PaneEvent) {
     if (this.disposed) return;
+    // park 期间忽略本地 PTY 事件（bash 被 read 阻塞，几乎无输出）
+    if (this.parked && e.type !== "closed") return;
     switch (e.type) {
       case "output":
         if (!this.firstOutput) {
@@ -758,7 +808,7 @@ export class Pane {
     }
     // 仅实际 resize 时才通知 PTY——冗余 SIGWINCH 会打扰 TUI 程序
     if (this.term.cols !== prevCols || this.term.rows !== prevRows) {
-      void api.paneResize(this.id, this.term.cols, this.term.rows).catch(() => {});
+      void api.paneResize(this.backendId, this.term.cols, this.term.rows).catch(() => {});
     }
     // 始终刷新：DOM 移动或设置变更后 canvas 可能未重绘
     this.term.refresh(0, this.term.rows - 1);
@@ -988,6 +1038,10 @@ export class Pane {
       this.wheelPending = 0;
     }
     this.resizeObserver.disconnect();
+    if (this.activeBackendId) {
+      void api.paneClose(this.activeBackendId).catch(() => {});
+      this.activeBackendId = null;
+    }
     void api.paneClose(this.id).catch(() => {});
     this.term.dispose();
     this.element.remove();

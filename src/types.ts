@@ -107,6 +107,8 @@ export interface SessionTab {
   layout?: SessionLayout | null;
   /** 本地终端首个 pane 的起始工作目录（OSC7 上报），恢复时传给 shell 启动 */
   cwd?: string | null;
+  /** hssh park 模式的连接项 ID：本地终端 + hssh 进入的 SSH 连接，恢复时自动重连 */
+  hsshProfile?: string | null;
 }
 
 export interface ConnParams {
