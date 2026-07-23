@@ -690,7 +690,18 @@ export class Pane {
     const ch = new Channel<PaneEvent>();
     ch.onmessage = (e) => this.handlePaneEvent(e);
     this.term.reset();
-    await api.paneOpen(connId, sshPaneId, this.term.cols, this.term.rows, ch);
+    try {
+      await api.paneOpen(connId, sshPaneId, this.term.cols, this.term.rows, ch);
+    } catch (err) {
+      this.activeBackendId = null;
+      this.parked = false;
+      this.connId = "local";
+      throw err;
+    }
+    if (!this.homeDir) {
+      api.remoteHome(connId).then((h) => { this.homeDir = h; }).catch(() => {});
+    }
+    this.injectCwdTracker();
     this.focus();
   }
 

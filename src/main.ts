@@ -178,6 +178,7 @@ async function bootstrap() {
       const found = tabs.findPane(pane.id);
       if (!found) {
         toast("hssh：当前终端已关闭", true);
+        void api.paneInput(pane.id, b64encode("\n")).catch(() => {});
         return;
       }
       const { tab } = found;
@@ -230,6 +231,7 @@ async function bootstrap() {
         const p = profiles.find((x) => x.name === spec.name);
         if (!p) {
           toast(`hssh：未找到连接项「${spec.name}」`, true);
+          void api.paneInput(pane.id, b64encode("\n")).catch(() => {});
           return;
         }
         if (p.auth === "password") {
@@ -262,6 +264,11 @@ async function bootstrap() {
       }
     } catch (err) {
       toast(String(err), true);
+      // 连接失败/取消：解锁 hssh 脚本的 read，让 bash 回到 prompt
+      // 仅在 pane 仍为 local（park 未进入或已退出）时发送
+      if (pane.isLocal && !pane.parked) {
+        void api.paneInput(pane.id, b64encode("\n")).catch(() => {});
+      }
     }
   };
 
