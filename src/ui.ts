@@ -211,16 +211,17 @@ export function confirmOverwriteDialog(name: string, dir: string): Promise<Overw
   });
 }
 
-export function toast(message: string, isError = false) {
+export function toast(message: string, isError = false, duration = 0) {
   const el = document.createElement("div");
   el.className = "toast" + (isError ? " error" : "");
   el.textContent = message;
   document.body.appendChild(el);
   window.setTimeout(() => el.classList.add("show"), 10);
+  const ms = duration > 0 ? duration : (isError ? 5000 : 2500);
   window.setTimeout(() => {
     el.classList.remove("show");
     window.setTimeout(() => el.remove(), 300);
-  }, isError ? 5000 : 2500);
+  }, ms);
 }
 
 // ---------- 悬停元信息 tooltip ----------

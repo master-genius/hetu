@@ -10,6 +10,7 @@ import { Channel } from "@tauri-apps/api/core";
 import { api, b64decode, b64encode } from "./ipc";
 import { installImeGuard } from "./imeGuard";
 import { getSettings, activeTheme, fontStack, computeMcr } from "./settings";
+import { toast } from "./ui";
 import type { FileMeta, PaneEvent } from "./types";
 
 /** hssh 内建命令通过此 OSC 标识符通知前端（见 local.rs 注入的 hssh 脚本）。 */
@@ -359,11 +360,20 @@ export class Pane {
       if (sel && getSettings().copyOnSelect) void this.copyText(sel);
     });
 
-    // mouseup 备份选区：鼠标模式下 onSelectionChange 可能不触发，
-    // mouseup 时再检查一次，确保 lastSelection 捕获到 Shift+drag 选中的文本
+    // mouseup 备份选区 + TUI 模式/普通模式松开即复制提示
     this.element.addEventListener("mouseup", () => {
       const sel = this.term.getSelection();
-      if (sel) this.lastSelection = sel;
+      if (!sel) return;
+      this.lastSelection = sel;
+      const tui = this.term.buffer.active.type === "alternate" && this.mouseMode;
+      if (tui) {
+        // Shift+drag 是明确的复制意图，独立于 copyOnSelect 自动复制
+        void this.copyText(sel);
+        toast("已复制", false, 3000);
+      } else if (getSettings().copyOnSelect) {
+        // copyOnSelect 已在 onSelectionChange 中复制，仅补充提示
+        toast("已复制", false, 3000);
+      }
     });
 
     // 快捷键拦截：命中全局快捷键则返回 false，阻止按键透传给远端 shell（也防止终端聚焦
