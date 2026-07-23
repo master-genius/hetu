@@ -130,7 +130,7 @@ export class Pane {
   private resizeObserver: ResizeObserver;
   private hoverTimer: number | undefined;
   private statCache = new Map<string, { meta: FileMeta | null; at: number }>();
-  private disposed = false;
+  disposed = false;
   /** 当前 Ctrl 悬停命中的词（原始相对/绝对词，下载时再异步解析为绝对路径） */
   private ctrlHoverWord: string | null = null;
   /** 备用屏幕滚轮节流：rAF 合并帧内多次 wheel，避免触摸板高频 IPC 拥塞 PTY 输入队列 */
