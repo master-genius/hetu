@@ -61,7 +61,6 @@ export interface Settings {
   /** 新建标签页行为："local" 直接本地终端 | "dialog" 弹出连接选择 */
   newTabMode: "local" | "dialog";
   autoReconnect: boolean;
-  copyOnSelect: boolean;
   /** 上传遇同名文件时提示确认；false 表示直接覆盖 */
   confirmOverwrite: boolean;
   /** 默认下载目录（空 = 自动，系统 Downloads） */

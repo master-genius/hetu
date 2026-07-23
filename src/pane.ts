@@ -777,8 +777,6 @@ export class Pane {
   /** Channel 事件入口：取代全局 listen 的 pane-output/exit/closed 路由 */
   private handlePaneEvent(e: PaneEvent) {
     if (this.disposed) return;
-    // park 期间忽略本地 PTY 事件（bash 被 read 阻塞，几乎无输出）
-    if (this.parked && e.type !== "closed") return;
     switch (e.type) {
       case "output":
         if (!this.firstOutput) {
