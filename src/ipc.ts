@@ -78,6 +78,10 @@ export const api = {
   readFeedFile: (path: string) => invoke<string>("read_feed_file", { path }),
   /** 用系统默认浏览器打开外部 http/https 链接 */
   openExternal: (url: string) => invoke<void>("open_external", { url }),
+  /** 用系统默认应用打开本地文件 */
+  openPath: (path: string) => invoke<void>("open_path", { path }),
+  /** 返回连接专属缓存目录（自动创建） */
+  cacheDir: (connId: string) => invoke<string>("cache_dir", { connId }),
   /** 从最大化还原窗口尺寸（后端直接获取屏幕尺寸 + 设置窗口） */
   restoreWindowSize: () => invoke<void>("restore_window_size"),
 

@@ -163,6 +163,8 @@ export class Pane {
   /** 全局快捷键分发：返回 true 表示已处理（不透传给 shell） */
   onAppKey: ((e: KeyboardEvent) => boolean) | null = null;
   onPreview: ((path: string) => void) | null = null;
+  /** 双击文件词 → 用系统默认应用打开（本地直接打开，远程下载到缓存后打开） */
+  onOpenFile: ((word: string, pane: Pane) => void) | null = null;
   onTooltip: ((meta: FileMeta | null, x: number, y: number) => void) | null = null;
   onContextMenu: ((e: MouseEvent, word: string | null) => void) | null = null;
   /** Ctrl+单击终端中的文件/目录（下载） */
@@ -365,7 +367,11 @@ export class Pane {
       if (sel) this.lastSelection = sel;
     });
 
-    // mouseup：Shift+选择才复制（TUI 模式 Shift+drag 同样复制）
+    // mouseup：
+    // - TUI 模式（vim/claude code 等开了鼠标追踪）：松手即自动复制——
+    //   拖拽时必须按住 Shift 绕过鼠标追踪才能选文本，松手后自动复制无需再按修饰键。
+    // - 非 TUI 模式：松手时 Shift 仍按住则复制（与原有行为一致）。
+    // - 另：选择后按 Ctrl 也可复制（见下方 keydown），避免 Shift 与输入法切换冲突。
     this.element.addEventListener("mouseup", (e) => {
       const sel = this.term.getSelection();
       if (!sel) return;
@@ -377,6 +383,20 @@ export class Pane {
       }
     });
 
+    // 选择后按 Ctrl 快速复制：Ctrl 不被窗口管理器拦截，不与输入法冲突。
+    // 注意：按 Ctrl 时 e.ctrlKey 必为 true，故条件只排除其他修饰键。
+    // bare Ctrl + 有非空选区 → 复制 + 清空选区（视觉确认）。
+    this.element.addEventListener("keydown", (e) => {
+      if (e.key === "Control" && !e.shiftKey && !e.altKey && !e.metaKey) {
+        const sel = this.term.getSelection();
+        if (sel) {
+          void this.copyText(sel);
+          toast("已复制", false, 3000);
+          this.term.clearSelection();
+        }
+      }
+    }, true);
+
     // 快捷键拦截：命中全局快捷键则返回 false，阻止按键透传给远端 shell（也防止终端聚焦
     // 时窗口监听重复触发——快捷键统一由这里在终端聚焦时处理，窗口监听仅兜底焦点在外）。
     this.term.attachCustomKeyEventHandler((e) => {
@@ -386,11 +406,11 @@ export class Pane {
 
     this.element.addEventListener("mousedown", () => this.onFocus?.());
 
-    // 双击 → 预览（xterm 已按词选中）
+    // 双击 → 用系统默认应用打开文件（xterm 已按词选中）
     this.element.addEventListener("dblclick", () => {
       window.setTimeout(() => {
         const sel = this.term.getSelection().trim();
-        if (sel && !sel.includes("\n")) this.onPreview?.(sel);
+        if (sel && !sel.includes("\n")) this.onOpenFile?.(sel, this);
       }, 10);
     });
 
@@ -723,6 +743,21 @@ export class Pane {
     void api.paneInput(this.id, b64encode("\n")).catch(() => {});
   }
 
+  /** park 模式下重连成功后重开 SSH 子任务（不触碰本地 PTY） */
+  async reopenParkedSsh(): Promise<void> {
+    if (!this.activeBackendId) return;
+    requestAnimationFrame(() => this.refit());
+    this.firstOutput = false;
+    this.readyPromise = new Promise<void>((r) => { this._readyResolve = r; });
+    this.shellPid = null;
+    this.cwd = null;
+    this.statCache.clear();
+    const ch = new Channel<PaneEvent>();
+    ch.onmessage = (e) => this.handlePaneEvent(e);
+    await api.paneOpen(this.connId, this.activeBackendId, this.term.cols, this.term.rows, ch);
+    this.injectCwdTracker();
+  }
+
   /** cwd 是否由 shell（OSC7）真实上报，而非 home 兜底猜测 */
   get cwdKnown(): boolean {
     return this.cwd !== null;
@@ -756,6 +791,19 @@ export class Pane {
     if (!this.isLocal) return null;
     if (this.cwd) return this.cwd;
     return api.localCwd(this.id).catch(() => null);
+  }
+
+  /** 本地终端：相对词 → 本地绝对路径（异步） */
+  async resolveLocalPath(word: string): Promise<string | null> {
+    if (!word || word.includes("\n")) return null;
+    if (word.startsWith("/")) return word;
+    if (word.startsWith("~/")) {
+      const home = await api.localHome().catch(() => null);
+      return home ? `${home}/${word.slice(2)}` : null;
+    }
+    const base = this.cwd ?? (await this.resolveLocalCwd());
+    if (!base) return null;
+    return `${base.replace(/\/$/, "")}/${word.replace(/^\.\//, "")}`;
   }
 
   /**

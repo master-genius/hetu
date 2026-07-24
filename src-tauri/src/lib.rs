@@ -641,38 +641,61 @@ fn open_external(url: String) -> Result<()> {
     if !(lower.starts_with("http://") || lower.starts_with("https://")) {
         return Err(Error::msg("仅支持打开 http/https 链接"));
     }
+    open_with_system(&url)
+}
+
+/// 用系统默认应用打开本地文件（双击终端中的文件路径触发）。
+/// 经下载缓存后打开的远程文件也走此命令。
+fn open_with_system(path: &str) -> Result<()> {
     #[cfg(target_os = "linux")]
     {
-        // xdg-open 是 freedesktop 标准分发器（GNOME/KDE/XFCE 等各桌面均会路由到默认浏览器），
+        // xdg-open 是 freedesktop 标准分发器（GNOME/KDE/XFCE 等各桌面均会路由到默认应用），
         // 再以 gio open 兜底，覆盖个别缺 xdg-utils 但装了 glib 的环境。
         let attempts: [(&str, &[&str]); 2] = [("xdg-open", &[]), ("gio", &["open"])];
         let mut last = String::from("无可用打开器");
         for (bin, pre) in attempts {
-            match std::process::Command::new(bin).args(pre).arg(&url).spawn() {
+            match std::process::Command::new(bin).args(pre).arg(path).spawn() {
                 Ok(_) => return Ok(()),
                 Err(e) => last = format!("{bin}: {e}"),
             }
         }
-        return Err(Error::msg(format!("打开链接失败（xdg-open/gio 均不可用）: {last}")));
+        return Err(Error::msg(format!("打开失败（xdg-open/gio 均不可用）: {last}")));
     }
     #[cfg(not(target_os = "linux"))]
     {
         #[cfg(target_os = "macos")]
         let mut cmd = {
             let mut c = std::process::Command::new("open");
-            c.arg(&url);
+            c.arg(path);
             c
         };
         #[cfg(target_os = "windows")]
         let mut cmd = {
-            // start 是 cmd 内建命令；空标题占位 "" 避免带引号的 URL 被当成窗口标题
+            // start 是 cmd 内建命令；空标题占位 "" 避免带引号的路径被当成窗口标题
             let mut c = std::process::Command::new("cmd");
-            c.args(["/C", "start", "", &url]);
+            c.args(["/C", "start", "", path]);
             c
         };
-        cmd.spawn().map_err(|e| Error::msg(format!("打开链接失败: {e}")))?;
+        cmd.spawn().map_err(|e| Error::msg(format!("打开失败: {e}")))?;
         Ok(())
     }
+}
+
+/// 用系统默认应用打开本地文件路径。
+#[tauri::command]
+fn open_path(path: String) -> Result<()> {
+    if !std::path::Path::new(&path).exists() {
+        return Err(Error::msg("文件不存在"));
+    }
+    open_with_system(&path)
+}
+
+/// 返回连接专属缓存目录（/tmp/hetushell_cache/<conn_id>），自动创建。
+#[tauri::command]
+async fn cache_dir(conn_id: String) -> Result<String> {
+    let dir = std::env::temp_dir().join("hetushell_cache").join(&conn_id);
+    tokio::fs::create_dir_all(&dir).await?;
+    Ok(dir.to_string_lossy().into_owned())
 }
 
 // ---------- 应用入口 ----------
@@ -789,6 +812,8 @@ pub fn run() {
             read_feed_file,
             read_file_base64,
             open_external,
+            open_path,
+            cache_dir,
             restore_window_size,
         ])
         .run(tauri::generate_context!())

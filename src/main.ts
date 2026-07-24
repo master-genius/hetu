@@ -533,6 +533,41 @@ async function bootstrap() {
         /* 词不是文件路径，静默 */
       }
     };
+    // 双击文件词 → 用系统默认应用打开（本地直接，远程下载到缓存后打开）
+    pane.onOpenFile = async (word, p) => {
+      try {
+        if (p.isLocal) {
+          const path = await p.resolveLocalPath(word);
+          if (!path) return;
+          await api.openPath(path);
+        } else {
+          const path = await p.resolveRemotePath(word);
+          if (!path) return;
+          const meta = await api.sftpStat(p.connId, path);
+          if (meta.isDir) return;
+          const size = meta.size ?? 0;
+          if (size > 50 * 1024 * 1024) {
+            const ok = await confirmDialog("打开文件", `文件 ${formatSize(size)}，下载到缓存后打开？`);
+            if (!ok) return;
+          }
+          const name = path.replace(/\/+$/, "").split("/").pop() ?? path;
+          const dir = await api.cacheDir(p.connId);
+          const local = `${dir}/${name}`;
+          const tid = crypto.randomUUID();
+          beginTransfer(tid, name, "download", local);
+          try {
+            await api.sftpDownload(p.connId, path, local, tid);
+            completeTransfer(tid);
+            await api.openPath(local);
+            toast(`已打开 ${name}`);
+          } catch (err) {
+            failTransfer(tid, String(err));
+          }
+        }
+      } catch {
+        /* 词不是文件路径，静默 */
+      }
+    };
     pane.onContextMenu = (e, word) => {
       const remote = !pane.isLocal;
       // 备用屏幕 = TUI 全屏应用（vim/less/man/claude code）：界面上的词是应用渲染的
@@ -604,6 +639,29 @@ async function bootstrap() {
 
   // ---------- 后端事件路由 ----------
 
+  /** 重连成功后重开 pane：park 模式重开 SSH 子任务（保留本地 PTY），非 park 走 pane.open() + 退避重试 */
+  const reopenPane = async (pane: Pane) => {
+    const delays = [0, 500, 1000, 2000];
+    for (let i = 0; i < delays.length; i++) {
+      if (pane.disposed) return;
+      if (delays[i] > 0) await new Promise(r => setTimeout(r, delays[i]));
+      if (pane.disposed) return;
+      try {
+        if (pane.parked && pane.activeBackendId) {
+          await pane.reopenParkedSsh();
+        } else {
+          await pane.open();
+        }
+        return;
+      } catch (e) {
+        if (i === delays.length - 1) {
+          pane.term.write(`\r\n\x1b[31m[分屏重开失败: ${e}]\x1b[0m\r\n`);
+          toast(`分屏重开失败: ${e}`, true);
+        }
+      }
+    }
+  };
+
   void events.onConnState((e) => {
     // 按 pane 自身 connId 定位受影响的分屏（而非 tab.connId）：多 pane 标签页里被就地
     // 切换连接的 pane 才能正确收到自己连接的重连事件，且不会误重开同标签页其它连接的 pane。
@@ -622,7 +680,7 @@ async function bootstrap() {
         for (const tab of affectedTabs) tabs.setBanner(tab, null);
         for (const { pane } of affected) {
           pane.term.write("\r\n\x1b[32m[连接已恢复]\x1b[0m\r\n");
-          void pane.open().catch(() => {});
+          void reopenPane(pane);
         }
         break;
       case "closed":
