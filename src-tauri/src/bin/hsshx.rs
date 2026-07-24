@@ -161,7 +161,12 @@ async fn exec_mode(
         }
     };
 
-    if let Err(e) = channel.exec(true, command.as_str()).await {
+    // 通过 login shell 执行，确保 /etc/profile、~/.bash_profile、~/.profile 被加载，
+    // 否则 conda/nvm/自定义 PATH 等环境变量在非交互非登录 shell 中不可用。
+    let quoted = format!("'{}'", command.replace('\'', "'\\''"));
+    let full_command = format!("bash --login -c {quoted}");
+
+    if let Err(e) = channel.exec(true, full_command.as_str()).await {
         eprintln!("hsshx: {e}");
         return 255;
     }
