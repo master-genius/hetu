@@ -148,21 +148,77 @@ export class Layout {
     divider.addEventListener("mousedown", (down) => {
       down.preventDefault();
       const rect = box.getBoundingClientRect();
+      const isCol = node.dir === "col";
+      const containerRect = this.container.getBoundingClientRect();
+
+      const guide = document.createElement("div");
+      guide.className = `snap-guide ${isCol ? "snap-guide-h" : "snap-guide-v"}`;
+      this.container.appendChild(guide);
+
+      // 拖拽期间 DOM 结构不变，一次查询即可
+      const peers = Array.from(this.container.querySelectorAll(".split-divider"))
+        .filter((d): d is HTMLElement => d !== divider)
+        .filter((d) => {
+          const p = d.parentElement;
+          return p && (isCol ? p.classList.contains("split-col") : p.classList.contains("split-row"));
+        });
+
+      const SNAP_PX = 6;
+
       const move = (e: MouseEvent) => {
-        const frac =
-          node.dir === "row"
-            ? (e.clientX - rect.left) / rect.width
-            : (e.clientY - rect.top) / rect.height;
-        node.ratio = Math.min(0.9, Math.max(0.1, frac));
+        let frac = isCol
+          ? (e.clientY - rect.top) / rect.height
+          : (e.clientX - rect.left) / rect.width;
+
+        // 查找最近的对齐目标（同方向 + 垂直范围重叠）
+        const curPx = isCol ? e.clientY : e.clientX;
+        let snapPx: number | null = null;
+        let bestDist = SNAP_PX;
+
+        for (const d of peers) {
+          const dRect = d.getBoundingClientRect();
+          if (isCol) {
+            if (dRect.right < rect.left || dRect.left > rect.right) continue;
+          } else {
+            if (dRect.bottom < rect.top || dRect.top > rect.bottom) continue;
+          }
+          const dCenter = isCol ? dRect.top + dRect.height / 2 : dRect.left + dRect.width / 2;
+          const dist = Math.abs(dCenter - curPx);
+          if (dist <= bestDist) {
+            bestDist = dist;
+            snapPx = dCenter;
+          }
+        }
+
+        if (snapPx !== null) {
+          const snapFrac = isCol
+            ? (snapPx - rect.top) / rect.height
+            : (snapPx - rect.left) / rect.width;
+          if (snapFrac >= 0.1 && snapFrac <= 0.9) {
+            frac = snapFrac;
+            if (isCol) guide.style.top = `${snapPx - containerRect.top}px`;
+            else guide.style.left = `${snapPx - containerRect.left}px`;
+            guide.classList.add("snap-guide-on");
+          } else {
+            guide.classList.remove("snap-guide-on");
+          }
+        } else {
+          guide.classList.remove("snap-guide-on");
+        }
+
+        frac = Math.min(0.9, Math.max(0.1, frac));
+        node.ratio = frac;
         const cells = box.querySelectorAll(":scope > .split-cell");
-        (cells[0] as HTMLElement).style.flex = `${node.ratio} 1 0`;
-        (cells[1] as HTMLElement).style.flex = `${1 - node.ratio} 1 0`;
-        this.panes().forEach((p) => p.refit());
+        (cells[0] as HTMLElement).style.flex = `${frac} 1 0`;
+        (cells[1] as HTMLElement).style.flex = `${1 - frac} 1 0`;
+        // 不显式 refit：仅更新 flex（廉价），由各 pane 的 ResizeObserver 异步触发 refit。
+        // 浏览器每帧批量回调，只通知尺寸真正变化的 pane（含嵌套子分屏），避免全量同步 reflow。
       };
       const up = () => {
         window.removeEventListener("mousemove", move);
         window.removeEventListener("mouseup", up);
-        this.onChange?.(); // 拖动结束：比例已定，通知上层持久化
+        guide.remove();
+        this.onChange?.();
       };
       window.addEventListener("mousemove", move);
       window.addEventListener("mouseup", up);

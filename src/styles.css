@@ -477,6 +477,32 @@ body {
   background: rgba(66, 66, 66, calc(var(--bg-alpha) - 0.05));
 }
 
+/* 对齐吸附提示线：拖分割线接近另一条同向分割线时显示 1px accent 线 */
+.snap-guide {
+  position: absolute;
+  z-index: 50;
+  opacity: 0;
+  transition: opacity 0.1s;
+  pointer-events: none;
+}
+.snap-guide-h {
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--accent);
+  box-shadow: 0 0 3px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.snap-guide-v {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--accent);
+  box-shadow: 0 0 3px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.snap-guide-on {
+  opacity: 0.55;
+}
+
 /* xterm v6 使用 VSCode 风格自定义滚动条（.xterm-scrollable-element > .scrollbar）。
  * 隐藏 .xterm-viewport 原生滚动条（避免双重显示），样式化自定义滚动条为极细风格。
  * 背景交给应用层（透明），viewport 不要遮挡毛玻璃。 */
