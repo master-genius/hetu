@@ -482,7 +482,7 @@ body {
   position: absolute;
   z-index: 50;
   opacity: 0;
-  transition: opacity 0.1s;
+  transition: opacity 0.08s;
   pointer-events: none;
 }
 .snap-guide-h {
@@ -490,17 +490,36 @@ body {
   right: 0;
   height: 1px;
   background: var(--accent);
-  box-shadow: 0 0 3px color-mix(in srgb, var(--accent) 70%, transparent);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--accent) 80%, transparent);
 }
 .snap-guide-v {
   top: 0;
   bottom: 0;
   width: 1px;
   background: var(--accent);
-  box-shadow: 0 0 3px color-mix(in srgb, var(--accent) 70%, transparent);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--accent) 80%, transparent);
 }
 .snap-guide-on {
-  opacity: 0.55;
+  animation: snap-pulse 0.7s ease-in-out infinite;
+}
+@keyframes snap-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+/* 被对齐的分割线闪烁 */
+.snap-divider-flash {
+  animation: snap-divider-flash 0.7s ease-in-out infinite;
+}
+@keyframes snap-divider-flash {
+  0%, 100% {
+    background: rgba(66, 66, 66, calc(var(--bg-alpha) - 0.15));
+    box-shadow: none;
+  }
+  50% {
+    background: color-mix(in srgb, var(--accent) 65%, transparent);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 70%, transparent);
+  }
 }
 
 /* xterm v6 使用 VSCode 风格自定义滚动条（.xterm-scrollable-element > .scrollbar）。

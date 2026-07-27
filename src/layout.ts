@@ -163,7 +163,16 @@ export class Layout {
           return p && (isCol ? p.classList.contains("split-col") : p.classList.contains("split-row"));
         });
 
-      const SNAP_PX = 6;
+      const SNAP_PX = 7;
+      let lastSnapped: HTMLElement | null = null;
+
+      const clearSnapHighlight = () => {
+        if (lastSnapped) {
+          lastSnapped.classList.remove("snap-divider-flash");
+          lastSnapped = null;
+        }
+        guide.classList.remove("snap-guide-on");
+      };
 
       const move = (e: MouseEvent) => {
         let frac = isCol
@@ -173,24 +182,21 @@ export class Layout {
         // 查找最近的对齐目标（同方向 + 垂直范围重叠）
         const curPx = isCol ? e.clientY : e.clientX;
         let snapPx: number | null = null;
+        let snapTarget: HTMLElement | null = null;
         let bestDist = SNAP_PX;
 
         for (const d of peers) {
           const dRect = d.getBoundingClientRect();
-          if (isCol) {
-            if (dRect.right < rect.left || dRect.left > rect.right) continue;
-          } else {
-            if (dRect.bottom < rect.top || dRect.top > rect.bottom) continue;
-          }
           const dCenter = isCol ? dRect.top + dRect.height / 2 : dRect.left + dRect.width / 2;
           const dist = Math.abs(dCenter - curPx);
           if (dist <= bestDist) {
             bestDist = dist;
             snapPx = dCenter;
+            snapTarget = d;
           }
         }
 
-        if (snapPx !== null) {
+        if (snapPx !== null && snapTarget) {
           const snapFrac = isCol
             ? (snapPx - rect.top) / rect.height
             : (snapPx - rect.left) / rect.width;
@@ -198,12 +204,18 @@ export class Layout {
             frac = snapFrac;
             if (isCol) guide.style.top = `${snapPx - containerRect.top}px`;
             else guide.style.left = `${snapPx - containerRect.left}px`;
+            // 切换闪烁目标
+            if (lastSnapped !== snapTarget) {
+              if (lastSnapped) lastSnapped.classList.remove("snap-divider-flash");
+              snapTarget.classList.add("snap-divider-flash");
+              lastSnapped = snapTarget;
+            }
             guide.classList.add("snap-guide-on");
           } else {
-            guide.classList.remove("snap-guide-on");
+            clearSnapHighlight();
           }
         } else {
-          guide.classList.remove("snap-guide-on");
+          clearSnapHighlight();
         }
 
         frac = Math.min(0.9, Math.max(0.1, frac));
@@ -217,6 +229,7 @@ export class Layout {
       const up = () => {
         window.removeEventListener("mousemove", move);
         window.removeEventListener("mouseup", up);
+        clearSnapHighlight();
         guide.remove();
         this.onChange?.();
       };
