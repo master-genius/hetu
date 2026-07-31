@@ -108,6 +108,8 @@ export interface SessionTab {
   cwd?: string | null;
   /** hssh park 模式的连接项 ID：本地终端 + hssh 进入的 SSH 连接，恢复时自动重连 */
   hsshProfile?: string | null;
+  /** hssh 自动恢复连续失败次数；成功连接后归零，超过 12 次则放弃 */
+  hsshRetries?: number | null;
 }
 
 export interface ConnParams {

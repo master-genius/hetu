@@ -218,6 +218,12 @@ pub struct SessionTab {
     /// 本地终端首个 pane 的起始工作目录，恢复时传给 shell 启动
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+    /// hssh park 模式的连接项 ID：本地终端 + hssh 进入的 SSH 连接，恢复时自动重连
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hssh_profile: Option<String>,
+    /// hssh 自动恢复连续失败次数；成功连接后归零，超过阈值（12）则放弃重试
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hssh_retries: Option<u32>,
 }
 
 pub(crate) fn config_dir() -> Result<PathBuf> {

@@ -194,6 +194,7 @@ async function bootstrap() {
             tab.title = params.name;
             if (tab.layout.panes().length === 1) tab.connId = connId;
             tabs.setLabel(tab, params.name);
+            tab.pendingHssh = null;
             tabs.gcConnections([oldConn]);
             tabs.onLayoutChange?.();
           } else {
@@ -492,6 +493,7 @@ async function bootstrap() {
           tab.title = "本地终端";
           if (tab.layout.panes().length === 1) tab.connId = "local";
           tabs.setLabel(tab, "本地终端");
+          tab.pendingHssh = null;
           tabs.gcConnections([oldConn]);
           tabs.onLayoutChange?.();
         }).catch(() => {});
@@ -1297,6 +1299,8 @@ async function bootstrap() {
       b: await snapLayout(n.b),
     };
   };
+  /** hssh 自动恢复连续失败上限：超过此值视为连接项已失效，放弃重试 */
+  const HSSH_MAX_RETRIES = 12;
   const snapshotSession = async (): Promise<void> => {
     // 未开启「记住最后的会话」时不写盘：既避免无谓写入，也不覆盖上次保存的会话
     if (restoring || !getSettings().restoreSession) return;
@@ -1309,6 +1313,17 @@ async function bootstrap() {
         const layout = tab.layout.root.type === "split" ? await snapLayout(tab.layout.root) : undefined;
         const cwd = await api.localCwd(pane.id).catch(() => null);
         return { local: true, name: "本地终端", layout, cwd, hsshProfile: info?.profileId ?? null };
+      }
+      // hssh 恢复失败但未超阈值：保留 profileId 供下次启动重试，递增 retries
+      if (tab.pendingHssh && tab.pendingHssh.retries < HSSH_MAX_RETRIES) {
+        const info = first ? connMeta.get(first.connId) : undefined;
+        const layout = tab.layout.root.type === "split" ? await snapLayout(tab.layout.root) : undefined;
+        const cwd = (!info || info.local) ? await first?.resolveLocalCwd() : null;
+        return {
+          local: true, name: info?.name ?? "本地终端", layout, cwd,
+          hsshProfile: tab.pendingHssh.profileId,
+          hsshRetries: tab.pendingHssh.retries,
+        };
       }
       const info = first ? connMeta.get(first.connId) : undefined;
       // 分屏结构仅在确有切分时记录（单 pane 省略，保持 session.json 精简）
@@ -1766,6 +1781,13 @@ async function bootstrap() {
           await applySessionLayout(tab, st.layout);
           // hssh park 模式恢复：本地终端就绪后自动重连 SSH
           if (st.hsshProfile) {
+            // 超过失败上限：放弃重试，清除 hssh 记录
+            const retries = st.hsshRetries ?? 0;
+            if (retries >= HSSH_MAX_RETRIES) {
+              toast(`hssh 连接「${st.hsshProfile}」连续 ${retries} 次恢复失败，已放弃`, true);
+              return;
+            }
+            let connId: string | null = null;
             try {
               const hProfiles = await api.profilesList().catch(() => [] as Profile[]);
               const hp = hProfiles.find((x) => x.id === st.hsshProfile);
@@ -1776,15 +1798,21 @@ async function bootstrap() {
               await new Promise(r => setTimeout(r, 500));
               if (pane.disposed || !pane.isLocal) return;
               const params = profileToParams(hp);
-              const connId = await api.sshConnect(params);
+              connId = await api.sshConnect(params);
               recordConn(connId, params, hp.id);
               await pane.parkForSsh(connId);
               tab.title = hp.name;
               if (tab.layout.panes().length === 1) tab.connId = connId;
               tabs.setLabel(tab, hp.name);
               tabs.onLayoutChange?.();
+              // 恢复成功：清除 pendingHssh（snapshotSession 写盘时不再带 retries）
+              tab.pendingHssh = null;
             } catch (err) {
-              toast(`恢复 hssh 连接「${st.hsshProfile}」失败: ${err}`, true);
+              // parkForSsh 失败时 SSH 连接已建立但无 pane 引用，需断开防泄漏
+              if (connId) void api.sshDisconnect(connId).catch(() => {});
+              // 恢复失败：暂存 profileId + 递增 retries，snapshotSession 会保留到 session
+              tab.pendingHssh = { profileId: st.hsshProfile, retries: retries + 1 };
+              toast(`恢复 hssh 连接「${st.hsshProfile}」失败（第 ${retries + 1} 次）: ${err}`, true);
             }
           }
         }));

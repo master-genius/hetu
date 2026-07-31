@@ -54,6 +54,9 @@ export interface Tab {
   remoteOpen: boolean;
   /** 会话恢复时的原始序号（用于后台并行连接完成后按保存顺序归位） */
   order?: number;
+  /** hssh 恢复失败的暂存信息：保留 profileId 供下次启动重试，retries 为连续失败次数。
+   *  恢复成功后清空；snapshotSession 据此在 session 中保留 hsshProfile + 递增 retries。 */
+  pendingHssh?: { profileId: string; retries: number } | null;
 }
 
 export class TabManager {
