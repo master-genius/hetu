@@ -67,6 +67,9 @@ fn default_max_image_mb() -> u16 {
 fn default_cursor_style() -> String {
     "block".to_string()
 }
+fn default_scrollback() -> u32 {
+    12345
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -104,6 +107,9 @@ pub struct Settings {
     pub tab_font_size: u16,
     /// 显示终端滚动条（默认显示）
     pub show_scrollbar: bool,
+    /// 终端最大回滚行数（范围 5000–100000，默认 12345；非法值由前端回退默认）
+    #[serde(default = "default_scrollback")]
+    pub scrollback: u32,
     /// WebGL 硬件加速渲染（默认开启；关闭后回退 Canvas，可解决部分 GPU 驱动导致的乱码）
     pub webgl: bool,
     /// 新建标签页行为："local"（直接本地终端）| "dialog"（弹出连接选择）
@@ -179,6 +185,7 @@ impl Default for Settings {
             tab_font_family: String::new(),
             tab_font_size: 12,
             show_scrollbar: true,
+            scrollback: 12345,
             webgl: true,
             new_tab_mode: "local".into(),
             auto_reconnect: true,

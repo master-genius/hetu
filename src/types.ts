@@ -56,6 +56,8 @@ export interface Settings {
   tabFontSize: number;
   /** 显示终端滚动条 */
   showScrollbar: boolean;
+  /** 终端最大回滚行数（5000–100000，默认 12345；非法值回退默认） */
+  scrollback: number;
   /** WebGL 硬件加速渲染（默认开；关闭后回退 Canvas） */
   webgl: boolean;
   /** 新建标签页行为："local" 直接本地终端 | "dialog" 弹出连接选择 */

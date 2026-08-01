@@ -7,7 +7,7 @@ import "./styles.css";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, events, b64encode } from "./ipc";
-import { loadSettings, getSettings, onSettingsChange, activeTheme, fontStack, computeMcr } from "./settings";
+import { loadSettings, getSettings, onSettingsChange, activeTheme, fontStack, computeMcr, sanitizeScrollback } from "./settings";
 import { TabManager, type Tab } from "./tabs";
 import { Pane, type HsshSpec, type HfileSpec } from "./pane";
 import {
@@ -1457,6 +1457,7 @@ async function bootstrap() {
   let lastCjkFontFamily = "";
   let lastFontSize = 0;
   let lastWebgl = true;
+  let lastScrollback = 0;
 
   onSettingsChange(() => {
     const s = getSettings();
@@ -1468,6 +1469,16 @@ async function bootstrap() {
     const fontChanged = s.fontFamily !== lastFontFamily
       || s.cjkFontFamily !== lastCjkFontFamily
       || s.fontSize !== lastFontSize;
+    // 回滚行数：仅变化时动态 resize 缓冲（xterm 原生支持 scrollback 选项变更；调小会裁剪已有历史）
+    const scrollback = sanitizeScrollback(s.scrollback);
+    if (scrollback !== lastScrollback) {
+      for (const tab of tabs.tabs) {
+        for (const pane of tab.layout.panes()) {
+          pane.term.options.scrollback = scrollback;
+        }
+      }
+      lastScrollback = scrollback;
+    }
     // 主题/字号/透明度立即生效（这些不依赖字体加载）
     for (const tab of tabs.tabs) {
       for (const pane of tab.layout.panes()) {

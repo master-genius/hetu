@@ -9,7 +9,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Channel } from "@tauri-apps/api/core";
 import { api, b64decode, b64encode } from "./ipc";
 import { installImeGuard } from "./imeGuard";
-import { getSettings, activeTheme, fontStack, computeMcr } from "./settings";
+import { getSettings, activeTheme, fontStack, computeMcr, sanitizeScrollback } from "./settings";
 import { toast } from "./ui";
 import type { FileMeta, PaneEvent } from "./types";
 
@@ -209,7 +209,8 @@ export class Pane {
       cursorBlink: true,
       cursorStyle: (s.cursorStyle === "bar" ? "bar" : "block") as never,
       cursorWidth: s.cursorStyle === "bar" ? 2 : undefined,
-      scrollback: 12345,
+      // 回滚行数用户可配（5000–100000）；数值异常回退默认 12345
+      scrollback: sanitizeScrollback(getSettings().scrollback),
       overviewRuler: { width: 10 },
       theme: (() => {
         const c: Record<string, string> = { ...theme.colors, background: "#00000000" };

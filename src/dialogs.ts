@@ -1,7 +1,7 @@
 /** 连接对话框（新建标签页选择连接项）、设置对话框与关于弹窗 */
 
 import { api } from "./ipc";
-import { getSettings, loadSettings, updateSettings } from "./settings";
+import { getSettings, loadSettings, updateSettings, sanitizeScrollback } from "./settings";
 import { allThemes, BUILTIN_THEMES, resolveTheme } from "./themes";
 import { customSelect, toast, type CSOption } from "./ui";
 import {
@@ -456,6 +456,8 @@ export function showSettingsDialog() {
           <label>点击“+”新建标签页时 <span class="cs-mount" data-cs="newTabMode"></span></label>
           <label class="check"><input name="autoReconnect" type="checkbox"> 连接断开后自动重连</label>
           <label class="check"><input name="showScrollbar" type="checkbox"> 显示终端滚动条</label>
+          <label>终端回滚行数 <input name="scrollback" type="number" min="5000" max="100000" step="100" style="width:120px;margin-left:8px"></label>
+          <p class="section-desc">终端最多可回看的历史行数（5000–100000，默认 12345）；调小会裁剪已有历史。</p>
           <label class="check"><input name="webgl" type="checkbox"> WebGL 硬件加速渲染（关闭后回退 Canvas，可解决部分 GPU 驱动导致的乱码；乱码时按 Ctrl+Shift+R 重建）</label>
           <label class="check"><input name="mcrEnabled" type="checkbox"> 最小对比度提亮（MCR）<input name="mcrMax" type="number" min="1.1" max="2" step="0.01" placeholder="1.6" style="width:120px;margin-left:8px"></label>
           <p class="section-desc">按透明度自适应提亮前景色对比度，值越高文字越清晰但颜色偏移也越大（1.1–2.0）。</p>
@@ -514,6 +516,7 @@ export function showSettingsDialog() {
   q<HTMLElement>(".max-image-mb-val").textContent = `${s.maxImageMb ?? 128} MB`;
   input("autoReconnect").checked = s.autoReconnect;
   input("showScrollbar").checked = s.showScrollbar;
+  input("scrollback").value = String(sanitizeScrollback(s.scrollback));
   input("webgl").checked = s.webgl;
   input("mcrEnabled").checked = s.mcrEnabled;
   input("mcrMax").value = String(s.mcrMax ?? 1.6);
@@ -841,6 +844,7 @@ export function showSettingsDialog() {
       newTabMode: newTabModeSel.getValue() as "local" | "dialog",
       autoReconnect: input("autoReconnect").checked,
       showScrollbar: input("showScrollbar").checked,
+      scrollback: Math.max(5000, Math.min(100000, parseInt(input("scrollback").value, 10) || 12345)),
       webgl: input("webgl").checked,
       mcrEnabled: input("mcrEnabled").checked,
       mcrMax: Math.max(1.1, Math.min(2, parseFloat(input("mcrMax").value) || 1.6)),

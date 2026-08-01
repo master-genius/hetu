@@ -81,3 +81,8 @@ export function computeMcr(s: Settings, themeBase: "dark" | "light"): number {
   if (s.opacity < 0.85) return Math.round(max * 0.975 * 100) / 100;
   return max;
 }
+
+/** 终端最大回滚行数：范围 5000–100000，缺失/非法回退默认 12345 */
+export function sanitizeScrollback(v: number | undefined | null): number {
+  return v !== undefined && v !== null && v >= 5000 && v <= 100000 ? Math.round(v) : 12345;
+}
