@@ -607,6 +607,8 @@ export class Pane {
 
   /** 打开（或断线后重开）后端 PTY channel */
   async open(): Promise<void> {
+    // 恢复光标闪烁（断开等待重连期间暂停过；初始打开本就为 true，幂等）
+    this.term.options.cursorBlink = true;
     // 首帧 fit 放到下一帧：新建标签时不在点击处理里同步强制重排（消除「新建标签有点卡」）。
     // PTY 先以当前 cols/rows 启动，下一帧 fit 后经 paneResize 校正（SIGWINCH），观感无损；
     // 重连场景终端已保留上次尺寸，cols/rows 本就正确，延后一帧亦无副作用。
@@ -701,6 +703,7 @@ export class Pane {
     this.activeBackendId = sshPaneId;
     this.parked = true;
     this.connId = connId;
+    this.term.options.cursorBlink = true; // 进入 SSH 活跃态：恢复光标闪烁
     this.cwd = null;
     this.homeDir = null;
     this.shellPid = null;
@@ -731,6 +734,7 @@ export class Pane {
    */
   async unparkFromSsh(): Promise<void> {
     if (!this.activeBackendId) return;
+    this.term.options.cursorBlink = true; // SSH 退出回本地：恢复光标闪烁
     await api.paneClose(this.activeBackendId).catch(() => {});
     this.activeBackendId = null;
     this.parked = false;
@@ -746,6 +750,7 @@ export class Pane {
   /** park 模式下重连成功后重开 SSH 子任务（不触碰本地 PTY） */
   async reopenParkedSsh(): Promise<void> {
     if (!this.activeBackendId) return;
+    this.term.options.cursorBlink = true; // 重连成功：恢复光标闪烁
     requestAnimationFrame(() => this.refit());
     this.firstOutput = false;
     this.readyPromise = new Promise<void>((r) => { this._readyResolve = r; });
@@ -840,6 +845,9 @@ export class Pane {
         }
         break;
       case "closed":
+        // 连接断开（exited=false）等待重连：暂停光标闪烁，renderer 停止每帧
+        // rAF 调度，消除断开 pane 的稳态渲染负载（重连成功/退出后恢复）
+        if (!e.exited) this.term.options.cursorBlink = false;
         this.onClose?.(e.exited);
         break;
     }

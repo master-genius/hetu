@@ -626,6 +626,15 @@ body {
 }
 
 .reconnect-banner {
+  /* 绝对定位覆盖在内容区上方（以 #content-wrap 为基准），不占文档流：
+     插入/移除不影响 #content 高度，避免触发所有 pane 的 ResizeObserver
+     全局 refit（单个 pane 断开不得拖累全部渲染） */
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  pointer-events: none; /* 纯展示条：点击穿透，不拦截终端交互 */
   background: color-mix(in srgb, #e5c07b 25%, var(--term-bg));
   color: var(--term-fg);
   font-size: 12.5px;
