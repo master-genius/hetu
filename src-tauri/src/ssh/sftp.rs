@@ -7,6 +7,7 @@ use std::time::Duration;
 use base64::Engine;
 use russh::ChannelMsg;
 use russh_sftp::client::SftpSession;
+use russh_sftp::protocol::FileAttributes;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -365,6 +366,71 @@ fn emit_progress(app: &AppHandle, id: &str, name: &str, done: u64, total: u64, d
     );
 }
 
+/// 尽力保留远端文件权限到本地（仅 0o777 位），失败/超时静默忽略。
+#[cfg(unix)]
+async fn preserve_perms_to_local(sftp: &SftpSession, remote: &str, local: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let meta = match tokio::time::timeout(SFTP_TIMEOUT, sftp.metadata(remote)).await {
+        Ok(Ok(m)) => m,
+        _ => return,
+    };
+    if let Some(mode) = meta.permissions {
+        let mode = mode & 0o777;
+        if mode != 0 {
+            let _ = tokio::fs::set_permissions(local, std::fs::Permissions::from_mode(mode)).await;
+        }
+    }
+}
+
+#[cfg(not(unix))]
+async fn preserve_perms_to_local(_sftp: &SftpSession, _remote: &str, _local: &str) {}
+
+/// 尽力保留本地文件权限到远端（仅 0o777 位），失败/超时静默忽略。
+#[cfg(unix)]
+async fn preserve_perms_to_remote(sftp: &SftpSession, local: &str, remote: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = match std::fs::metadata(local) {
+        Ok(m) => m.permissions().mode() & 0o777,
+        Err(_) => return,
+    };
+    if mode == 0 {
+        return;
+    }
+    let attrs = FileAttributes {
+        permissions: Some(mode),
+        ..Default::default()
+    };
+    let _ = tokio::time::timeout(SFTP_TIMEOUT, sftp.set_metadata(remote, attrs)).await;
+}
+
+#[cfg(not(unix))]
+async fn preserve_perms_to_remote(_sftp: &SftpSession, _local: &str, _remote: &str) {}
+
+/// 尽力保留远端→远端文件权限（仅 0o777 位），失败/超时静默忽略。
+async fn preserve_perms_remote_to_remote(
+    src_sftp: &SftpSession,
+    dst_sftp: &SftpSession,
+    src: &str,
+    dst: &str,
+) {
+    let meta = match tokio::time::timeout(SFTP_TIMEOUT, src_sftp.metadata(src)).await {
+        Ok(Ok(m)) => m,
+        _ => return,
+    };
+    let mode = match meta.permissions {
+        Some(m) => m & 0o777,
+        None => return,
+    };
+    if mode == 0 {
+        return;
+    }
+    let attrs = FileAttributes {
+        permissions: Some(mode),
+        ..Default::default()
+    };
+    let _ = tokio::time::timeout(SFTP_TIMEOUT, dst_sftp.set_metadata(dst, attrs)).await;
+}
+
 /// 单文件下载（追加进度到聚合计数）
 async fn download_file(
     app: &AppHandle,
@@ -412,6 +478,7 @@ async fn download_file(
         }
     }
     dst.flush().await?;
+    preserve_perms_to_local(sftp, remote, local).await;
     Ok(())
 }
 
@@ -471,6 +538,7 @@ async fn upload_file(
     }
     dst.flush().await?;
     dst.shutdown().await?;
+    preserve_perms_to_remote(sftp, local, remote).await;
     Ok(())
 }
 
@@ -846,6 +914,7 @@ async fn copy_file_between(
     // 源已完整读入临时文件，即便目标恰为源本身（别名），此序列也只是原地等价替换。
     let _ = dst_sftp.remove_file(dst).await;
     dst_sftp.rename(&tmp, dst).await?;
+    preserve_perms_remote_to_remote(src_sftp, dst_sftp, src, dst).await;
     Ok(())
 }
 
