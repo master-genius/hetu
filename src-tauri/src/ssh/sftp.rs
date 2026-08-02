@@ -396,11 +396,41 @@ async fn preserve_perms_to_remote(sftp: &SftpSession, local: &str, remote: &str)
     if mode == 0 {
         return;
     }
+    // 注意：必须用 empty() 而非 Default::default()——FileAttributes 的 Default
+    // 是"dummy attrs"（size=0 等全字段填充），若带入 SETSTAT 会把远端文件截断为 0 大小。
     let attrs = FileAttributes {
         permissions: Some(mode),
-        ..Default::default()
+        ..FileAttributes::empty()
     };
     let _ = tokio::time::timeout(SFTP_TIMEOUT, sftp.set_metadata(remote, attrs)).await;
+}
+
+/// 构造「仅含权限」的 SETSTAT attrs。回归测试：确保 size/uid/gid/atime/mtime 不被
+/// Default（dummy attrs）填充——否则 SETSTAT 会把远端文件截断为 0 大小。
+#[cfg(test)]
+fn attrs_with_mode_only(mode: u32) -> FileAttributes {
+    FileAttributes {
+        permissions: Some(mode),
+        ..FileAttributes::empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_metadata_attrs_only_carries_permissions() {
+        let attrs = attrs_with_mode_only(0o755);
+        assert_eq!(attrs.permissions, Some(0o755));
+        // Default 是 dummy attrs（size=Some(0) 等），empty() 必须保证这些字段为 None，
+        // 否则序列化会设置 SIZE/UIDGID/ACMODTIME 标志，SETSTAT 截断远端文件。
+        assert_eq!(attrs.size, None);
+        assert_eq!(attrs.uid, None);
+        assert_eq!(attrs.gid, None);
+        assert_eq!(attrs.atime, None);
+        assert_eq!(attrs.mtime, None);
+    }
 }
 
 #[cfg(not(unix))]
@@ -424,9 +454,10 @@ async fn preserve_perms_remote_to_remote(
     if mode == 0 {
         return;
     }
+    // 同上：必须 empty()，Default 的 dummy attrs 会把目标文件截断为 0 大小。
     let attrs = FileAttributes {
         permissions: Some(mode),
-        ..Default::default()
+        ..FileAttributes::empty()
     };
     let _ = tokio::time::timeout(SFTP_TIMEOUT, dst_sftp.set_metadata(dst, attrs)).await;
 }
