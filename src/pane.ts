@@ -639,6 +639,9 @@ export class Pane {
    */
   private startAtlasWatch(): void {
     this.stopAtlasWatch();
+    // 300s 轮询：rebuild 在多 pane 共享 atlas 时因 ownedBy>1 无效，
+    // 高频轮询只产生无收益 churn（dispose+新 GL 上下文+全量刷新）。
+    // 乱码由 merge 竞态触发，与 watch 频率无关；手动 Ctrl+Shift+R 不受影响。
     this.webglWatchTimer = window.setInterval(() => {
       const addon = this.webglAddon as any;
       const atlas = addon?._renderer?._charAtlas;
@@ -648,7 +651,7 @@ export class Pane {
       // 读不到时按默认 32 兜底。预留 4 页余量触发，避免进入 merge 频繁区。
       const maxPages = Math.max(4, atlas.constructor?.maxAtlasPages ?? 32);
       if (atlas._pages.length >= maxPages - 4) this.rebuildRenderer();
-    }, 30_000);
+    }, 300_000);
   }
 
   private stopAtlasWatch(): void {

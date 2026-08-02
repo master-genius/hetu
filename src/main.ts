@@ -705,22 +705,34 @@ async function bootstrap() {
   api.localHome().then((h) => (tabs.localHomeDir = h)).catch(() => {});
   const pollLocalTitles = () => void tabs.refreshLocalTabTitles();
   pollLocalTitles();
-  window.setInterval(pollLocalTitles, 1500);
+  // 2s 轮询：每 tab 一次 IPC，1.5s→2s 降低 IPC 频率；标题延迟可接受。
+  window.setInterval(pollLocalTitles, 2000);
 
   // ---------- 渲染进程内存预警 ----------
   // WebKitWebProcess 长时间运行可能膨胀（堆只涨不缩），接近 WebKit 自杀阈值
   // （系统内存一半）时窗口会全透明假死。定期采样 RSS，达到阈值提示用户重启避险；
   // 崩溃本身由 Rust 侧 web-process-terminated 自动 reload 兜底。
-  // 提示阈值 = max(系统阈值×75%, 8GB)，保证小内存机器也不会误报太早。
-  const WARN_MIN_BYTES = 8 * 1024 * 1024 * 1024; // 8GB 下限
+  // 预警阈值按系统总内存分档：
+  //   ≥64GB→8GB  32GB→5GB  16GB→4GB  <16GB→3GB
+  // 崩溃兜底由 Rust 侧 web-process-terminated 自动 reload 负责，不受此阈值影响。
+  const GB = 1024 * 1024 * 1024;
   let webprocessWarned = false;
+  let webprocessWarnedAt = 0;
   window.setInterval(async () => {
-    if (webprocessWarned) return;
+    // 上次提示超过 5 分钟后重置，允许再次提示（避免用户忽略后涨到崩溃不再提示）
+    if (webprocessWarned && Date.now() - webprocessWarnedAt < 300_000) return;
     const { rss, threshold } = await api.webprocessRss().catch(() => ({ rss: 0, threshold: 0 }));
-    const warnAt = Math.max(threshold * 0.75, WARN_MIN_BYTES);
+    // threshold = 系统总内存的一半（WebKit 自杀阈值），systemTotal = threshold × 2
+    const systemTotal = threshold * 2;
+    const warnAt =
+      systemTotal >= 64 * GB ? 8 * GB :
+      systemTotal >= 32 * GB ? 5 * GB :
+      systemTotal >= 16 * GB ? 4 * GB :
+                               3 * GB;
     if (rss > warnAt) {
       webprocessWarned = true;
-      const rssGb = (rss / 1024 / 1024 / 1024).toFixed(1);
+      webprocessWarnedAt = Date.now();
+      const rssGb = (rss / GB).toFixed(1);
       toast(`渲染进程内存占用过高（${rssGb}GB），建议保存工作后重启应用，避免窗口无法响应`);
     }
   }, 60_000);
@@ -1474,7 +1486,7 @@ async function bootstrap() {
   let lastFontFamily = "";
   let lastCjkFontFamily = "";
   let lastFontSize = 0;
-  let lastWebgl = true;
+  let lastWebgl = false;
   let lastScrollback = 0;
 
   onSettingsChange(() => {

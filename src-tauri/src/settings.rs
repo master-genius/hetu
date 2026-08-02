@@ -110,7 +110,7 @@ pub struct Settings {
     /// 终端最大回滚行数（范围 5000–100000，默认 12345；非法值由前端回退默认）
     #[serde(default = "default_scrollback")]
     pub scrollback: u32,
-    /// WebGL 硬件加速渲染（默认开启；关闭后回退 Canvas，可解决部分 GPU 驱动导致的乱码）
+    /// WebGL 硬件加速渲染（默认关闭；开启后走 WebGL，软渲染/驱动异常时可回退 Canvas）
     pub webgl: bool,
     /// 新建标签页行为："local"（直接本地终端）| "dialog"（弹出连接选择）
     pub new_tab_mode: String,
@@ -186,7 +186,7 @@ impl Default for Settings {
             tab_font_size: 12,
             show_scrollbar: true,
             scrollback: 12345,
-            webgl: true,
+            webgl: false,
             new_tab_mode: "local".into(),
             auto_reconnect: true,
             copy_on_select: true,

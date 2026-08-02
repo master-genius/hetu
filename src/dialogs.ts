@@ -458,7 +458,7 @@ export function showSettingsDialog() {
           <label class="check"><input name="showScrollbar" type="checkbox"> 显示终端滚动条</label>
           <label>终端回滚行数 <input name="scrollback" type="number" min="5000" max="100000" step="100" style="width:120px;margin-left:8px"></label>
           <p class="section-desc">终端最多可回看的历史行数（5000–100000，默认 12345）；调小会裁剪已有历史。</p>
-          <label class="check"><input name="webgl" type="checkbox"> WebGL 硬件加速渲染（关闭后回退 Canvas，可解决部分 GPU 驱动导致的乱码；乱码时按 Ctrl+Shift+R 重建）</label>
+          <label class="check"><input name="webgl" type="checkbox"> WebGL 硬件加速渲染（默认关闭；开启可提升渲染性能，但软渲染/驱动异常时可能乱码，按 Ctrl+Shift+R 重建）</label>
           <label class="check"><input name="mcrEnabled" type="checkbox"> 最小对比度提亮（MCR）<input name="mcrMax" type="number" min="1.1" max="2" step="0.01" placeholder="1.6" style="width:120px;margin-left:8px"></label>
           <p class="section-desc">按透明度自适应提亮前景色对比度，值越高文字越清晰但颜色偏移也越大（1.1–2.0）。</p>
           <label class="check"><input name="confirmOverwrite" type="checkbox"> 上传遇同名文件时提示确认（默认直接覆盖）</label>
