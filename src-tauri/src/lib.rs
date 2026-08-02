@@ -728,6 +728,71 @@ async fn restore_window_size(app: tauri::AppHandle) -> Result<()> {
     Ok(())
 }
 
+/// 渲染进程内存信息：RSS + WebKit 自杀阈值（系统内存一半，字节）。
+/// WebProcess 的 PPid 是本 UI 进程，据此精确匹配当前实例（多实例并存时互不干扰）。
+/// 前端定期采样，RSS 接近阈值时提示用户，防窗口假死。
+#[derive(serde::Serialize)]
+struct WebProcessMem {
+    rss: u64,
+    /// WebKit 内存压力机制的自杀阈值（≈ 系统内存一半）
+    threshold: u64,
+}
+
+#[tauri::command]
+fn webprocess_rss() -> WebProcessMem {
+    let self_pid = std::process::id();
+    let mut max_rss = 0u64;
+    if let Ok(entries) = std::fs::read_dir("/proc") {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if name.to_string_lossy().parse::<u32>().is_err() {
+                continue;
+            }
+            let Ok(status) = std::fs::read_to_string(entry.path().join("status")) else {
+                continue;
+            };
+            let mut is_web = false;
+            let mut is_child = false;
+            let mut rss_kb: Option<u64> = None;
+            for line in status.lines() {
+                if let Some(v) = line.strip_prefix("Name:") {
+                    if v.trim().starts_with("WebKitWebProcess") {
+                        is_web = true;
+                    }
+                } else if let Some(v) = line.strip_prefix("PPid:") {
+                    if v.trim().parse::<u32>().ok() == Some(self_pid) {
+                        is_child = true;
+                    }
+                } else if let Some(v) = line.strip_prefix("VmRSS:") {
+                    rss_kb = v.trim().trim_end_matches("kB").trim().parse::<u64>().ok();
+                }
+            }
+            if is_web && is_child {
+                if let Some(kb) = rss_kb {
+                    max_rss = max_rss.max(kb.saturating_mul(1024));
+                }
+            }
+        }
+    }
+    // WebKit 内存压力阈值 ≈ 系统总内存的一半（WebKitGTK Linux MemoryPressureHandler 默认）
+    let threshold = system_memory_kb().saturating_mul(1024) / 2;
+    WebProcessMem { rss: max_rss, threshold }
+}
+
+/// 读取系统物理内存（MemTotal，单位 kB），失败返回 0。
+fn system_memory_kb() -> u64 {
+    if let Ok(s) = std::fs::read_to_string("/proc/meminfo") {
+        for line in s.lines() {
+            if let Some(rest) = line.strip_prefix("MemTotal:") {
+                if let Ok(kb) = rest.trim().trim_end_matches("kB").trim().parse::<u64>() {
+                    return kb;
+                }
+            }
+        }
+    }
+    0
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -760,6 +825,30 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             let _ = window_vibrancy::apply_acrylic(&window, Some((18, 18, 18, 120)));
             let _ = window;
+            // WebProcess 崩溃自动恢复：渲染进程（WebKitWebProcess）承载全部前端 JS，
+            // 长时间运行可能被 WebKit 内存压力机制杀死，导致窗口全透明假死。
+            // 连接 web-process-terminated 信号（v2_20 起替代已弃用的 web-process-crashed），
+            // 崩溃后自动 reload 恢复界面。
+            #[cfg(target_os = "linux")]
+            {
+                use webkit2gtk::WebViewExt;
+                if let Some(webview_window) = app.get_webview_window("main") {
+                    let webview: &tauri::Webview = webview_window.as_ref();
+                    let _ = webview.with_webview(|wv| {
+                        let inner = wv.inner(); // webkit2gtk::WebView（引用计数句柄）
+                        inner.connect_web_process_terminated(move |wv, _reason| {
+                            // 延迟一帧执行 reload，避免在信号分发中直接重入
+                            let wv = wv.clone();
+                            glib::timeout_add_local_once(
+                                std::time::Duration::from_millis(100),
+                                move || {
+                                    wv.reload();
+                                },
+                            );
+                        });
+                    });
+                }
+            }
             // 预览缓存清理：应用内后台任务（启动 30s 后首次、之后每 30 分钟），
             // 随应用退出自动结束。文件操作走 spawn_blocking，不占用异步执行器。
             tauri::async_runtime::spawn(async {
@@ -815,6 +904,7 @@ pub fn run() {
             open_path,
             cache_dir,
             restore_window_size,
+            webprocess_rss,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

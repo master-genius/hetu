@@ -158,6 +158,8 @@ export class Pane {
   private webglAddon: { dispose: () => void } | null = null;
   /** WebGL renderer 原型 patch 是否已应用（全局一次性，所有 pane 共享同一原型） */
   private static webglPatched = false;
+  /** xterm Buffer.resize 原型 patch 是否已应用（scrollback 动态变更生效，全局一次性） */
+  private static scrollbackPatched = false;
 
   onFocus: (() => void) | null = null;
   /** 全局快捷键分发：返回 true 表示已处理（不透传给 shell） */
@@ -236,6 +238,8 @@ export class Pane {
       }),
     );
     this.term.open(this.element);
+    // scrollback 动态变更生效 patch（首次创建后应用一次，所有 pane 共享原型）
+    this.patchScrollbackResize(this.term);
     // WebKitGTK 下 CJK 输入法重复/残留修复（详见 imeGuard.ts 根因注释）
     installImeGuard(this.element);
     void this.tryWebgl();
@@ -519,6 +523,33 @@ export class Pane {
 
     this.resizeObserver = new ResizeObserver(() => this.refit());
     this.resizeObserver.observe(this.element);
+  }
+
+  /**
+   * xterm 的 scrollback option 动态变更走 Buffer.resize，但 Buffer.resize 在
+   * cols/rows 未变时跳过 super.resize（CoreBuffer.resize），导致 lines.maxLength
+   * 不更新、scrollback 设置实际不生效。patch：尺寸未变时也强制执行
+   * CoreBuffer.resize（其内部用 _getCorrectBufferLength 读取最新 scrollback，
+   * 安全地 trim 最旧行 / 扩展并调整 ybase、ydisp）。
+   * 所有 pane 共享同一原型，只需 patch 一次。
+   */
+  private patchScrollbackResize(term: Terminal): void {
+    if (Pane.scrollbackPatched) return;
+    const core = (term as unknown as { _core?: { _bufferService?: { buffers?: { _normal?: unknown } } } })._core;
+    const buf = core?._bufferService?.buffers?._normal;
+    if (!buf) return; // 拿不到内部结构（xterm 私有属性）则跳过 patch
+    const proto = Object.getPrototypeOf(buf) as { resize?: (cols: number, rows: number) => void };
+    const coreProto = Object.getPrototypeOf(proto) as { resize?: (cols: number, rows: number) => void };
+    const origResize = proto.resize;
+    if (typeof origResize !== "function" || typeof coreProto?.resize !== "function") return;
+    proto.resize = function (this: unknown, cols: number, rows: number): void {
+      const self = this as { cols: number; rows: number };
+      if (cols === self.cols && rows === self.rows) {
+        coreProto.resize!.call(this, cols, rows);
+      }
+      origResize.call(this, cols, rows);
+    };
+    Pane.scrollbackPatched = true;
   }
 
   /**

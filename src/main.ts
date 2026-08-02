@@ -707,6 +707,24 @@ async function bootstrap() {
   pollLocalTitles();
   window.setInterval(pollLocalTitles, 1500);
 
+  // ---------- 渲染进程内存预警 ----------
+  // WebKitWebProcess 长时间运行可能膨胀（堆只涨不缩），接近 WebKit 自杀阈值
+  // （系统内存一半）时窗口会全透明假死。定期采样 RSS，达到阈值提示用户重启避险；
+  // 崩溃本身由 Rust 侧 web-process-terminated 自动 reload 兜底。
+  // 提示阈值 = max(系统阈值×75%, 8GB)，保证小内存机器也不会误报太早。
+  const WARN_MIN_BYTES = 8 * 1024 * 1024 * 1024; // 8GB 下限
+  let webprocessWarned = false;
+  window.setInterval(async () => {
+    if (webprocessWarned) return;
+    const { rss, threshold } = await api.webprocessRss().catch(() => ({ rss: 0, threshold: 0 }));
+    const warnAt = Math.max(threshold * 0.75, WARN_MIN_BYTES);
+    if (rss > warnAt) {
+      webprocessWarned = true;
+      const rssGb = (rss / 1024 / 1024 / 1024).toFixed(1);
+      toast(`渲染进程内存占用过高（${rssGb}GB），建议保存工作后重启应用，避免窗口无法响应`);
+    }
+  }, 60_000);
+
   // ---------- 上传：工具栏按钮 + 拖拽 ----------
 
   const uploadFiles = async (paths: string[], pane?: Pane | null, dirOverride?: string | null) => {
@@ -1469,7 +1487,10 @@ async function bootstrap() {
     const fontChanged = s.fontFamily !== lastFontFamily
       || s.cjkFontFamily !== lastCjkFontFamily
       || s.fontSize !== lastFontSize;
-    // 回滚行数：仅变化时动态 resize 缓冲（xterm 原生支持 scrollback 选项变更；调小会裁剪已有历史）
+    // 回滚行数：仅变化时动态调整缓冲（调小会裁剪已有历史）。
+    // xterm 的 scrollback 变更会触发 BufferSet 的 onSpecificOptionChange 监听 →
+    // Buffer.resize（pane 构造时已 patch 使尺寸未变也走 CoreBuffer.resize 重算
+    // maxLength），此处仅需设置 option 即可生效，无需额外 resize。
     const scrollback = sanitizeScrollback(s.scrollback);
     if (scrollback !== lastScrollback) {
       for (const tab of tabs.tabs) {

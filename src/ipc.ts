@@ -84,6 +84,8 @@ export const api = {
   cacheDir: (connId: string) => invoke<string>("cache_dir", { connId }),
   /** 从最大化还原窗口尺寸（后端直接获取屏幕尺寸 + 设置窗口） */
   restoreWindowSize: () => invoke<void>("restore_window_size"),
+  /** 本实例渲染进程（WebKitWebProcess）内存信息：RSS + WebKit 自杀阈值（字节） */
+  webprocessRss: () => invoke<{ rss: number; threshold: number }>("webprocess_rss"),
 
   /** 以 base64 读取文件内容（供 Agent 图片上传使用） */
   readFileBase64: (path: string, maxBytes: number) => invoke<string>("read_file_base64", { path, maxBytes }),

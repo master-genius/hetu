@@ -1874,13 +1874,14 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hetushell"
-version = "3.1.10"
+version = "3.1.11"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
  "dirs",
  "fs2",
  "futures-util",
+ "glib",
  "glob",
  "libc",
  "portable-pty",
@@ -1897,6 +1898,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "uuid",
+ "webkit2gtk",
  "window-vibrancy",
 ]
 
