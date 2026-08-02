@@ -419,6 +419,13 @@ fn attrs_with_mode_only(mode: u32) -> FileAttributes {
 mod tests {
     use super::*;
 
+    /// SETSTAT attrs 序列化后的第一个 u32 是属性标志位（协议大端序）。
+    /// SIZE=0x01, UIDGID=0x02, PERMISSIONS=0x04, ACMODTIME=0x08
+    fn serialize_flags(attrs: &FileAttributes) -> u32 {
+        let bytes = russh_sftp::ser::to_bytes(attrs).expect("序列化失败");
+        u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+    }
+
     #[test]
     fn set_metadata_attrs_only_carries_permissions() {
         let attrs = attrs_with_mode_only(0o755);
@@ -430,6 +437,29 @@ mod tests {
         assert_eq!(attrs.gid, None);
         assert_eq!(attrs.atime, None);
         assert_eq!(attrs.mtime, None);
+    }
+
+    /// 修复后：SETSTAT 字节流只携带 PERMISSIONS 标志（0x04），
+    /// 不含 SIZE（0x01）——远端文件不会被截断为 0 大小。
+    #[test]
+    fn setstat_serializes_permissions_flag_only() {
+        let attrs = attrs_with_mode_only(0o755);
+        let flags = serialize_flags(&attrs);
+        assert_eq!(flags, 0x04, "flags 应只含 PERMISSIONS，实际 {flags:#010x}");
+    }
+
+    /// 判别力验证：错误的 Default 写法必须能捕获——若某天回归回
+    /// `..Default::default()`，此测试会失败（flags 含 SIZE=0x01）。
+    #[test]
+    fn dummy_default_would_truncate_file() {
+        let attrs = FileAttributes {
+            permissions: Some(0o755),
+            ..Default::default()
+        };
+        let flags = serialize_flags(&attrs);
+        assert_eq!(attrs.size, Some(0));
+        assert_ne!(flags & 0x01, 0, "dummy Default 必带 SIZE 标志（回归捕获）");
+        assert_ne!(flags & 0x08, 0, "dummy Default 必带 ACMODTIME 标志（回归捕获）");
     }
 }
 
