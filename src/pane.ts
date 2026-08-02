@@ -154,10 +154,14 @@ export class Pane {
   activeBackendId: string | null = null;
   /** 后端路由 ID：park 期间指向 SSH 子任务，否则指向本地 PTY */
   get backendId(): string { return this.activeBackendId ?? this.id; }
-  /** WebGL addon 引用，用于 dispose + 重建（Ctrl+Shift+R / onContextLoss） */
+  /** WebGL addon 引用，用于 dispose + 重建（Ctrl+Shift+R / onContextLoss / atlas 预防重建） */
   private webglAddon: { dispose: () => void } | null = null;
   /** WebGL renderer 原型 patch 是否已应用（全局一次性，所有 pane 共享同一原型） */
   private static webglPatched = false;
+  /** atlas 页数监控定时器：接近 maxAtlasPages 时预防性重建，避免碎片化乱码不可自愈 */
+  private webglWatchTimer: number | null = null;
+  /** 上次预防性重建时间戳（防抖：60s 内不重复重建） */
+  private lastWebglRebuildAt = 0;
   /** xterm Buffer.resize 原型 patch 是否已应用（scrollback 动态变更生效，全局一次性） */
   private static scrollbackPatched = false;
 
@@ -556,13 +560,15 @@ export class Pane {
    * 对 xterm.js WebGL addon 的渲染器原型做一次性 patch，修复 texture atlas
    * page merge 导致的同帧渲染不一致（xterm.js #4480）。
    *
-   * Bug 时序：_updateModel 增量更新中途触发 page merge → 原地修改 glyph.texturePage
+   * Bug 时序：_updateModel 更新中途触发 page merge → 原地修改 glyph.texturePage
    * → 前半行用旧索引、后半行用新索引 → 顶点缓冲混合 → 乱码。
    * _requestClearModel 延迟到下一帧才生效，且原始 beginFrame() 从不重置该标志。
    *
    * Patch 1 — beginFrame：读取后重置 _requestClearModel，避免每帧全量重建。
-   * Patch 2 — _updateModel：增量更新后检查 merge 是否触发，若是则立即全量重建，
-   *           保证当前帧 model 与 atlas 状态一致。
+   * Patch 2 — _updateModel：merge 触发后（_createNewPage 置位 _requestClearModel）
+   *           立即全量重建，并循环 re-check：全量重建本身可能再次触发 merge
+   *           （atlas 近饱和），直到 atlas 稳定。增量与全量路径都检测（原实现
+   *           isIncremental 门控会漏掉 beginFrame=true 的全量路径）。
    *
    * 所有 pane 共享同一原型，只需 patch 一次。
    */
@@ -580,12 +586,13 @@ export class Pane {
       return v;
     };
 
-    // Patch 2: _updateModel — 增量更新后若 merge 触发，立即全量重建
+    // Patch 2: _updateModel — merge 触发后立即全量重建；循环 re-check 覆盖级联 merge。
+    // guard 上限 3 防死循环：碎片化时 merge 空操作会持续置位，交给 atlas 页数监控主动重建。
     const origUpdateModel = proto._updateModel;
     proto._updateModel = function (this: any, start: number, end: number): void {
-      const isIncremental = start !== 0 || end !== this._terminal.rows - 1;
       origUpdateModel.call(this, start, end);
-      if (isIncremental && this._charAtlas?._requestClearModel) {
+      let guard = 0;
+      while (this._charAtlas?._requestClearModel && guard++ < 3) {
         this._charAtlas._requestClearModel = false;
         this._clearModel(true);
         origUpdateModel.call(this, 0, this._terminal.rows - 1);
@@ -602,6 +609,7 @@ export class Pane {
       const addon = new WebglAddon();
       // WebGL 上下文丢失（GPU 驱动重置等）时重建渲染器，否则字符纹理累积损坏导致乱码
       addon.onContextLoss(() => {
+        this.stopAtlasWatch();
         addon.dispose();
         this.webglAddon = null;
         void this.tryWebgl();
@@ -611,7 +619,10 @@ export class Pane {
       // addon.activate 后 _renderer 才存在；下一帧取实例做原型 patch
       requestAnimationFrame(() => {
         const renderer = (addon as any)._renderer;
-        if (renderer) this.patchWebglRenderer(renderer);
+        if (renderer) {
+          this.patchWebglRenderer(renderer);
+          this.startAtlasWatch();
+        }
       });
     } catch {
       /* WebGL 不可用时回退 canvas 渲染 */
@@ -619,11 +630,43 @@ export class Pane {
   }
 
   /**
-   * 重建 WebGL 渲染缓存（Ctrl+Shift+R）：dispose 当前 WebGL addon 并重新创建，
-   * 获得全新的空 texture atlas + cache map，从现有 buffer 重建渲染。
-   * TUI 应用不退出、对话记录不丢失，与 onContextLoss 走同一路径。
+   * atlas 页数监控（方案 A 预防性重建）：低频轮询 atlas 页面数，接近 maxAtlasPages
+   * 时主动 dispose + 重建渲染器。atlas 碎片化（页面尺寸混合导致 4 页同尺寸 merge
+   * 空操作）是不可自愈的持久乱码路径——页数一旦超过 maxAtlasPages，GlyphRenderer
+   * 绑定 _atlasTextures[i] 越界 undefined。重建在饱和前重置 atlas，从源头消除。
+   * 每次重建后 addon 实例变化，故监控从 this.webglAddon 实时取当前渲染器。
+   * 60s 防抖：重建后短时间内不再触发，避免输出密集场景下的重建风暴。
+   */
+  private startAtlasWatch(): void {
+    this.stopAtlasWatch();
+    this.webglWatchTimer = window.setInterval(() => {
+      const addon = this.webglAddon as any;
+      const atlas = addon?._renderer?._charAtlas;
+      if (!atlas) return;
+      if (Date.now() - this.lastWebglRebuildAt < 60_000) return;
+      // maxAtlasPages = min(32, MAX_TEXTURE_IMAGE_UNITS)，构造时静态赋值；
+      // 读不到时按默认 32 兜底。预留 4 页余量触发，避免进入 merge 频繁区。
+      const maxPages = Math.max(4, atlas.constructor?.maxAtlasPages ?? 32);
+      if (atlas._pages.length >= maxPages - 4) this.rebuildRenderer();
+    }, 30_000);
+  }
+
+  private stopAtlasWatch(): void {
+    if (this.webglWatchTimer !== null) {
+      clearInterval(this.webglWatchTimer);
+      this.webglWatchTimer = null;
+    }
+  }
+
+  /**
+   * 重建 WebGL 渲染缓存（Ctrl+Shift+R / onContextLoss / atlas 预防性重建）：
+   * dispose 当前 WebGL addon 并重新创建，获得全新的空 texture atlas + cache map，
+   * 从现有 buffer 重建渲染。TUI 应用不退出、对话记录不丢失。
+   * tryWebgl 成功后会重新挂 atlas 监控，故先停旧监控。
    */
   rebuildRenderer(): void {
+    this.stopAtlasWatch();
+    this.lastWebglRebuildAt = Date.now();
     if (this.webglAddon) {
       this.webglAddon.dispose();
       this.webglAddon = null;
@@ -1129,6 +1172,7 @@ export class Pane {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    this.stopAtlasWatch();
     if (this.wheelRafId !== null) {
       cancelAnimationFrame(this.wheelRafId);
       this.wheelRafId = null;
