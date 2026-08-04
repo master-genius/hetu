@@ -461,6 +461,37 @@ mod tests {
         assert_ne!(flags & 0x01, 0, "dummy Default 必带 SIZE 标志（回归捕获）");
         assert_ne!(flags & 0x08, 0, "dummy Default 必带 ACMODTIME 标志（回归捕获）");
     }
+
+    /// exec 回退路径的命令注入安全：远端路径经 sh_quote 后必须整体处于
+    /// 单引号字面内，任何 shell 元字符（;、$()、反引号、换行）都不得逃逸。
+    #[test]
+    fn sh_quote_contains_shell_metacharacters() {
+        // 单引号：' → '\''，闭合后仍是同一字面字符串
+        assert_eq!(sh_quote("/tmp/it's.txt"), "'/tmp/it'\\''s.txt'");
+        // 命令注入尝试：整体字面化，无分号/命令替换/重定向逃逸
+        let evil = "/tmp/x; rm -rf /";
+        assert_eq!(sh_quote(evil), "'/tmp/x; rm -rf /'");
+        let subshell = "/tmp/$(whoami)`id`.txt";
+        assert_eq!(sh_quote(subshell), "'/tmp/$(whoami)`id`.txt'");
+        // 换行：单引号字符串内合法，不破坏命令边界
+        assert_eq!(sh_quote("/tmp/a\nb"), "'/tmp/a\nb'");
+        // 空格与 ~ 保持字面
+        assert_eq!(sh_quote("~/my dir/file"), "'~/my dir/file'");
+    }
+
+    /// exec 回退命令构造：`base64 -d > '<path>'` 重定向目标必须被单引号整体包裹，
+    /// 路径内的分号等元字符是字面量，shell 不会解释为命令分隔/注入。
+    #[test]
+    fn exec_upload_command_redirects_to_quoted_path() {
+        let remote = "/data/weird name;touch pwned";
+        let cmd = format!("base64 -d > {}", sh_quote(remote));
+        assert_eq!(cmd, "base64 -d > '/data/weird name;touch pwned'");
+        // 重定向目标以单引号开头并闭合：分号/空格被字面化
+        let quoted = cmd.strip_prefix("base64 -d > ").unwrap();
+        assert!(quoted.starts_with('\'') && quoted.ends_with('\''));
+        // 命令体（base64 -d >）本身不含用户可控内容
+        assert!(cmd.starts_with("base64 -d > "));
+    }
 }
 
 #[cfg(not(unix))]
@@ -754,7 +785,8 @@ pub async fn download(
     result
 }
 
-/// 上传（文件或整个目录，目录递归处理），返回远端根路径
+/// 上传（文件或整个目录，目录递归处理），返回远端根路径。
+/// 优先 SFTP；SFTP 会话建立失败（如服务器禁用 subsystem）时回退 exec 通道上传。
 pub async fn upload(
     app: &AppHandle,
     conn: &Arc<Connection>,
@@ -770,57 +802,11 @@ pub async fn upload(
         .to_string_lossy()
         .into_owned();
     let remote_root = format!("{}/{}", remote_dir.trim_end_matches('/'), name);
-    let sftp = session(conn).await?;
-    // 主体失败即失效缓存的 SFTP 会话，下次自动重建
-    let result = async {
-        let meta = tokio::fs::metadata(local).await?;
-        let mut done = 0u64;
-
-        if !meta.is_dir() {
-            let total = meta.len();
-            upload_file(app, &sftp, ctl, local, &remote_root, transfer_id, &name, &mut done, total).await?;
-            emit_progress(app, transfer_id, &name, done, total, "upload");
-            return Ok(());
-        }
-
-        // 目录：先建远端目录骨架（已存在则忽略错误），再逐文件上传。
-        // 骨架创建是逐目录的远端调用，允许取消抢占（不回滚：目录可能本就存在）
-        let (dirs, files, total) = walk_local(local_path)?;
-        ctl.preempt(async {
-            let _ = sftp.create_dir(&remote_root).await;
-            for d in &dirs {
-                let _ = sftp.create_dir(&format!("{remote_root}/{d}")).await;
-            }
-            Ok(())
-        })
-        .await?;
-        let count = files.len();
-        for (i, (lpath, rel)) in files.iter().enumerate() {
-            let label = format!("{name}/{rel} ({}/{count})", i + 1);
-            match upload_file(app, &sftp, ctl, lpath, &format!("{remote_root}/{rel}"), transfer_id, &label, &mut done, total).await {
-                Ok(()) => {}
-                // 取消：best-effort 回滚远端已建的树——先删文件，再逆序删目录，最后删根。
-                // 回滚是 O(N) 次串行远端调用，整体限时：网络停滞/大目录时不让取消挂死
-                Err(Error::Cancelled) => {
-                    cleanup_bounded(async {
-                        for (_, r) in &files {
-                            let _ = sftp.remove_file(format!("{remote_root}/{r}")).await;
-                        }
-                        for d in dirs.iter().rev() {
-                            let _ = sftp.remove_dir(format!("{remote_root}/{d}")).await;
-                        }
-                        let _ = sftp.remove_dir(remote_root.clone()).await;
-                    })
-                    .await;
-                    return Err(Error::Cancelled);
-                }
-                Err(e) => return Err(e),
-            }
-        }
-        emit_progress(app, transfer_id, &name, done, total, "upload");
-        Ok(())
-    }
-    .await;
+    let result = match session(conn).await {
+        Ok(sftp) => upload_via_sftp(app, &sftp, ctl, local, &remote_root, transfer_id, &name).await,
+        // SFTP 子系统不可用（连接 shell 仍正常）→ 回退 exec 通道上传
+        Err(_) => upload_via_exec(app, conn, ctl, local, &remote_root, transfer_id, &name).await,
+    };
     match result {
         Ok(()) => Ok(remote_root),
         Err(e) => {
@@ -833,16 +819,257 @@ pub async fn upload(
     }
 }
 
+/// SFTP 上传主体（会话已建立）
+async fn upload_via_sftp(
+    app: &AppHandle,
+    sftp: &SftpSession,
+    ctl: &TransferCtl,
+    local: &str,
+    remote_root: &str,
+    transfer_id: &str,
+    name: &str,
+) -> Result<()> {
+    let local_path = std::path::Path::new(local);
+    let meta = tokio::fs::metadata(local).await?;
+    let mut done = 0u64;
+
+    if !meta.is_dir() {
+        let total = meta.len();
+        upload_file(app, sftp, ctl, local, remote_root, transfer_id, name, &mut done, total).await?;
+        emit_progress(app, transfer_id, name, done, total, "upload");
+        return Ok(());
+    }
+
+    // 目录：先建远端目录骨架（已存在则忽略错误），再逐文件上传。
+    // 骨架创建是逐目录的远端调用，允许取消抢占（不回滚：目录可能本就存在）
+    let (dirs, files, total) = walk_local(local_path)?;
+    ctl.preempt(async {
+        let _ = sftp.create_dir(remote_root).await;
+        for d in &dirs {
+            let _ = sftp.create_dir(&format!("{remote_root}/{d}")).await;
+        }
+        Ok(())
+    })
+    .await?;
+    let count = files.len();
+    for (i, (lpath, rel)) in files.iter().enumerate() {
+        let label = format!("{name}/{rel} ({}/{count})", i + 1);
+        match upload_file(app, sftp, ctl, lpath, &format!("{remote_root}/{rel}"), transfer_id, &label, &mut done, total).await {
+            Ok(()) => {}
+            // 取消：best-effort 回滚远端已建的树——先删文件，再逆序删目录，最后删根。
+            // 回滚是 O(N) 次串行远端调用，整体限时：网络停滞/大目录时不让取消挂死
+            Err(Error::Cancelled) => {
+                cleanup_bounded(async {
+                    for (_, r) in &files {
+                        let _ = sftp.remove_file(format!("{remote_root}/{r}")).await;
+                    }
+                    for d in dirs.iter().rev() {
+                        let _ = sftp.remove_dir(format!("{remote_root}/{d}")).await;
+                    }
+                    let _ = sftp.remove_dir(remote_root.to_string()).await;
+                })
+                .await;
+                return Err(Error::Cancelled);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    emit_progress(app, transfer_id, name, done, total, "upload");
+    Ok(())
+}
+
+/// exec 通道上传（SFTP 子系统不可用时的回退路径）：
+/// `base64 -d > '<远端路径>'` —— base64 纯文本流经 SSH channel，二进制安全；
+/// 远端需有 base64 命令（Linux coreutils / busybox 标配）。
+async fn upload_via_exec(
+    app: &AppHandle,
+    conn: &Arc<Connection>,
+    ctl: &TransferCtl,
+    local: &str,
+    remote_root: &str,
+    transfer_id: &str,
+    name: &str,
+) -> Result<()> {
+    let local_path = std::path::Path::new(local);
+    let meta = tokio::fs::metadata(local).await?;
+    let mut done = 0u64;
+
+    if !meta.is_dir() {
+        let total = meta.len();
+        upload_file_exec(app, conn, ctl, local, remote_root, transfer_id, name, &mut done, total).await?;
+        emit_progress(app, transfer_id, name, done, total, "upload");
+        return Ok(());
+    }
+
+    // 目录：mkdir -p 建骨架（已存在则忽略错误），再逐文件 exec 上传
+    let (dirs, files, total) = walk_local(local_path)?;
+    ctl.preempt(async {
+        let _ = exec_capture(conn, &format!("mkdir -p {}", sh_quote(remote_root))).await;
+        for d in &dirs {
+            let _ = exec_capture(conn, &format!("mkdir -p {}", sh_quote(&format!("{remote_root}/{d}")))).await;
+        }
+        Ok(())
+    })
+    .await?;
+    let count = files.len();
+    for (i, (lpath, rel)) in files.iter().enumerate() {
+        let label = format!("{name}/{rel} ({}/{count})", i + 1);
+        match upload_file_exec(app, conn, ctl, lpath, &format!("{remote_root}/{rel}"), transfer_id, &label, &mut done, total).await {
+            Ok(()) => {}
+            // 取消：best-effort 回滚远端已建的树（rm -rf，限时）
+            Err(Error::Cancelled) => {
+                cleanup_bounded(async {
+                    let _ = exec_capture(conn, &format!("rm -rf {}", sh_quote(remote_root))).await;
+                })
+                .await;
+                return Err(Error::Cancelled);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    emit_progress(app, transfer_id, name, done, total, "upload");
+    Ok(())
+}
+
+/// 取消时清理远端半成品文件：base64 -d 收到 EOF 后会把已解码部分写入目标，
+/// 留下截断文件。与 SFTP 版 remove_file 对齐，限时 best-effort。
+async fn cleanup_remote_file(conn: &Arc<Connection>, remote: &str) {
+    cleanup_bounded(async {
+        let _ = exec_capture(conn, &format!("rm -f {}", sh_quote(remote))).await;
+    })
+    .await;
+}
+
+/// 单文件 exec 上传（base64 流式写入远端文件），追加进度到聚合计数
+async fn upload_file_exec(
+    app: &AppHandle,
+    conn: &Arc<Connection>,
+    ctl: &TransferCtl,
+    local: &str,
+    remote: &str,
+    transfer_id: &str,
+    label: &str,
+    done: &mut u64,
+    total: u64,
+) -> Result<()> {
+    let mut channel = {
+        let guard = conn.handle.lock().await;
+        let handle = guard.as_ref().ok_or_else(|| Error::msg("连接未建立"))?;
+        handle.channel_open_session().await?
+    };
+    channel.exec(true, format!("base64 -d > {}", sh_quote(remote))).await?;
+    let mut src = tokio::fs::File::open(local).await?;
+    // base64 按 3 字节对齐：累积到 3 的倍数才编码发送，余数留到下次，
+    // 仅末尾 flush 带 padding——中途 padding 会被 base64 -d 判为非法输入。
+    // （read 不保证返回满块，不能依赖 buf 大小是 3 的倍数这一假设。）
+    let mut buf = vec![0u8; 192 * 1024];
+    let mut pending: Vec<u8> = Vec::new();
+    let mut last_emit = 0u64;
+    const PROGRESS_INTERVAL: u64 = 1024 * 1024;
+    loop {
+        // 每块前过闸门：暂停则挂起，取消则关闭通道并清理远端半成品
+        if let Err(e) = ctl.gate().await {
+            let _ = channel.close().await;
+            cleanup_remote_file(conn, remote).await;
+            return Err(e);
+        }
+        let n = src.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        pending.extend_from_slice(&buf[..n]);
+        *done += n as u64;
+        // 只编码 3 的倍数部分，余数留到下次（避免中途 padding）
+        let encodable = (pending.len() / 3) * 3;
+        if encodable > 0 {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&pending[..encodable]);
+            // 抢占式取消：写阻塞在慢/停滞的远端网络上时，取消无需等这次写完成即可中止
+            tokio::select! {
+                biased;
+                _ = ctl.cancelled() => {
+                    let _ = channel.close().await;
+                    cleanup_remote_file(conn, remote).await;
+                    return Err(Error::Cancelled);
+                }
+                r = channel.data(b64.as_bytes()) => r?,
+            }
+            pending = pending[encodable..].to_vec();
+        }
+        if *done >= last_emit + PROGRESS_INTERVAL {
+            emit_progress(app, transfer_id, label, *done, total, "upload");
+            last_emit = *done;
+        }
+    }
+    // flush 末尾余数（< 3 字节，合法 padding）
+    if !pending.is_empty() {
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&pending);
+        channel.data(b64.as_bytes()).await?;
+    }
+    channel.eof().await?;
+    // 等待退出状态：base64 解码失败 / 路径不可写等会以非 0 退出
+    let mut code = None;
+    let mut stderr = Vec::new();
+    while let Some(msg) = channel.wait().await {
+        match msg {
+            ChannelMsg::ExtendedData { data, .. } => stderr.extend_from_slice(&data),
+            ChannelMsg::ExitStatus { exit_status } => code = Some(exit_status),
+            _ => {}
+        }
+    }
+    if code != Some(0) {
+        let detail = String::from_utf8_lossy(&stderr).trim().to_string();
+        return Err(Error::msg(format!(
+            "远端写入失败（退出码 {}）{}",
+            code.map_or_else(|| "未知".to_string(), |c| c.to_string()),
+            if detail.is_empty() { String::new() } else { format!("：{detail}") }
+        )));
+    }
+    Ok(())
+}
+
 /// 通过 /proc/<pid>/cwd 解析远端 shell 的实时工作目录（Linux）。
-/// realpath 解析该符号链接即得 shell 当前 cwd，无需 OSC7 或持续上报。
+/// 优先 SFTP canonicalize；SFTP 子系统不可用时回退 exec `readlink`（同用户可读）。
 pub async fn proc_cwd(conn: &Arc<Connection>, pid: u32) -> Result<String> {
+    match proc_cwd_via_sftp(conn, pid).await {
+        Ok(dir) => Ok(dir),
+        Err(_) => {
+            let (stdout, _, code) = exec_capture(conn, &format!("readlink /proc/{pid}/cwd")).await?;
+            let dir = stdout.trim().to_string();
+            if code == Some(0) && !dir.is_empty() {
+                Ok(dir)
+            } else {
+                Err(Error::msg("无法读取远端工作目录（SFTP 与 /proc 均不可用）"))
+            }
+        }
+    }
+}
+
+/// SFTP 优先路径（宏内含函数级 return，需独立成函数以便外层回退）
+async fn proc_cwd_via_sftp(conn: &Arc<Connection>, pid: u32) -> Result<String> {
     Ok(sftp_with_retry!(conn, sftp, {
         sftp.canonicalize(format!("/proc/{pid}/cwd")).await
     }))
 }
 
-/// 远端 home 目录（用于 cwd 兜底）
+/// 远端 home 目录（用于 cwd 兜底）。
+/// 优先 SFTP canonicalize(".")；子系统不可用时回退 exec `pwd`
+/// （登录会话的初始目录即 home）。
 pub async fn home(conn: &Arc<Connection>) -> Result<String> {
+    match home_via_sftp(conn).await {
+        Ok(dir) => Ok(dir),
+        Err(_) => {
+            let (stdout, _, code) = exec_capture(conn, "pwd").await?;
+            let dir = stdout.trim().to_string();
+            if code == Some(0) && !dir.is_empty() {
+                Ok(dir)
+            } else {
+                Err(Error::msg("无法获取远端主目录（SFTP 与命令通道均不可用）"))
+            }
+        }
+    }
+}
+
+async fn home_via_sftp(conn: &Arc<Connection>) -> Result<String> {
     Ok(sftp_with_retry!(conn, sftp, {
         sftp.canonicalize(".").await
     }))
@@ -875,6 +1102,33 @@ async fn exec_status(conn: &Arc<Connection>, cmd: &str) -> Result<(Option<u32>, 
         }
     }
     Ok((code, String::from_utf8_lossy(&stderr).into_owned()))
+}
+
+/// 在连接上执行一条命令并捕获 stdout/stderr，返回 (stdout, stderr, 退出码)。
+/// 作为 SFTP 子系统不可用时的兜底通道（shell 正常 ⇒ exec 可用）。
+async fn exec_capture(conn: &Arc<Connection>, cmd: &str) -> Result<(String, String, Option<u32>)> {
+    let mut channel = {
+        let guard = conn.handle.lock().await;
+        let handle = guard.as_ref().ok_or_else(|| Error::msg("连接未建立"))?;
+        handle.channel_open_session().await?
+    };
+    channel.exec(true, cmd).await?;
+    let mut code = None;
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    while let Some(msg) = channel.wait().await {
+        match msg {
+            ChannelMsg::Data { data } => stdout.extend_from_slice(&data),
+            ChannelMsg::ExtendedData { data, .. } => stderr.extend_from_slice(&data),
+            ChannelMsg::ExitStatus { exit_status } => code = Some(exit_status),
+            _ => {}
+        }
+    }
+    Ok((
+        String::from_utf8_lossy(&stdout).into_owned(),
+        String::from_utf8_lossy(&stderr).into_owned(),
+        code,
+    ))
 }
 
 /// 同连接快路径：服务器内 `cp -a`，零下行/上行带宽。

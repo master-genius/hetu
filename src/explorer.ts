@@ -19,6 +19,8 @@ export interface FsEntry {
   name: string;
   path: string;
   isDir: boolean;
+  /** 符号链接（本地悬空链接或远端 lstat 未跟随的链接） */
+  isLink?: boolean;
   size: number;
   mtime: number | null;
 }
@@ -121,7 +123,7 @@ export class Explorer {
    * 避免同一连接被分屏复用时错用其它 pane 的工作目录。
    */
   onDownloadRequest:
-    | ((connId: string, remotePath: string, targetDir: string, srcPaneId?: string) => void)
+    | ((connId: string, remotePaths: string[], targetDir: string, srcPaneId?: string) => void)
     | null = null;
   /** [remote] 请求把本地文件上传到本连接的某远端目录（本地条目拖入时触发） */
   onUploadHere: ((localPaths: string[], remoteDir: string) => void) | null = null;
@@ -139,6 +141,8 @@ export class Explorer {
   private entries: FsEntry[] = [];
   private rowEls: HTMLElement[] = [];
   private selIdx = -1;
+  /** 多选集合（Ctrl+单击增/减选）；单击/换目录/空白点击/Escape 重置 */
+  private selection = new Set<number>();
 
   constructor(backend: ExplorerBackend) {
     this.backend = backend;
@@ -198,9 +202,13 @@ export class Explorer {
       if (e.target === this.listEl) this.clearSelection();
     });
 
-    // 键盘导航：↑/↓ 移动选中，Enter 打开选中的目录（本地/远程一致）
+    // 键盘导航：↑/↓ 移动选中，Enter 打开选中的目录（本地/远程一致），Escape 取消选择
     this.listEl.tabIndex = 0;
     this.listEl.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        this.clearSelection();
+        return;
+      }
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault(); // 防止列表容器自身滚动，滚动交给 scrollIntoView
         if (!this.rowEls.length) return;
@@ -211,7 +219,7 @@ export class Explorer {
               ? 0
               : this.rowEls.length - 1
             : Math.min(this.rowEls.length - 1, Math.max(0, this.selIdx + delta));
-        this.select(next);
+        this.selectOnly(next);
       } else if (e.key === "Enter") {
         const entry = this.entries[this.selIdx];
         if (entry?.isDir) {
@@ -248,13 +256,14 @@ export class Explorer {
       const targetDir = row?.dataset.dir || this.cwd;
       try {
         if (this.backend.kind === "local") {
-          // 远端文件拖入本地面板 → 下载到该目录/当前目录
-          const { connId, path, paneId } = JSON.parse(raw) as {
+          // 远端文件拖入本地面板 → 批量下载到该目录/当前目录
+          const { connId, paths, paneId } = JSON.parse(raw) as {
             connId: string;
-            path: string;
+            paths: string[];
             paneId?: string;
           };
-          this.onDownloadRequest?.(connId, path, targetDir, paneId);
+          if (Array.isArray(paths) && paths.length)
+            this.onDownloadRequest?.(connId, paths, targetDir, paneId);
         } else {
           // 本地条目拖入远程面板 → 上传到该远端目录/当前目录
           const paths = JSON.parse(raw) as string[];
@@ -319,7 +328,9 @@ export class Explorer {
     const visible = this.showHidden ? entries : entries.filter((e) => !e.name.startsWith("."));
     this.entries = visible;
     this.rowEls = [];
-    this.selIdx = -1; // 换目录/刷新后清空选中（行元素已随列表清空，无需摘类）
+    // 换目录/刷新后清空选中（行元素已随列表清空，无需摘类）
+    this.selection.clear();
+    this.selIdx = -1;
     visible.forEach((entry, i) => {
       const row = this.renderRow(entry, i);
       this.rowEls.push(row);
@@ -337,20 +348,38 @@ export class Explorer {
     this.hiddenBtn.title = this.showHidden ? "点击隐藏隐藏文件" : "点击显示隐藏文件";
   }
 
-  /** 取消选择（点击空白处 / 主动清理） */
-  private clearSelection(): void {
-    if (this.selIdx >= 0) this.rowEls[this.selIdx]?.classList.remove("selected");
-    this.selIdx = -1;
+  /** 重绘所有行的选中态（selection 集合 → 行类，单选/多选统一） */
+  private syncSelectionClasses(): void {
+    for (let i = 0; i < this.rowEls.length; i++) {
+      this.rowEls[i].classList.toggle("selected", this.selection.has(i));
+    }
   }
 
-  /** 选中某行：背景条高亮 + 滚动到可视区（点击与方向键共用） */
-  private select(idx: number): void {
+  /** 取消选择（点击空白 / Escape / 主动清理） */
+  private clearSelection(): void {
+    this.selection.clear();
+    this.selIdx = -1;
+    this.syncSelectionClasses();
+  }
+
+  /** 单选某行（清空多选）并滚动到可视区 */
+  private selectOnly(idx: number): void {
     if (idx < 0 || idx >= this.rowEls.length) return;
-    if (this.selIdx >= 0) this.rowEls[this.selIdx]?.classList.remove("selected");
+    this.selection.clear();
+    this.selection.add(idx);
     this.selIdx = idx;
-    const row = this.rowEls[idx];
-    row.classList.add("selected");
-    row.scrollIntoView({ block: "nearest" });
+    this.syncSelectionClasses();
+    this.rowEls[idx].scrollIntoView({ block: "nearest" });
+  }
+
+  /** Ctrl+单击：增选/减选（不重置其它选择），焦点跟随 */
+  private toggleSelect(idx: number): void {
+    if (idx < 0 || idx >= this.rowEls.length) return;
+    if (this.selection.has(idx)) this.selection.delete(idx);
+    else this.selection.add(idx);
+    this.selIdx = idx;
+    this.syncSelectionClasses();
+    this.rowEls[idx].scrollIntoView({ block: "nearest" });
   }
 
   private renderRow(entry: FsEntry, idx: number): HTMLElement {
@@ -367,61 +396,92 @@ export class Explorer {
     row.title = entry.path;
     if (entry.isDir) row.dataset.dir = entry.path; // 拖入时作为目标目录
 
-    // 单击选中（并让列表获得焦点，方向键随即可用）；双击才进入目录
-    row.addEventListener("click", () => {
-      this.select(idx);
+    // 单击选中（Ctrl 增/减选，普通单击单选；并让列表获得焦点，方向键随即可用）
+    row.addEventListener("click", (e) => {
+      if (e.ctrlKey || e.metaKey) this.toggleSelect(idx);
+      else this.selectOnly(idx);
       this.listEl.focus();
     });
+    // 双击：目录进入；图片内置预览；本地其它文件用系统默认应用打开；
+    // 远端符号链接（列表为 lstat，目录链接 is_dir=false）跟随 stat 判断真实类型
     row.addEventListener("dblclick", () => {
-      if (entry.isDir) void this.navigate(entry.path);
+      if (entry.isDir) {
+        void this.navigate(entry.path);
+        return;
+      }
+      if (VIEWABLE_IMG.test(entry.name)) {
+        this.previewImage(entry);
+        return;
+      }
+      if (this.backend.kind === "local") {
+        void api.openPath(entry.path).catch((err) => toast(`无法打开: ${err}`, true));
+        return;
+      }
+      if (entry.isLink && this.backend.connId) {
+        void api
+          .sftpStat(this.backend.connId, entry.path)
+          .then((meta) => {
+            if (meta.isDir) void this.navigate(entry.path);
+          })
+          .catch(() => toast("无法解析链接目标", true));
+      }
     });
     row.addEventListener("dragstart", (e) => {
+      // 拖拽行在多选内 → 携带全部选中路径；否则携带该行
+      const idxs = this.selection.has(idx)
+        ? [...this.selection].sort((a, b) => a - b)
+        : [idx];
+      const paths = idxs.map((i) => this.entries[i].path);
       if (this.backend.kind === "local") {
-        // 本地条目：上传源（携带本地路径）
-        e.dataTransfer?.setData(DND_MIME, JSON.stringify([entry.path]));
-        e.dataTransfer?.setData("text/plain", entry.path);
+        // 本地条目：上传源（携带本地路径数组）
+        e.dataTransfer?.setData(DND_MIME, JSON.stringify(paths));
+        e.dataTransfer?.setData("text/plain", paths.join("\n"));
       } else {
-        // 远端条目：下载源（携带 连接 + 远端路径）
+        // 远端条目：下载源（携带 连接 + 远端路径数组）
         e.dataTransfer?.setData(
           DL_MIME,
-          JSON.stringify({ connId: this.backend.connId, path: entry.path }),
+          JSON.stringify({ connId: this.backend.connId, paths }),
         );
       }
       if (e.dataTransfer) e.dataTransfer.effectAllowed = "copy";
       row.classList.add("dragging");
     });
     row.addEventListener("dragend", () => row.classList.remove("dragging"));
-    // 双击图片文件也可预览（目录双击是进入，互不冲突）
-    row.addEventListener("dblclick", () => {
-      if (!entry.isDir && VIEWABLE_IMG.test(entry.name)) this.previewImage(entry);
-    });
     row.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      this.select(idx); // 右键也建立选中，菜单操作对象一目了然
+      // 右键行不在多选内 → 单选它；在多选内 → 菜单作用于全部选中项
+      if (!this.selection.has(idx)) this.selectOnly(idx);
+      const selIdxs = [...this.selection].sort((a, b) => a - b);
+      const sel = selIdxs.map((i) => this.entries[i]);
+      const multi = sel.length > 1;
       const items =
         this.backend.kind === "local"
           ? [
               {
-                label: `上传 “${entry.name}” 到当前终端目录`,
-                action: () => this.onUploadRequest?.([entry.path]),
+                label: multi
+                  ? `上传 ${sel.length} 项到当前终端目录`
+                  : `上传 “${entry.name}” 到当前终端目录`,
+                action: () => this.onUploadRequest?.(sel.map((x) => x.path)),
               },
             ]
           : [
               {
-                label: `下载 “${entry.name}” 到本地`,
+                label: multi
+                  ? `下载 ${sel.length} 项到本地`
+                  : `下载 “${entry.name}” 到本地`,
                 action: () =>
                   this.backend.connId &&
-                  this.onDownloadRequest?.(this.backend.connId, entry.path, ""),
+                  this.onDownloadRequest?.(this.backend.connId, sel.map((x) => x.path), ""),
               },
             ];
       showMenu(e.clientX, e.clientY, [
-        // 图片（本地/远端）→ 弹图片查看器：缩放/旋转/平移
-        ...(!entry.isDir && VIEWABLE_IMG.test(entry.name)
+        // 图片（本地/远端）→ 弹图片查看器：缩放/旋转/平移（仅单选时）
+        ...(!multi && !entry.isDir && VIEWABLE_IMG.test(entry.name)
           ? [{ label: `预览 “${entry.name}”`, action: () => this.previewImage(entry) }]
           : []),
         ...items,
-        ...(entry.isDir
+        ...(!multi && entry.isDir
           ? [{ label: "进入目录", action: () => void this.navigate(entry.path) }]
           : []),
         { separator: true, label: "" },

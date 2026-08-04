@@ -367,15 +367,15 @@ async function bootstrap() {
       // 装配上传/下载回调（与侧边面板同款逻辑）
       if (backend.kind === "local") {
         ex.onUploadRequest = (paths) => void uploadFiles(paths);
-        ex.onDownloadRequest = (cid, path, targetDir, srcPaneId) => {
+        ex.onDownloadRequest = (cid, paths, targetDir, srcPaneId) => {
           const src = (srcPaneId && tabs.findPane(srcPaneId)?.pane) || tabs.panesByConn(cid)[0]?.pane;
-          if (src) void downloadFile(src, path, targetDir);
+          if (src) void downloadBatch(src, paths, targetDir);
           else toast("该连接已无终端，无法下载", true);
         };
       } else {
-        ex.onDownloadRequest = (cid, path, targetDir) => {
+        ex.onDownloadRequest = (cid, paths, targetDir) => {
           const found = tabs.panesByConn(cid)[0];
-          if (found) void downloadFile(found.pane, path, targetDir || undefined);
+          if (found) void downloadBatch(found.pane, paths, targetDir || undefined);
           else toast("该连接已无终端，无法下载", true);
         };
         ex.onUploadHere = (localPaths, remoteDir) => {
@@ -514,7 +514,7 @@ async function bootstrap() {
       // 保证同一连接分屏复用时仍用发起终端的工作目录。
       e.dataTransfer?.setData(
         DL_MIME,
-        JSON.stringify({ connId: pane.connId, paneId: pane.id, path: word }),
+        JSON.stringify({ connId: pane.connId, paneId: pane.id, paths: [word] }),
       );
       if (e.dataTransfer) e.dataTransfer.effectAllowed = "copy";
     };
@@ -947,40 +947,49 @@ async function bootstrap() {
       dlHlPane.classList.add("dl-drop-target");
     }
   });
-  /** 远端文件拖入远程终端：复制到该终端的实时 cwd */
-  const copyToRemotePane = async (src: Pane, srcSpec: string, target: Pane) => {
-    try {
-      const srcPath = await src.resolveRemotePath(srcSpec);
-      if (!srcPath) {
-        toast("无法解析远端路径（未知当前目录）", true);
-        return;
-      }
-      const { dir, guessed } = await target.currentDir();
-      if (!dir) {
-        toast("尚未获取目标终端的远端目录，请稍候重试", true);
-        return;
-      }
-      // cwd 未由 OSC7/proc 获得时落到 home 猜测——与上传拖放同款确认，避免静默复制错位置
-      if (guessed) {
-        const ok = await confirmDialog(
-          "确认复制目录",
-          `未能获取目标终端的当前工作目录。\n将复制到用户主目录：${dir}\n\n继续吗？`,
-        );
-        if (!ok) return;
-      }
+  /** 远端文件批量复制到远程终端：源路径预解析 + cwd 一次获取/确认，逐项复制 */
+  const copyToRemotePaneBatch = async (src: Pane, srcSpecs: string[], target: Pane) => {
+    const srcPaths: string[] = [];
+    for (const spec of srcSpecs) {
+      const p = await src.resolveRemotePath(spec).catch(() => null);
+      if (p) srcPaths.push(p);
+    }
+    if (srcPaths.length === 0) {
+      toast("无法解析远端路径（未知当前目录）", true);
+      return;
+    }
+    const { dir, guessed } = await target.currentDir();
+    if (!dir) {
+      toast("尚未获取目标终端的远端目录，请稍候重试", true);
+      return;
+    }
+    // cwd 未由 OSC7/proc 获得时落到 home 猜测——与上传拖放同款确认，避免静默复制错位置
+    if (guessed) {
+      const confirmed = await confirmDialog(
+        "确认复制目录",
+        `未能获取目标终端的当前工作目录。\n将复制到用户主目录：${dir}\n\n继续吗？`,
+      );
+      if (!confirmed) return;
+    }
+    const quiet = srcPaths.length > 1;
+    let ok = 0;
+    for (const srcPath of srcPaths) {
       const name = srcPath.replace(/\/+$/, "").split("/").pop() ?? srcPath;
       const tid = crypto.randomUUID();
       beginTransfer(tid, name, "upload", dir);
       try {
         const dest = await api.sftpCopyRemote(src.connId, srcPath, target.connId, dir, tid);
         completeTransfer(tid);
-        toast(`已复制到 ${dest}`);
+        ok++;
+        if (!quiet) toast(`已复制到 ${dest}`);
       } catch (err) {
         failTransfer(tid, String(err));
       }
-    } catch (err) {
-      // 路径解析 / cwd 获取等传输前错误仍用 toast 提示
-      toast(`复制失败: ${err}`, true);
+    }
+    if (quiet) {
+      const fail = srcPaths.length - ok;
+      if (fail > 0) toast(`批量复制：成功 ${ok} 项，失败 ${fail} 项`);
+      else toast(`已复制 ${ok} 项到 ${dir}`);
     }
   };
   // 拖拽操作结束（无论落在哪、是否成功落下）统一清理两套高亮：
@@ -997,9 +1006,10 @@ async function bootstrap() {
     clearDlHighlight();
     if (!target) return;
     e.preventDefault();
-    let payload: { connId: string; paneId?: string; path: string };
+    let payload: { connId: string; paneId?: string; paths: string[] };
     try {
-      payload = JSON.parse(raw) as { connId: string; paneId?: string; path: string };
+      payload = JSON.parse(raw) as { connId: string; paneId?: string; paths: string[] };
+      if (!Array.isArray(payload.paths) || payload.paths.length === 0) return;
     } catch {
       return; // 载荷异常，忽略
     }
@@ -1007,18 +1017,18 @@ async function bootstrap() {
     const src = (payload.paneId && tabs.findPane(payload.paneId)?.pane) || tabs.panesByConn(payload.connId)[0]?.pane;
     if (!src) return;
     if (target.isLocal) {
-      // 本地终端 → 下载（原有行为不变）
+      // 本地终端 → 批量下载到其当前目录
       void (async () => {
         const dir = (await target.resolveLocalCwd()) ?? (await api.localHome().catch(() => ""));
         if (!dir) {
           toast("无法确定本地终端目录", true);
           return;
         }
-        void downloadFile(src, payload.path, dir);
+        void downloadBatch(src, payload.paths, dir);
       })();
     } else {
-      // 远程终端 → 复制到其所在目录
-      void copyToRemotePane(src, payload.path, target);
+      // 远程终端 → 批量复制到其所在目录
+      void copyToRemotePaneBatch(src, payload.paths, target);
     }
   });
 
@@ -1036,13 +1046,19 @@ async function bootstrap() {
    * 因此 shell 未上报 OSC7 时也能命中用户 `cd` 后的真实目录（经 /proc/PID）。
    * - targetDir 指定（拖到文件管理器某目录）→ 直接下载到该目录。
    * - 否则按设置：勾选"每次询问"→ 弹保存对话框；否则默认下载目录（Downloads / 自定义）。
+   * - quiet=true（批量）：抑制 per-file toast，成功返回 true / 失败 false 由批量层汇总。
    */
-  const downloadFile = async (pane: Pane, remoteSpec: string, targetDir?: string) => {
+  const downloadFile = async (
+    pane: Pane,
+    remoteSpec: string,
+    targetDir?: string,
+    quiet = false,
+  ): Promise<boolean> => {
     try {
       const remotePath = await pane.resolveRemotePath(remoteSpec);
       if (!remotePath) {
-        toast("无法解析远端路径（未知当前目录）", true);
-        return;
+        if (!quiet) toast("无法解析远端路径（未知当前目录）", true);
+        return false;
       }
       const meta = await api.sftpStat(pane.connId, remotePath);
       const name = remotePath.replace(/\/+$/, "").split("/").pop() ?? remotePath;
@@ -1059,12 +1075,12 @@ async function bootstrap() {
       } else {
         const dir = await resolveDownloadDir();
         if (!dir) {
-          toast("未能确定下载目录，请在设置中指定", true);
-          return;
+          if (!quiet) toast("未能确定下载目录，请在设置中指定", true);
+          return false;
         }
         local = meta.isDir ? dir : `${dir.replace(/\/+$/, "")}/${name}`;
       }
-      if (!local) return;
+      if (!local) return false;
       // 传输进度与成败由右下角面板呈现（可暂停/取消/删除）；
       // 落地完整路径作为行名悬停提示，让用户能找到文件。
       // 完成时另发一条 toast：小文件瞬间完成，仅靠面板行不够醒目
@@ -1074,14 +1090,44 @@ async function bootstrap() {
       try {
         await api.sftpDownload(pane.connId, remotePath, local, tid);
         completeTransfer(tid);
-        toast(`已下载到 ${dest}`);
+        if (!quiet) toast(`已下载到 ${dest}`);
+        return true;
       } catch (err) {
         failTransfer(tid, String(err));
+        return false;
       }
     } catch (err) {
       // 路径解析 / stat 等传输前的错误仍用 toast 提示
-      toast(`下载失败: ${err}`, true);
+      if (!quiet) toast(`下载失败: ${err}`, true);
+      return false;
     }
+  };
+
+  /**
+   * 批量下载：目标目录一次确定（拖到面板某目录 → 用之；「每次询问」→ 弹一次目录框；
+   * 否则默认下载目录），逐项串行下载（与批量上传一致），完成后汇总 toast。
+   */
+  const downloadBatch = async (pane: Pane, specs: string[], targetDir?: string) => {
+    let dir: string | null = targetDir ?? null;
+    if (!dir && getSettings().askDownloadLocation) {
+      const dialog = await import("@tauri-apps/plugin-dialog");
+      dir = (await dialog.open({ directory: true, title: "选择下载目录" })) as string | null;
+      if (!dir) return; // 用户取消
+    }
+    if (!dir) {
+      dir = await resolveDownloadDir();
+      if (!dir) {
+        toast("未能确定下载目录，请在设置中指定", true);
+        return;
+      }
+    }
+    let ok = 0;
+    for (const spec of specs) {
+      if (await downloadFile(pane, spec, dir, true)) ok++;
+    }
+    const fail = specs.length - ok;
+    if (fail > 0) toast(`批量下载：成功 ${ok} 项，失败 ${fail} 项`);
+    else if (specs.length > 1) toast(`已下载 ${ok} 项到 ${dir}`);
   };
 
   // ---------- 工具栏 ----------
@@ -1148,10 +1194,10 @@ async function bootstrap() {
         syncExplorerPanel();
       };
       tab.explorer.onUploadRequest = (paths) => void uploadFiles(paths);
-      tab.explorer.onDownloadRequest = (connId, path, targetDir, srcPaneId) => {
+      tab.explorer.onDownloadRequest = (connId, paths, targetDir, srcPaneId) => {
         // 优先用拖拽发起的源 pane 解析相对路径，回退到该连接任一 pane
         const src = (srcPaneId && tabs.findPane(srcPaneId)?.pane) || tabs.panesByConn(connId)[0]?.pane;
-        if (src) void downloadFile(src, path, targetDir);
+        if (src) void downloadBatch(src, paths, targetDir);
         else toast("该连接已无终端，无法下载", true); // 不再静默：用户能知道为什么没反应
       };
     }
@@ -1254,9 +1300,9 @@ async function bootstrap() {
         syncRemotePanel();
         updateRemoteBtn();
       };
-      ex.onDownloadRequest = (cid, path, targetDir) => {
+      ex.onDownloadRequest = (cid, paths, targetDir) => {
         const found = tabs.panesByConn(cid)[0];
-        if (found) void downloadFile(found.pane, path, targetDir || undefined);
+        if (found) void downloadBatch(found.pane, paths, targetDir || undefined);
         else toast("该连接已无终端，无法下载", true); // 不再静默：用户能知道为什么没反应
       };
       ex.onUploadHere = (localPaths, remoteDir) => {

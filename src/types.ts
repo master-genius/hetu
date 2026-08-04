@@ -165,6 +165,7 @@ export interface LocalEntry {
   name: string;
   path: string;
   isDir: boolean;
+  isLink: boolean;
   size: number;
   mtime: number | null;
 }

@@ -21,6 +21,7 @@ pub struct LocalEntry {
     pub name: String,
     pub path: String,
     pub is_dir: bool,
+    pub is_link: bool,
     pub size: u64,
     pub mtime: Option<u64>,
 }
@@ -30,16 +31,32 @@ pub fn list_dir(dir: &str) -> Result<Vec<LocalEntry>> {
     let mut entries = Vec::new();
     for entry in std::fs::read_dir(dir)? {
         let Ok(entry) = entry else { continue };
-        let Ok(meta) = entry.metadata() else { continue };
+        let Ok(ft) = entry.file_type() else { continue };
+        // 符号链接：跟随 metadata 确定真实类型（指向目录的链接 is_dir=true，双击可进入）；
+        // 悬空链接保留为 is_link=true 的条目而非静默消失。
+        let (is_link, meta) = if ft.is_symlink() {
+            (true, std::fs::metadata(entry.path()).ok())
+        } else {
+            (false, entry.metadata().ok())
+        };
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let path = entry.path().to_string_lossy().into_owned();
+        let Some(meta) = meta else {
+            if is_link {
+                entries.push(LocalEntry { name, path, is_dir: false, is_link: true, size: 0, mtime: None });
+            }
+            continue;
+        };
         let mtime = meta
             .modified()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs());
         entries.push(LocalEntry {
-            name: entry.file_name().to_string_lossy().into_owned(),
-            path: entry.path().to_string_lossy().into_owned(),
+            name,
+            path,
             is_dir: meta.is_dir(),
+            is_link,
             size: meta.len(),
             mtime,
         });

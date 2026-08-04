@@ -857,6 +857,11 @@ export class Pane {
       const cwd = await api.remoteCwd(this.connId, this.shellPid).catch(() => null);
       if (cwd) return { dir: cwd, guessed: false };
     }
+    // homeDir 由 open() 异步预取，失败时（如服务器 SFTP 子系统不可用）不会自动重试；
+    // 现场补取一次，避免该连接上上传/下载永远报「尚未获取远端目录」
+    if (!this.homeDir) {
+      this.homeDir = await api.remoteHome(this.connId).catch(() => null);
+    }
     return { dir: this.homeDir, guessed: true };
   }
 
