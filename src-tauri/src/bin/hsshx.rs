@@ -30,6 +30,11 @@ async fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
+    if args.len() >= 2 && (args[1] == "--doc" || args[1] == "--docs") {
+        print_doc();
+        return ExitCode::SUCCESS;
+    }
+
     if args.len() < 2 {
         usage();
         return ExitCode::from(2);
@@ -410,7 +415,90 @@ fn usage() {
     eprintln!("  hsshx <连接项> -f <脚本文件>       从文件读取命令执行");
     eprintln!("  hsshx <连接项> | command           从 stdin 管道读取命令执行");
     eprintln!("  hsshx -l                           列出已保存的连接项");
-    eprintln!("  hsshx -h                           显示此帮助");
+    eprintln!("  hsshx -h                           显示简要帮助");
+    eprintln!("  hsshx --doc                        显示完整文档（含示例，适合人与 AI 参考）");
+}
+
+/// 完整文档：结构化说明 + 基本/进阶示例。输出到 stdout，可直接管道给
+/// 人阅读或 AI 参考（如 `hsshx --doc | llm`）。
+fn print_doc() {
+    println!("hsshx — HetuShell SSH 命令行工具（SSH exec CLI）");
+    println!("====================================================");
+    println!();
+    println!("概述");
+    println!("----");
+    println!("复用 HetuShell 的 SSH 栈（russh），按连接项（profiles.json）执行远程命令。");
+    println!("与交互式终端不同，hsshx 面向脚本化/自动化场景：非交互执行、纯净输出、");
+    println!("退出码跟随远程命令。认证信息（私钥/口令）来自已保存的连接项，");
+    println!("命令行不出现任何凭据。");
+    println!();
+    println!("三种运行模式");
+    println!("------------");
+    println!("1. exec 模式（默认）: hsshx <连接项> <命令...>");
+    println!("   非交互执行命令，stdout/stderr 分离输出，退出码跟随远程命令（0-255）。");
+    println!();
+    println!("2. file 模式: hsshx <连接项> -f <脚本文件>");
+    println!("   从本地文件读取命令内容后按 exec 模式执行（适合多行脚本）。");
+    println!();
+    println!("3. 交互模式: hsshx <连接项>");
+    println!("   请求远程 PTY + shell，完整交互能力（sudo 密码、apt 确认、vi 等）。");
+    println!("   退出即返回本地 shell。");
+    println!();
+    println!("命令来源优先级");
+    println!("--------------");
+    println!("-f 文件 > 位置参数 > stdin 管道 > 交互模式");
+    println!();
+    println!("参数说明");
+    println!("--------");
+    println!("  <连接项>             profiles.json 中的连接项名称（hsshx -l 查看）");
+    println!("  <命令...>            要执行的命令（多参数自动空格连接）");
+    println!("  -f, --file <文件>    从文件读取命令内容");
+    println!("  -l, --list           列出已保存的连接项");
+    println!("  -h, --help           显示简要帮助");
+    println!("  --doc                显示完整文档（本内容）");
+    println!();
+    println!("stdin 管道输入");
+    println!("--------------");
+    println!("exec 模式下，stdin 管道数据自动转发到远程命令（Unix 管道哲学），");
+    println!("读完发送 EOF。典型用法：");
+    println!();
+    println!("  echo \"data\" | hsshx server \"cat\"");
+    println!("  echo \"password\" | hsshx server \"sudo -S apt update\"");
+    println!("  yes | hsshx server \"apt install pkg\"");
+    println!();
+    println!("注意：sudo/apt 等交互命令在 exec 模式（无 PTY）下无法直接交互，");
+    println!("应使用其非交互参数（sudo -S、apt -y、yes |），或改用交互模式。");
+    println!();
+    println!("退出码");
+    println!("------");
+    println!("  0     命令成功执行（远程退出码为 0）");
+    println!("  1-255 跟随远程命令退出码");
+    println!("  2     参数错误 / 连接项未找到");
+    println!("  255   SSH 连接或 channel 建立失败");
+    println!();
+    println!("示例");
+    println!("----");
+    println!("  # 基本");
+    println!("  hsshx web \"uptime\"");
+    println!("  hsshx web \"df -h && free -m\"");
+    println!("  hsshx -l");
+    println!();
+    println!("  # 文件脚本");
+    println!("  hsshx web -f deploy.sh");
+    println!();
+    println!("  # 管道（sudo/自动化）");
+    println!("  echo \"password\" | hsshx web \"sudo -S systemctl restart nginx\"");
+    println!("  yes | hsshx web \"apt install -y git\"");
+    println!("  curl -s https://example.com/install.sh | hsshx web \"bash\"");
+    println!();
+    println!("  # 交互");
+    println!("  hsshx web");
+    println!();
+    println!("安全提示");
+    println!("--------");
+    println!("- 密码等敏感信息通过 stdin 管道传入（sudo -S），切勿作为命令行参数");
+    println!("  （ps 可被其他用户看到）。");
+    println!("- 连接项密码/口令不会持久化，仅支持密钥认证（keyData/keyPath）。");
 }
 
 fn list_profiles() -> ExitCode {
