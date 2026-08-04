@@ -149,11 +149,13 @@ async fn main() -> ExitCode {
 }
 
 /// exec 模式：非交互执行命令，纯净输出，退出码跟随远程命令。
+/// stdin 管道数据自动转发到远端 channel（Unix 管道哲学），读完发 EOF；
+/// 终端 stdin 不转发，直接发 EOF 防止读 stdin 的命令挂死。
 async fn exec_mode(
     handle: &russh::client::Handle<hetushell_lib::ssh::conn::ClientHandler>,
     command: String,
 ) -> u8 {
-    let mut channel = match handle.channel_open_session().await {
+    let channel = match handle.channel_open_session().await {
         Ok(c) => c,
         Err(e) => {
             eprintln!("hsshx: {e}");
@@ -171,11 +173,47 @@ async fn exec_mode(
         return 255;
     }
 
+    // stdin 管道转发：管道数据写入 channel，读完发 EOF。
+    // 终端 stdin 不转发（exec 模式非交互），直接发 EOF 防止读 stdin 的命令挂死。
+    let (mut read_half, write_half) = channel.split();
+    let (write_tx, mut write_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+
+    if !std::io::stdin().is_terminal() {
+        tokio::task::spawn_blocking(move || {
+            let mut stdin = std::io::stdin().lock();
+            let mut buf = [0u8; 4096];
+            loop {
+                match stdin.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if write_tx.send(buf[..n].to_vec()).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            // write_tx 在此 drop → write_rx 收到 None → 写 task 发 EOF
+        });
+    } else {
+        drop(write_tx);
+    }
+
+    // 写 task：stdin 数据 → channel，stdin 读完 → EOF
+    tokio::spawn(async move {
+        while let Some(data) = write_rx.recv().await {
+            if write_half.data_bytes(data).await.is_err() {
+                break;
+            }
+        }
+        let _ = write_half.eof().await;
+    });
+
     let mut stdout = std::io::stdout().lock();
     let mut stderr = std::io::stderr().lock();
     let mut code: u8 = 0;
 
-    while let Some(msg) = channel.wait().await {
+    while let Some(msg) = read_half.wait().await {
         match msg {
             ChannelMsg::Data { ref data } => {
                 let _ = stdout.write_all(data);
