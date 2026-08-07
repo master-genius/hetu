@@ -125,7 +125,7 @@ async fn main() -> ExitCode {
         port: profile.port,
         user: profile.user.clone(),
         auth: profile.auth.clone(),
-        password: None,
+        password: profile.password.clone(),
         key_path: profile.key_path.clone(),
         key_data: profile.key_data.clone(),
         passphrase: None,

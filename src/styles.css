@@ -1174,13 +1174,20 @@ body {
   gap: 20px;
 }
 
-.profile-list {
-  /* 不随右侧表单在 grid 中拉伸到等高：连接项少时贴合内容高度，避免底部大片带边框空白；
-     连接项多时仍在 max-height 处滚动。 */
-  align-self: start;
+.profile-panel {
+  /* 左侧列：flex 纵向布局 = 滚动列表 + 底部固定「新建」按钮（不随列表滚动）。
+     与右侧表单等高（默认 stretch），列表在剩余空间内滚动。 */
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 520px;
   border-right: 1px solid color-mix(in srgb, var(--term-fg) 10%, transparent);
   padding-right: 16px;
-  max-height: 480px;
+}
+
+.profile-list {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -1238,6 +1245,47 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+/* 认证 Tab 切换 */
+.auth-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
+  margin-bottom: 12px;
+}
+
+.auth-tab {
+  padding: 6px 18px;
+  font-size: 13px;
+  border: none;
+  background: none;
+  color: var(--term-fg);
+  opacity: 0.5;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: opacity 0.15s, border-color 0.15s;
+}
+
+.auth-tab:hover {
+  opacity: 0.8;
+}
+
+.auth-tab.active {
+  opacity: 1;
+  border-bottom-color: var(--accent);
+}
+
+/* 左侧列底部固定「新建」按钮：位于滚动容器之外，不随列表滚动 */
+.new-conn-btn {
+  flex: 0 0 auto;
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  text-align: center;
 }
 
 .btn.tiny {

@@ -88,6 +88,36 @@ export type ConnPrefill =
   | { kind: "profile"; profile: Profile }
   | { kind: "adhoc"; host: string; user?: string; port?: number };
 
+/** 新建按钮的三选一确认：保存 / 保留（不保存也不清空）/ 取消。 */
+function saveConfirmDialog(): Promise<"save" | "discard" | "cancel"> {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = `
+      <div class="modal small confirm">
+        <h3>表单已修改</h3>
+        <p class="modal-msg">当前表单尚未保存。保存则存入连接项并开始新建；保留则维持当前输入不清空。</p>
+        <div class="modal-actions center">
+          <button class="btn primary" data-act="save">保存</button>
+          <button class="btn" data-act="discard">保留</button>
+          <button class="btn" data-act="cancel">取消</button>
+        </div>
+      </div>`;
+    const done = (v: "save" | "discard" | "cancel") => {
+      overlay.remove();
+      resolve(v);
+    };
+    overlay.querySelector('[data-act="save"]')!.addEventListener("click", () => done("save"));
+    overlay.querySelector('[data-act="discard"]')!.addEventListener("click", () => done("discard"));
+    overlay.querySelector('[data-act="cancel"]')!.addEventListener("click", () => done("cancel"));
+    overlay.addEventListener("mousedown", (e) => {
+      if (e.target === overlay) done("cancel");
+    });
+    document.body.appendChild(overlay);
+    (overlay.querySelector('[data-act="save"]') as HTMLElement).focus();
+  });
+}
+
 export function showConnectDialog(
   onConnect: (params: ConnParams, profileId?: string) => Promise<void>,
   onLocal?: () => Promise<void>,
@@ -99,9 +129,12 @@ export function showConnectDialog(
     <div class="modal connect">
       <h3>新建连接</h3>
       <div class="connect-layout">
-        <div class="profile-list">
-          <div class="profile-list-head">连接项（含 ~/.ssh/config 导入）</div>
-          <div class="profile-items"></div>
+        <div class="profile-panel">
+          <div class="profile-list">
+            <div class="profile-list-head">连接项（含 ~/.ssh/config 导入）</div>
+            <div class="profile-items"></div>
+          </div>
+          <button type="button" class="btn new-conn-btn">+ 新建</button>
         </div>
         <form class="connect-form">
           <label>名称 <input name="name" placeholder="my-server" required></label>
@@ -110,7 +143,10 @@ export function showConnectDialog(
             <label class="port">端口 <input name="port" type="number" value="22" min="1" max="65535"></label>
           </div>
           <label>用户名 <input name="user" placeholder="root" required></label>
-          <label>认证方式 <span class="cs-mount" data-cs="auth"></span></label>
+          <div class="auth-tabs">
+            <button type="button" class="auth-tab active" data-tab="key">密钥</button>
+            <button type="button" class="auth-tab" data-tab="password">密码</button>
+          </div>
           <div class="auth-key">
             <input name="keyPath" type="hidden">
             <label>
@@ -125,6 +161,7 @@ export function showConnectDialog(
           </div>
           <div class="auth-pass" style="display:none">
             <label>密码 <input name="password" type="password" autocomplete="off"></label>
+            <p class="hint">密码随连接项保存（0600）；密钥认证失败时自动回退使用密码。</p>
           </div>
           <details class="advanced">
             <summary>高级选项</summary>
@@ -140,7 +177,7 @@ export function showConnectDialog(
             <button type="button" class="btn" data-act="cancel">取消</button>
             <button type="submit" class="btn primary">连接</button>
           </div>
-          <p class="hint">密码与口令不会被保存，仅用于本次连接。</p>
+          <p class="hint">口令不保存，仅用于本次连接。</p>
         </form>
       </div>
     </div>`;
@@ -148,47 +185,71 @@ export function showConnectDialog(
 
   const form = overlay.querySelector(".connect-form") as HTMLFormElement;
   const field = (n: string) => form.elements.namedItem(n) as HTMLInputElement;
-  // 认证方式：自定义下拉（值 authSel.getValue()），改动视为手动编辑
+
+  // 认证 Tab：密钥 / 密码并列，两者值独立保留，切换不丢失。
+  // activeAuth 决定连接时先尝试哪种方式（主方式），失败后后端自动回退。
+  let activeAuth: "key" | "password" = "key";
   const syncAuthUI = () => {
-    const v = authSel.getValue();
-    (overlay.querySelector(".auth-key") as HTMLElement).style.display = v === "key" ? "" : "none";
+    overlay.querySelectorAll(".auth-tab").forEach((t) => {
+      t.classList.toggle("active", (t as HTMLElement).dataset.tab === activeAuth);
+    });
+    (overlay.querySelector(".auth-key") as HTMLElement).style.display =
+      activeAuth === "key" ? "" : "none";
     (overlay.querySelector(".auth-pass") as HTMLElement).style.display =
-      v === "password" ? "" : "none";
+      activeAuth === "password" ? "" : "none";
   };
-  const authSel = customSelect(
-    [
-      { value: "key", label: "私钥（直接证书验证）" },
-      { value: "password", label: "密码" },
-    ],
-    "key",
-    () => {
+  overlay.querySelectorAll(".auth-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      activeAuth = (tab as HTMLElement).dataset.tab as "key" | "password";
       connectProfileId = null;
+      formDirty = true;
       syncAuthUI();
-    },
-  );
-  (overlay.querySelector('.cs-mount[data-cs="auth"]') as HTMLElement).appendChild(authSel.el);
+    });
+  });
 
   let selectedProfileId: string | null = null;
   // 连接来源的连接项 id（供会话恢复）：仅当表单未被用户改动、直接来自某连接项时有效。
   // 一旦手动编辑任一字段即清空 → 视为临时连接，不参与会话恢复。
   let connectProfileId: string | null = null;
-  form.addEventListener("input", () => (connectProfileId = null));
-  form.addEventListener("change", () => (connectProfileId = null));
+  // 表单是否被用户改动过（相对 fillForm / resetForm 后的干净状态）
+  let formDirty = false;
+  form.addEventListener("input", () => {
+    connectProfileId = null;
+    formDirty = true;
+  });
+  form.addEventListener("change", () => {
+    connectProfileId = null;
+    formDirty = true;
+  });
 
   const fillForm = (p: Profile) => {
     selectedProfileId = p.id;
     connectProfileId = p.id;
+    formDirty = false;
     field("name").value = p.name;
     field("host").value = p.host;
     field("port").value = String(p.port);
     field("user").value = p.user;
-    authSel.setValue(p.auth);
+    activeAuth = (p.auth as "key" | "password") || "key";
     field("keyPath").value = p.keyPath ?? "";
     field("keyData").value = p.keyData ?? "";
+    field("password").value = p.password ?? "";
+    field("passphrase").value = "";
     field("note").value = p.note ?? "";
     field("keepalive").value = p.keepalive != null ? String(p.keepalive) : "";
     field("timeout").value = p.timeout != null ? String(p.timeout) : "";
     syncAuthUI();
+  };
+
+  const resetForm = () => {
+    selectedProfileId = null;
+    connectProfileId = null;
+    formDirty = false;
+    form.reset();
+    field("port").value = "22";
+    activeAuth = "key";
+    syncAuthUI();
+    itemsEl.querySelectorAll(".profile-item").forEach((i) => i.classList.remove("selected"));
   };
 
   const itemsEl = overlay.querySelector(".profile-items") as HTMLElement;
@@ -232,20 +293,48 @@ export function showConnectDialog(
   };
   void api.profilesList().then(renderProfiles).catch(() => renderProfiles([]));
 
+  // 新建按钮：解除当前连接项绑定，回到自由编辑状态。
+  // - 表单有未保存数据：保存则入库后清空开始新建；保留则数据不动仅解除绑定；取消则无操作。
+  // - 表单干净（未修改）：直接清空为空白表单（数据无损失）。
+  overlay.querySelector(".new-conn-btn")!.addEventListener("click", async () => {
+    if (formDirty && field("host").value.trim() && field("user").value.trim()) {
+      const choice = await saveConfirmDialog();
+      if (choice === "cancel") return;
+      if (choice === "save") {
+        const ok = await saveProfile();
+        if (!ok) return; // 保存失败：保留用户输入，不重置
+        resetForm(); // 已入库，清空开始新建
+        return;
+      }
+      // 保留：不清空数据，仅解除与连接项的绑定（连接不再参与会话恢复）
+      selectedProfileId = null;
+      connectProfileId = null;
+      itemsEl.querySelectorAll(".profile-item").forEach((i) => i.classList.remove("selected"));
+      return;
+    }
+    resetForm();
+  });
+
   // 预填（hssh 无密码时复用）：填好字段并聚焦密码/口令框，让用户直接输入后回车连接。
   if (prefill?.kind === "profile") {
     fillForm(prefill.profile);
-    requestAnimationFrame(() =>
-      (prefill.profile.auth === "password" ? field("password") : field("passphrase"))?.focus(),
-    );
+    // 若 profile 未存密码且主方式是密码 → 聚焦密码；否则若密钥 tab → 聚焦口令
+    requestAnimationFrame(() => {
+      if (prefill.profile.auth === "password" && !prefill.profile.password) {
+        field("password").focus();
+      } else if (prefill.profile.auth === "key" && !(prefill.profile.keyData || prefill.profile.keyPath)) {
+        field("keyData").focus();
+      }
+    });
   } else if (prefill?.kind === "adhoc") {
     field("name").value = prefill.host;
     field("host").value = prefill.host;
     if (prefill.user) field("user").value = prefill.user;
     if (prefill.port) field("port").value = String(prefill.port);
-    authSel.setValue("password");
+    activeAuth = "password";
     syncAuthUI();
     connectProfileId = null;
+    formDirty = true;
     requestAnimationFrame(() => field("password").focus());
   }
 
@@ -282,7 +371,7 @@ export function showConnectDialog(
       host,
       port: parseInt(field("port").value, 10) || 22,
       user,
-      auth: authSel.getValue() as "key" | "password",
+      auth: activeAuth,
       keyPath: field("keyPath").value.trim() || undefined,
       keyData: field("keyData").value.trim() || undefined,
       passphrase: field("passphrase").value || undefined,
@@ -292,11 +381,12 @@ export function showConnectDialog(
     };
   };
 
-  overlay.querySelector(".save-profile")!.addEventListener("click", async () => {
+  // 保存当前表单为连接项；成功返回 true。供「保存连接项」按钮与「新建」按钮共用。
+  const saveProfile = async (): Promise<boolean> => {
     const p = paramsFromForm();
     if (!p) {
       toast("请先填写主机与用户名", true);
-      return;
+      return false;
     }
     const profile: Profile = {
       id: selectedProfileId?.startsWith("sshcfg:") || !selectedProfileId
@@ -309,18 +399,27 @@ export function showConnectDialog(
       auth: p.auth,
       keyPath: p.keyPath ?? null,
       keyData: p.keyData ?? null,
+      password: p.password ?? null,
       source: "manual",
       note: field("note").value.trim() || null,
       keepalive: p.keepalive ?? null,
       timeout: p.timeout ?? null,
     };
-    await api.profileSave(profile);
+    try {
+      await api.profileSave(profile);
+    } catch (err) {
+      toast(`保存连接项失败: ${err}`, true);
+      return false;
+    }
     // 保存后表单即代表该连接项，随后「连接」可参与会话恢复
     selectedProfileId = profile.id;
     connectProfileId = profile.id;
+    formDirty = false;
     toast("连接项已保存");
     void api.profilesList().then(renderProfiles);
-  });
+    return true;
+  };
+  overlay.querySelector(".save-profile")!.addEventListener("click", () => void saveProfile());
 
   const close = () => overlay.remove();
   overlay.querySelector('[data-act="cancel"]')!.addEventListener("click", close);
@@ -332,12 +431,8 @@ export function showConnectDialog(
     e.preventDefault();
     const p = paramsFromForm();
     if (!p) return;
-    if (p.auth === "key" && !p.keyData && !p.keyPath) {
-      toast("私钥认证需要粘贴私钥内容或从文件导入", true);
-      return;
-    }
-    if (p.auth === "password" && !p.password) {
-      toast("请输入密码", true);
+    if (!p.keyData && !p.keyPath && !p.password) {
+      toast("请填写密钥或密码（至少一项）", true);
       return;
     }
     const submitBtn = form.querySelector('[type="submit"]') as HTMLButtonElement;

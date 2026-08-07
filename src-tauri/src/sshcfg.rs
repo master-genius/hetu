@@ -144,6 +144,7 @@ pub fn import() -> Vec<Profile> {
                 },
                 key_path,
                 key_data: None,
+                password: None,
                 source: "ssh_config".into(),
                 note: None,
                 keepalive: None,

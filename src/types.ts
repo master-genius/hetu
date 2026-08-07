@@ -10,6 +10,8 @@ export interface Profile {
   keyPath?: string | null;
   /** 私钥内容（PEM），自存于 profiles.json，不依赖外部文件 */
   keyData?: string | null;
+  /** 密码（持久化，0600 保护；密钥认证失败时自动回退） */
+  password?: string | null;
   source: "manual" | "ssh_config";
   /** 备注/标记，便于查找与展示 */
   note?: string | null;

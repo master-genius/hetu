@@ -1,8 +1,8 @@
 //! SSH 连接建立、认证与断线重连。
 //!
-//! 关键设计：认证时只提交用户明确指定的**单一**凭据（一把私钥或一个密码），
-//! 不像 openssh 那样把 agent 里所有密钥挨个试一遍——从根本上避免触发服务端
-//! MaxAuthTries 重试次数限制。
+//! 认证策略：先尝试用户指定的主方式（密钥或密码），失败后自动回退到另一种
+//! （若提供了对应凭据）。最多尝试 2 次，不会像 openssh 那样把 agent 里所有
+//! 密钥挨个试——从根本上避免触发服务端 MaxAuthTries 限制。
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -156,6 +156,29 @@ fn ensure_auth(result: AuthResult) -> Result<()> {
     }
 }
 
+/// 尝试密钥认证。返回 Some(()) 表示成功，None 表示失败或无可用密钥。
+/// 失败时不返回错误（调用方负责回退到密码或报告最终错误），以免密钥解码/加载
+/// 等问题（如密钥格式错误、passphrase 缺失）被误报为"认证失败"。
+async fn try_key_auth(
+    handle: &mut client::Handle<ClientHandler>,
+    params: &ConnParams,
+) -> Option<()> {
+    let passphrase = params.passphrase.as_deref().filter(|s| !s.is_empty());
+    let key = match params.key_data.as_deref().filter(|s| !s.trim().is_empty()) {
+        Some(pem) => russh::keys::decode_secret_key(pem, passphrase).ok()?,
+        None => {
+            let path = params.key_path.as_deref()?;
+            russh::keys::load_secret_key(expand_tilde(path), passphrase).ok()?
+        }
+    };
+    let hash = handle.best_supported_rsa_hash().await.ok()?.flatten();
+    let auth_key = PrivateKeyWithHashAlg::new(Arc::new(key), hash);
+    match handle.authenticate_publickey(&params.user, auth_key).await.ok()? {
+        AuthResult::Success => Some(()),
+        AuthResult::Failure { .. } => None,
+    }
+}
+
 fn expand_tilde(path: &str) -> String {
     if let Some(rest) = path.strip_prefix("~/") {
         if let Some(home) = dirs::home_dir() {
@@ -165,7 +188,7 @@ fn expand_tilde(path: &str) -> String {
     path.to_string()
 }
 
-/// 建立连接并按指定方式认证。只尝试一次、只用一份凭据。
+/// 建立连接并按指定方式认证（主方式失败自动回退）。
 pub async fn establish(params: &ConnParams) -> Result<client::Handle<ClientHandler>> {
     // 超时覆盖「连接 + 认证」全过程：仅包 connect 会让服务器在认证阶段卡住时无限挂起，
     // 进而卡死重连循环。默认 20s。
@@ -197,29 +220,41 @@ async fn establish_inner(params: &ConnParams) -> Result<client::Handle<ClientHan
 
     match params.auth.as_str() {
         "password" => {
-            let pw = params
-                .password
-                .as_deref()
-                .ok_or_else(|| Error::msg("未提供密码"))?;
-            ensure_auth(handle.authenticate_password(&params.user, pw).await?)?;
+            // 主方法：密码；备选：密钥
+            match params.password.as_deref() {
+                Some(pw) => match handle.authenticate_password(&params.user, pw).await? {
+                    AuthResult::Success => {}
+                    AuthResult::Failure { .. } => {
+                        // 密码失败 → 尝试密钥回退（若提供了私钥）
+                        try_key_auth(&mut handle, params)
+                            .await
+                            .ok_or_else(|| {
+                                Error::msg("认证失败：请检查用户名、密码或私钥是否正确")
+                            })?;
+                    }
+                },
+                // 未提供密码 → 直接尝试密钥回退
+                None => {
+                    try_key_auth(&mut handle, params)
+                        .await
+                        .ok_or_else(|| {
+                            Error::msg("认证失败：请检查用户名、密码或私钥是否正确")
+                        })?;
+                }
+            }
         }
         _ => {
-            let passphrase = params.passphrase.as_deref().filter(|s| !s.is_empty());
-            // 优先用自存的密钥内容（不依赖外部文件）；否则回退到路径（如 ssh_config 导入项）
-            let key = match params.key_data.as_deref().filter(|s| !s.trim().is_empty()) {
-                Some(pem) => russh::keys::decode_secret_key(pem, passphrase)?,
+            // 主方法：密钥；备选：密码
+            match try_key_auth(&mut handle, params).await {
+                Some(()) => {}
                 None => {
-                    let path = params
-                        .key_path
-                        .as_deref()
-                        .ok_or_else(|| Error::msg("未提供私钥内容或路径"))?;
-                    russh::keys::load_secret_key(expand_tilde(path), passphrase)?
+                    // 密钥失败或无密钥 → 尝试密码回退
+                    let pw = params.password.as_deref().ok_or_else(|| {
+                        Error::msg("认证失败：请检查用户名、密码或私钥是否正确")
+                    })?;
+                    ensure_auth(handle.authenticate_password(&params.user, pw).await?)?;
                 }
-            };
-            // RSA 密钥协商服务端支持的最优签名哈希（rsa-sha2-512/256）
-            let hash = handle.best_supported_rsa_hash().await?.flatten();
-            let auth_key = PrivateKeyWithHashAlg::new(Arc::new(key), hash);
-            ensure_auth(handle.authenticate_publickey(&params.user, auth_key).await?)?;
+            }
         }
     }
     Ok(handle)

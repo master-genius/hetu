@@ -128,13 +128,15 @@ async function bootstrap() {
     await openLocalTab();
   };
 
-  /** 已保存连接项 → 连接参数（与手动连接的 paramsFromForm 等价；密码/口令从不入库，故不含）。 */
+  /** 已保存连接项 → 连接参数。密码现已持久化（0600），随连接项一起传入；
+   *  口令不入库，仅连接对话框现场输入。 */
   const profileToParams = (p: Profile): ConnParams => ({
     name: p.name,
     host: p.host,
     port: p.port,
     user: p.user,
     auth: p.auth,
+    password: p.password ?? undefined,
     keyPath: p.keyPath ?? undefined,
     keyData: p.keyData ?? undefined,
     keepalive: p.keepalive ?? undefined,
@@ -235,7 +237,7 @@ async function bootstrap() {
           void api.paneInput(pane.id, b64encode("\n")).catch(() => {});
           return;
         }
-        if (p.auth === "password") {
+        if (p.auth === "password" ? !p.password : !(p.keyData || p.keyPath)) {
           showConnectDialog(onConnect, onLocal, { kind: "profile", profile: p });
         } else {
           await onConnect(profileToParams(p), p.id);
@@ -1255,8 +1257,8 @@ async function bootstrap() {
     return null;
   };
 
-  /** 按 name 查找已保存的连接项，密钥认证则自动连接并记录到 connMeta。
-   *  返回 connId 与是否为本次新建。密码认证/未找到时返回 null 并 toast 提示。 */
+  /** 按 name 查找已保存的连接项，有可用凭据（密钥或已存密码）则自动连接。
+   *  无凭据或未找到时返回 null 并 toast 提示。 */
   const ensureRemoteConn = async (name: string): Promise<{ connId: string; created: boolean } | null> => {
     const existing = findConnByName(name);
     if (existing) return { connId: existing, created: false };
@@ -1266,8 +1268,9 @@ async function bootstrap() {
       toast(`hfile：未找到连接项「${name}」`, true);
       return null;
     }
-    if (p.auth !== "key" || !(p.keyData || p.keyPath)) {
-      toast(`hfile：连接「${name}」需密码认证，请先通过 hssh 连接`, true);
+    const hasKey = !!(p.keyData || p.keyPath);
+    if (!hasKey && !p.password) {
+      toast(`hfile：连接「${name}」缺少凭据，请先通过 hssh 连接`, true);
       return null;
     }
     try {
@@ -1803,7 +1806,7 @@ async function bootstrap() {
       const p = profiles.find((pr) => pr.id === leaf.profileId);
       if (!p) continue;
       const hasKey = !!(p.keyData || p.keyPath);
-      if (p.auth !== "key" || !hasKey) continue;
+      if (!hasKey && !p.password) continue;
 
       // 已在同一连接上（外层 connectAndOpenTab 已为此 pane 建立连接）→ 无需切换
       const info = connMeta.get(pane.connId);
@@ -1812,7 +1815,8 @@ async function bootstrap() {
       // 建立新 SSH 连接并切换（最多重试 3 次，全部失败则该 pane 回退本地终端）
       const connParams = {
         name: p.name, host: p.host, port: p.port, user: p.user,
-        auth: p.auth, keyPath: p.keyPath ?? undefined, keyData: p.keyData ?? undefined,
+        auth: p.auth, password: p.password ?? undefined,
+        keyPath: p.keyPath ?? undefined, keyData: p.keyData ?? undefined,
         keepalive: p.keepalive ?? undefined, timeout: p.timeout ?? undefined,
       };
       let connId: string | null = null;
@@ -1881,7 +1885,7 @@ async function bootstrap() {
             try {
               const hProfiles = await api.profilesList().catch(() => [] as Profile[]);
               const hp = hProfiles.find((x) => x.id === st.hsshProfile);
-              if (!hp || hp.auth !== "key" || !(hp.keyData || hp.keyPath)) return;
+              if (!hp || (!(hp.keyData || hp.keyPath) && !hp.password)) return;
               const pane = tab.layout.panes()[0];
               if (!pane || pane.disposed || !pane.isLocal) return;
               // 等本地 shell 就绪
@@ -1912,7 +1916,7 @@ async function bootstrap() {
       const p = profiles.find((pr) => pr.id === st.profileId);
       if (!p) return; // 连接项已删除
       const hasKey = !!(p.keyData || p.keyPath);
-      if (p.auth !== "key" || !hasKey) {
+      if (!hasKey && !p.password) {
         toast(`「${p.name}」未保存凭据，跳过自动连接`);
         return;
       }
@@ -1924,6 +1928,7 @@ async function bootstrap() {
             port: p.port,
             user: p.user,
             auth: p.auth,
+            password: p.password ?? undefined,
             keyPath: p.keyPath ?? undefined,
             keyData: p.keyData ?? undefined,
             keepalive: p.keepalive ?? undefined,

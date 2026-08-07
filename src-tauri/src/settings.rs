@@ -17,7 +17,8 @@ pub struct ThemeDef {
     pub colors: serde_json::Map<String, serde_json::Value>,
 }
 
-/// 连接配置。密码永不持久化，仅在连接时由前端传入。
+/// 连接配置。密钥与密码为并列属性（可同时保存，0600 保护）；
+/// 连接时按 auth 指定的主方式先尝试，失败后自动回退另一种凭据。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Profile {
@@ -27,7 +28,7 @@ pub struct Profile {
     #[serde(default = "default_port")]
     pub port: u16,
     pub user: String,
-    /// "key" | "password"
+    /// "key" | "password"（主认证方式；连接时先尝试此方式，失败后回退另一种）
     #[serde(default = "default_auth")]
     pub auth: String,
     #[serde(default)]
@@ -35,6 +36,9 @@ pub struct Profile {
     /// 私钥内容（PEM 文本），自存于 profiles.json，不依赖外部文件
     #[serde(default)]
     pub key_data: Option<String>,
+    /// 密码（持久化，0600 保护；密钥认证失败时自动回退使用）
+    #[serde(default)]
+    pub password: Option<String>,
     /// "manual" | "ssh_config"
     #[serde(default = "default_source")]
     pub source: String,
