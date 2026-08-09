@@ -74,6 +74,8 @@ export class TabManager {
   onNewTabRequest: (() => void) | null = null;
   /** pane 创建后由 main.ts 挂载事件回调 */
   onPaneCreated: ((pane: Pane, tab: Tab) => void) | null = null;
+  /** 分屏关闭后焦点程序性转移给新活动 pane（无 mousedown，onFocus 不会触发）→ main.ts 同步标签标题 */
+  onActivePaneChange: ((tab: Tab, pane: Pane) => void) | null = null;
   onLayoutChange: (() => void) | null = null;
 
   constructor(tabBar: HTMLElement, content: HTMLElement) {
@@ -482,7 +484,10 @@ export class TabManager {
       tab.activePaneId = tab.layout.panes()[0]?.id ?? "";
     }
     this.gcConnections([oldConn]);
-    this.activePane(tab)?.focus();
+    const next = this.activePane(tab);
+    next?.focus();
+    // 焦点程序性转移（无 mousedown）→ 通知 main.ts 同步标签标题到新活动 pane
+    if (next) this.onActivePaneChange?.(tab, next);
     this.onLayoutChange?.(); // 分屏结构变化 → 面板同步 + 会话快照
   }
 

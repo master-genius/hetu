@@ -450,6 +450,38 @@ async function bootstrap() {
 
   // ---------- Pane 事件装配 ----------
 
+  /**
+   * 同步标签标题到指定 pane 的当前状态：
+   * - 单 pane：更新 tab 级 title/connId + setLabel（本地随后由轮询接管为 `目录:进程`）
+   * - 多 pane：updateActivePaneTitle（对全等标题短路，无冗余 DOM 操作）
+   * 供程序性焦点转移（closePane）与连接就地切换（远程 exit 回退本地）补齐标题——
+   * 这两条路径没有 mousedown，onFocus 不会触发。
+   */
+  const syncPaneTitle = (tab: Tab, pane: Pane) => {
+    const single = tab.layout.panes().length === 1;
+    if (pane.isLocal) {
+      if (single) {
+        tab.title = "本地终端";
+        tab.connId = "local";
+        tabs.setLabel(tab, "本地终端");
+      }
+      void api.localTabInfo(pane.id).then((info) => {
+        if (info) tabs.updateActivePaneTitle(tab, `${tabs.dirLabel(info.cwd)}:${info.process}`);
+      }).catch(() => {});
+    } else {
+      const info = connMeta.get(pane.connId);
+      if (info) {
+        if (single) {
+          tab.title = info.name;
+          tab.connId = pane.connId;
+          tabs.setLabel(tab, info.name);
+        } else {
+          tabs.updateActivePaneTitle(tab, info.name);
+        }
+      }
+    }
+  };
+
   tabs.onPaneCreated = (pane, tab) => {
     pane.onFocus = () => {
       const prevId = tab.activePaneId;
@@ -501,7 +533,10 @@ async function bootstrap() {
         }).catch(() => {});
       } else if (!pane.isLocal) {
         // 远程 shell 正常退出（用户 exit）→ 退回本地终端，不关闭 pane。
-        pane.switchConnection("local", true).catch(() => {});
+        // 后台 tab 退出也需更新标签栏可见标题；单 pane 由轮询接管为 `目录:进程`
+        pane.switchConnection("local", true).then(() => {
+          syncPaneTitle(tab, pane);
+        }).catch(() => {});
       } else {
         // 本地终端退出 → 收起该分屏
         void tabs.closePane(tab, pane);
@@ -1423,6 +1458,13 @@ async function bootstrap() {
   tabs.onLayoutChange = () => {
     refreshPanels();
     scheduleSaveSession();
+  };
+
+  // 分屏关闭后焦点程序性转移（无 mousedown，onFocus 不会触发）→ 标签标题跟随新活动 pane。
+  // closePane 可能在后台 tab 中触发（shell 退出），标签栏仍可见 → 不限 tab === tabs.active。
+  // refreshPanels 由紧随其后的 onLayoutChange 处理，此处只管标题。
+  tabs.onActivePaneChange = (tab, pane) => {
+    syncPaneTitle(tab, pane);
   };
 
   // 关闭流程：确认 → flush session → destroy。btn-close（win.close）与系统关闭
