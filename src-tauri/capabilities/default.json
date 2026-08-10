@@ -14,7 +14,6 @@
     "core:webview:default",
     "dialog:default",
     "clipboard-manager:allow-read-text",
-    "clipboard-manager:allow-write-text",
-    "window-state:default"
+    "clipboard-manager:allow-write-text"
   ]
 }

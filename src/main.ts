@@ -5,7 +5,7 @@ import "./fonts.css";
 import "./styles.css";
 
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { availableMonitors, getCurrentWindow } from "@tauri-apps/api/window";
 import { api, events, b64encode } from "./ipc";
 import { loadSettings, getSettings, onSettingsChange, activeTheme, fontStack, computeMcr, sanitizeScrollback } from "./settings";
 import { TabManager, type Tab } from "./tabs";
@@ -1179,18 +1179,69 @@ async function bootstrap() {
   };
   await syncMaximized();
   void win.onResized(() => void syncMaximized());
+  // 等待窗口尺寸变化停止：KWin 最大化/还原动画期间 resize 事件连续触发，
+  // 静默 quietMs 后视为动画结束。maxMs 兜底，避免极端情况下永久挂起。
+  const waitResizeSettled = (quietMs: number, maxMs: number): Promise<void> =>
+    new Promise((resolve) => {
+      let finished = false;
+      let unlisten: (() => void) | null = null;
+      const done = () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        clearTimeout(hard);
+        unlisten?.();
+        resolve();
+      };
+      let timer = setTimeout(done, quietMs);
+      const hard = setTimeout(done, maxMs);
+      void win
+        .onResized(() => {
+          clearTimeout(timer);
+          timer = setTimeout(done, quietMs);
+        })
+        .then((u) => {
+          unlisten = u;
+          if (finished) u();
+        });
+    });
+  // 窗口启动自检（自研 restore 的运行时兜底）：恢复的尺寸若仍超出所有显示器并集边界
+  // （跨会话缩放错位，如多实例退出互相覆盖状态文件），立即回退为 restore_size 尺寸。
+  // 仅启动早期执行一次；正常尺寸零操作；纯数据计算（一次尺寸查询 + 一次显示器枚举），
+  // 不依赖任何系统/WM 特性。条件 = 尺寸超过所有显示器并集 = 用户操作无法达成的物理边界。
+  void (async () => {
+    try {
+      const [size, monitors] = await Promise.all([win.innerSize(), availableMonitors()]);
+      if (monitors.length === 0) return;
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const m of monitors) {
+        minX = Math.min(minX, m.position.x);
+        minY = Math.min(minY, m.position.y);
+        maxX = Math.max(maxX, m.position.x + m.size.width);
+        maxY = Math.max(maxY, m.position.y + m.size.height);
+      }
+      if (size.width > maxX - minX || size.height > maxY - minY) {
+        await api.restoreWindowSize().catch(() => {});
+      }
+    } catch {
+      // 拿不到尺寸/显示器信息则跳过（磁盘修复已兜底）
+    }
+  })();
   document.getElementById("btn-about")!.addEventListener("click", showAboutDialog);
   document.getElementById("btn-min")!.addEventListener("click", () => void win.minimize());
   document.getElementById("btn-max")!.addEventListener("click", async () => {
     const wasMaximized = await win.isMaximized();
     await win.toggleMaximize();
     if (wasMaximized) {
-      // 从最大化还原：调用后端命令直接获取屏幕尺寸并设置窗口，
-      // 避免 WebKitGTK 下 window.screen/currentMonitor 返回异常值。
-      // 加 100ms 延迟让 window-state 插件先恢复，再覆盖为目标值。
-      await new Promise((r) => setTimeout(r, 100));
+      // 从最大化还原：先等 KWin unmaximize 动画结束（resize 事件停止）再设置目标尺寸，
+      // 避免动画中途改目标导致尺寸反复横跳（卡顿）。目标尺寸由 restore_size 设置决定。
+      await waitResizeSettled(200, 1500);
       await api.restoreWindowSize().catch(() => {});
     }
+    void syncMaximized();
   });
   // 关闭按钮触发 onCloseRequested，确认对话框与 session flush 统一在那里处理
   document.getElementById("btn-close")!.addEventListener("click", () => void win.close());

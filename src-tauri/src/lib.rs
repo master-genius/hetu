@@ -701,14 +701,14 @@ async fn cache_dir(conn_id: String) -> Result<String> {
 // ---------- 应用入口 ----------
 
 /// 从最大化还原：在后端直接获取屏幕尺寸并设置窗口大小，避免前端 IPC 竞态。
-/// 按设置中的 restore_size 百分比计算，兜底 960×550。
+/// 按设置中的 restore_size 百分比计算，兜底 1280×820（与窗口初始配置一致）。
 #[tauri::command]
 async fn restore_window_size(app: tauri::AppHandle) -> Result<()> {
     let window = app.get_webview_window("main").ok_or_else(|| Error::msg("主窗口不存在"))?;
     let settings = settings::load();
     let pct = (settings.restore_size.max(50).min(90)) as f64 / 100.0;
 
-    let (mut lw, mut lh) = (960.0_f64, 550.0_f64);
+    let (mut lw, mut lh) = (1280.0_f64, 820.0_f64);
     if let Ok(Some(monitor)) = window.current_monitor() {
         let sf = monitor.scale_factor();
         let size = monitor.size();
@@ -726,6 +726,192 @@ async fn restore_window_size(app: tauri::AppHandle) -> Result<()> {
         .set_size(tauri::LogicalSize::new(w, h))
         .map_err(|e| Error::msg(format!("设置窗口大小失败: {e}")))?;
     Ok(())
+}
+
+/// 自研窗口状态：保存/恢复窗口尺寸、位置与最大化状态（替代 tauri-plugin-window-state）。
+///
+/// 为什么自研：插件 restore 把 set_size→maximize→show 在窗口尚未映射时排队，窗口管理器把
+/// 「最大化前几何」记录为排队中的中间值，拖拽标题栏（WM 标准行为=取消最大化并还原到该
+/// 几何）时窗口塌缩成错乱尺寸。自研恢复在窗口几何稳定后再 maximize，「最大化前几何」即为
+/// 稳定后的合法尺寸——「启动恢复最大化」体验与拖拽不塌缩两者兼得。
+mod window_state {
+    use serde_json::Value;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+    use std::sync::Arc;
+    use tauri::{Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
+
+    const FILE: &str = ".window-state.json";
+
+    fn state_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+        app.path().app_config_dir().ok().map(|d| d.join(FILE))
+    }
+
+    /// 恢复窗口尺寸/位置；返回 true 表示上次退出时为最大化（由调用方延迟恢复最大化）。
+    /// 尺寸超过所有显示器并集边界（跨会话缩放错位）时回退为 restore_size 百分比；
+    /// 位置仅在目标点位于某个显示器内时恢复（换显示器布局后不把窗口甩出屏幕）。
+    pub fn restore(app: &tauri::AppHandle, window: &WebviewWindow) -> bool {
+        let Some(path) = state_path(app) else {
+            return false;
+        };
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return false;
+        };
+        let Ok(v) = serde_json::from_str::<Value>(&text) else {
+            return false;
+        };
+        let Some(main) = v.get("main") else {
+            return false;
+        };
+
+        let should_maximize = main.get("maximized").and_then(Value::as_bool) == Some(true);
+
+        let (mut w, mut h) = (1280_u32, 820_u32);
+        if let (Some(wv), Some(hv)) = (
+            main.get("width").and_then(Value::as_u64),
+            main.get("height").and_then(Value::as_u64),
+        ) {
+            if within_union(window, wv, hv) {
+                w = wv.min(u32::MAX as u64) as u32;
+                h = hv.min(u32::MAX as u64) as u32;
+            } else if let (Ok(Some(monitor)), settings) =
+                (window.current_monitor(), crate::settings::load())
+            {
+                let s = monitor.size();
+                if s.width > 0 && s.height > 0 {
+                    let pct = (settings.restore_size.max(50).min(90)) as f64 / 100.0;
+                    w = (s.width as f64 * pct).round() as u32;
+                    h = (s.height as f64 * pct).round() as u32;
+                }
+            }
+        }
+        let _ = window.set_size(PhysicalSize::new(w, h));
+
+        if let (Some(x), Some(y)) = (
+            main.get("x").and_then(Value::as_i64),
+            main.get("y").and_then(Value::as_i64),
+        ) {
+            if let Ok(monitors) = window.available_monitors() {
+                let inside = monitors.iter().any(|m| {
+                    let p = m.position();
+                    let s = m.size();
+                    x >= p.x as i64
+                        && x < (p.x + s.width as i32) as i64
+                        && y >= p.y as i64
+                        && y < (p.y + s.height as i32) as i64
+                });
+                if inside {
+                    let _ = window.set_position(PhysicalPosition::new(x as i32, y as i32));
+                }
+            }
+        }
+
+        should_maximize
+    }
+
+    /// 窗口尺寸 (w,h) 是否不超过所有显示器并集边界（允许合法的多屏跨屏布局）。
+    /// 拿不到显示器信息时保守放行（不修改）。
+    fn within_union(window: &WebviewWindow, w: u64, h: u64) -> bool {
+        let Ok(monitors) = window.available_monitors() else {
+            return true;
+        };
+        if monitors.is_empty() {
+            return true;
+        }
+        let mut min_x = i32::MAX;
+        let mut min_y = i32::MAX;
+        let mut max_x = i32::MIN;
+        let mut max_y = i32::MIN;
+        for m in monitors {
+            let p = m.position();
+            let s = m.size();
+            min_x = min_x.min(p.x);
+            min_y = min_y.min(p.y);
+            max_x = max_x.max(p.x + s.width as i32);
+            max_y = max_y.max(p.y + s.height as i32);
+        }
+        let union_w = (max_x - min_x) as u64;
+        let union_h = (max_y - min_y) as u64;
+        union_w > 0 && w <= union_w && h <= union_h
+    }
+
+    /// 延迟恢复最大化：等窗口几何稳定（Resized 静默 300ms）后 maximize，
+    /// 让 WM 把「最大化前几何」记录为稳定后的合法尺寸。2s 兜底覆盖
+    /// 「恢复尺寸 == 初始尺寸、无 Resized 事件」的情况。done 保证只执行一次。
+    pub fn restore_maximize(window: &WebviewWindow) {
+        let done = Arc::new(AtomicBool::new(false));
+        let gen = Arc::new(AtomicU32::new(0));
+        let w = window.clone();
+        let w1 = w.clone();
+        let done1 = done.clone();
+        let gen1 = gen.clone();
+        w.on_window_event(move |event| {
+            if !matches!(event, tauri::WindowEvent::Resized(_)) {
+                return;
+            }
+            // 已恢复最大化后不再处理后续 resize（窗口生命周期内零开销）
+            if done1.load(Ordering::SeqCst) {
+                return;
+            }
+            let g = gen1.fetch_add(1, Ordering::SeqCst) + 1;
+            let w = w1.clone();
+            let gen = gen1.clone();
+            let done = done1.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                if gen.load(Ordering::SeqCst) != g {
+                    return; // 期间尺寸继续变化，等待下一轮
+                }
+                if done.swap(true, Ordering::SeqCst) {
+                    return;
+                }
+                let _ = w.maximize();
+            });
+        });
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+            if done.swap(true, Ordering::SeqCst) {
+                return;
+            }
+            let _ = w.maximize();
+        });
+    }
+
+    /// 保存窗口状态（应用退出时）。最大化时不覆盖尺寸/位置（保留上次普通尺寸，
+    /// 还原后回到该尺寸），只更新 maximized=true。
+    pub fn save(app: &tauri::AppHandle) {
+        let Some(path) = state_path(app) else {
+            return;
+        };
+        let Some(window) = app.get_webview_window("main") else {
+            return;
+        };
+        let Ok(maximized) = window.is_maximized() else {
+            return;
+        };
+
+        let mut v: Value = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_else(|| Value::Object(Default::default()));
+        if v.get("main").is_none() {
+            v["main"] = Value::Object(Default::default());
+        }
+        if let Some(main) = v.get_mut("main") {
+            main["maximized"] = Value::Bool(maximized);
+            if !maximized {
+                if let (Ok(size), Ok(pos)) = (window.inner_size(), window.outer_position()) {
+                    main["width"] = Value::from(size.width);
+                    main["height"] = Value::from(size.height);
+                    main["x"] = Value::from(pos.x);
+                    main["y"] = Value::from(pos.y);
+                }
+            }
+        }
+        if let Ok(json) = serde_json::to_string_pretty(&v) {
+            let _ = std::fs::write(&path, json);
+        }
+    }
 }
 
 /// 渲染进程内存信息：RSS + WebKit 自杀阈值（系统内存一半，字节）。
@@ -798,8 +984,6 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        // 记住并恢复窗口大小/位置
-        .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(AppState {
             conns: Mutex::new(HashMap::new()),
             panes: Mutex::new(HashMap::new()),
@@ -824,6 +1008,21 @@ pub fn run() {
             );
             #[cfg(target_os = "windows")]
             let _ = window_vibrancy::apply_acrylic(&window, Some((18, 18, 18, 120)));
+
+            // 恢复窗口尺寸/位置（自研，尺寸钳制到显示器并集内）；若上次退出时为最大化，
+            // 在窗口几何稳定后再恢复最大化（避免 WM 把「最大化前几何」记为恢复序列中间值，
+            // 拖拽标题栏塌缩）。无系统/WM 依赖，仅 tauri 跨平台 API + serde_json。
+            if window_state::restore(app.handle(), &window) {
+                window_state::restore_maximize(&window);
+            }
+            // 关闭请求时保存窗口状态（此时窗口一定可用，能读到 is_maximized 等状态）；
+            // 用户取消关闭（prevent_close）也无害——下次启动恢复当前状态。
+            let app_handle = app.handle().clone();
+            window.on_window_event(move |event| {
+                if let tauri::WindowEvent::CloseRequested { .. } = event {
+                    window_state::save(&app_handle);
+                }
+            });
             let _ = window;
             // WebProcess 崩溃自动恢复：渲染进程（WebKitWebProcess）承载全部前端 JS，
             // 长时间运行可能被 WebKit 内存压力机制杀死，导致窗口全透明假死。
@@ -906,6 +1105,13 @@ pub fn run() {
             restore_window_size,
             webprocess_rss,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // 兜底：CloseRequested 未触发时（如 SIGTERM/进程被杀前的优雅退出）尝试保存。
+            // 窗口可能已销毁，save 内部 get_webview_window 返回 None 时安全跳过。
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                window_state::save(app);
+            }
+        });
 }
