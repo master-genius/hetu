@@ -743,25 +743,43 @@ mod window_state {
 
     const FILE: &str = ".window-state.json";
 
-    fn state_path(app: &tauri::AppHandle) -> Option<PathBuf> {
-        app.path().app_config_dir().ok().map(|d| d.join(FILE))
+    /// 与其他持久化配置同目录（~/.config/hetushell/）：config_dir() 自带 create_dir_all，
+    /// 全新安装也能落盘。此前用 app_config_dir()（~/.config/dev.hetushell.app/）时该目录
+    /// 已无任何代码创建，写盘静默 ENOENT，导致新装系统「最大化后关闭仍不恢复」必现。
+    fn state_path() -> Option<PathBuf> {
+        crate::settings::config_dir().ok().map(|d| d.join(FILE))
     }
 
-    /// 恢复窗口尺寸/位置；返回 true 表示上次退出时为最大化（由调用方延迟恢复最大化）。
+    /// 按设置中的 restore_size 百分比算出的物理尺寸；拿不到显示器信息时兜底 1280×820
+    /// （与窗口初始配置一致）。
+    fn size_by_settings(window: &WebviewWindow) -> (u32, u32) {
+        if let Ok(Some(monitor)) = window.current_monitor() {
+            let s = monitor.size();
+            if s.width > 0 && s.height > 0 {
+                let pct = crate::settings::load().restore_size.clamp(50, 90) as f64 / 100.0;
+                return (
+                    (s.width as f64 * pct).round() as u32,
+                    (s.height as f64 * pct).round() as u32,
+                );
+            }
+        }
+        (1280, 820)
+    }
+
+    /// 恢复窗口尺寸/位置；返回 true 表示需要恢复最大化（由调用方延迟探测执行）。
+    /// 无历史状态（全新安装）时按 restore_size 设定稳定尺寸并同样尝试最大化——先给 WM
+    /// 一个合法的「最大化前几何」，新装首次拖拽标题栏也不会塌缩。
     /// 尺寸超过所有显示器并集边界（跨会话缩放错位）时回退为 restore_size 百分比；
     /// 位置仅在目标点位于某个显示器内时恢复（换显示器布局后不把窗口甩出屏幕）。
-    pub fn restore(app: &tauri::AppHandle, window: &WebviewWindow) -> bool {
-        let Some(path) = state_path(app) else {
-            return false;
-        };
-        let Ok(text) = std::fs::read_to_string(path) else {
-            return false;
-        };
-        let Ok(v) = serde_json::from_str::<Value>(&text) else {
-            return false;
-        };
-        let Some(main) = v.get("main") else {
-            return false;
+    pub fn restore(window: &WebviewWindow) -> bool {
+        let saved = state_path()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+            .and_then(|v| v.get("main").cloned());
+        let Some(main) = saved else {
+            let (w, h) = size_by_settings(window);
+            let _ = window.set_size(PhysicalSize::new(w, h));
+            return true;
         };
 
         let should_maximize = main.get("maximized").and_then(Value::as_bool) == Some(true);
@@ -774,15 +792,8 @@ mod window_state {
             if within_union(window, wv, hv) {
                 w = wv.min(u32::MAX as u64) as u32;
                 h = hv.min(u32::MAX as u64) as u32;
-            } else if let (Ok(Some(monitor)), settings) =
-                (window.current_monitor(), crate::settings::load())
-            {
-                let s = monitor.size();
-                if s.width > 0 && s.height > 0 {
-                    let pct = (settings.restore_size.max(50).min(90)) as f64 / 100.0;
-                    w = (s.width as f64 * pct).round() as u32;
-                    h = (s.height as f64 * pct).round() as u32;
-                }
+            } else {
+                (w, h) = size_by_settings(window);
             }
         }
         let _ = window.set_size(PhysicalSize::new(w, h));
@@ -837,7 +848,7 @@ mod window_state {
 
     /// 延迟恢复最大化：等窗口几何稳定（Resized 静默 300ms）后 maximize，
     /// 让 WM 把「最大化前几何」记录为稳定后的合法尺寸。2s 兜底覆盖
-    /// 「恢复尺寸 == 初始尺寸、无 Resized 事件」的情况。done 保证只执行一次。
+    /// 「恢复尺寸 == 初始尺寸、无 Resized 事件」的情况。done 保证只探测一轮。
     pub fn restore_maximize(window: &WebviewWindow) {
         let done = Arc::new(AtomicBool::new(false));
         let gen = Arc::new(AtomicU32::new(0));
@@ -865,7 +876,7 @@ mod window_state {
                 if done.swap(true, Ordering::SeqCst) {
                     return;
                 }
-                let _ = w.maximize();
+                probe_maximize(w).await;
             });
         });
         tauri::async_runtime::spawn(async move {
@@ -873,14 +884,34 @@ mod window_state {
             if done.swap(true, Ordering::SeqCst) {
                 return;
             }
-            let _ = w.maximize();
+            probe_maximize(w).await;
         });
+    }
+
+    /// 下发 maximize 并回读校验窗口管理器是否真的接受了它，未接受则退避重试。
+    /// Wayland 下 maximize 是需 compositor 确认的异步请求（tao 还要经 channel 转主线程、
+    /// 拆成 3 个 idle 步骤执行），一次被吞即永久失败且无痕迹。成功即停——正常路径只多
+    /// 一次原子读；全部失败则保持已设定的还原尺寸，不比不探测更差。
+    async fn probe_maximize(window: WebviewWindow) {
+        const BACKOFF: [u64; 4] = [0, 200, 400, 800];
+        for delay in BACKOFF {
+            if delay > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+            }
+            let _ = window.maximize();
+            // 请求跨线程投递 + compositor 往返，留一拍再回读
+            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+            if window.is_maximized().unwrap_or(false) {
+                return;
+            }
+        }
+        eprintln!("[window_state] maximize 请求未被窗口管理器接受，保持还原尺寸");
     }
 
     /// 保存窗口状态（应用退出时）。最大化时不覆盖尺寸/位置（保留上次普通尺寸，
     /// 还原后回到该尺寸），只更新 maximized=true。
     pub fn save(app: &tauri::AppHandle) {
-        let Some(path) = state_path(app) else {
+        let Some(path) = state_path() else {
             return;
         };
         let Some(window) = app.get_webview_window("main") else {
@@ -908,8 +939,33 @@ mod window_state {
                 }
             }
         }
+        // 写盘失败必须可见：原先的 `let _ =` 把 ENOENT（父目录不存在）静默吞掉，
+        // 导致新装系统上「最大化存不下来」完全无从排查。目录现由 state_path →
+        // config_dir() 保证存在，剩下的都是真实异常（权限/只读/磁盘满）。
         if let Ok(json) = serde_json::to_string_pretty(&v) {
-            let _ = std::fs::write(&path, json);
+            if let Err(e) = std::fs::write(&path, json) {
+                eprintln!("[window_state] 状态写入失败 {}: {e}", path.display());
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// 回归锁：状态文件必须落在「与其余配置同目录、且写前一定已存在」的位置。
+        /// v3.2.5 曾写往 app_config_dir()（已无任何代码创建该目录）并用 `let _ =` 吞掉
+        /// ENOENT，导致全新安装上窗口状态永远存不下来——新装系统「最大化后关闭仍不恢复」。
+        #[test]
+        fn state_path_is_writable_on_fresh_install() {
+            let path = state_path().expect("无法定位配置目录");
+            let dir = path.parent().expect("状态文件必须有父目录");
+            assert_eq!(
+                dir,
+                crate::settings::config_dir().unwrap().as_path(),
+                "必须与其他持久化配置同目录（该目录由 config_dir 自建）"
+            );
+            assert!(dir.exists(), "写盘前父目录必须存在，否则 write 静默 ENOENT");
         }
     }
 }
@@ -1009,10 +1065,11 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             let _ = window_vibrancy::apply_acrylic(&window, Some((18, 18, 18, 120)));
 
-            // 恢复窗口尺寸/位置（自研，尺寸钳制到显示器并集内）；若上次退出时为最大化，
-            // 在窗口几何稳定后再恢复最大化（避免 WM 把「最大化前几何」记为恢复序列中间值，
-            // 拖拽标题栏塌缩）。无系统/WM 依赖，仅 tauri 跨平台 API + serde_json。
-            if window_state::restore(app.handle(), &window) {
+            // 恢复窗口尺寸/位置（自研，尺寸钳制到显示器并集内）；需要最大化时（上次退出为
+            // 最大化，或全新安装无历史状态）在窗口几何稳定后探测恢复最大化——避免 WM 把
+            // 「最大化前几何」记为恢复序列中间值导致拖拽标题栏塌缩，并回读校验请求是否被接受。
+            // 无系统/WM 特定代码，仅 tauri 跨平台 API + serde_json。
+            if window_state::restore(&window) {
                 window_state::restore_maximize(&window);
             }
             // 关闭请求时保存窗口状态（此时窗口一定可用，能读到 is_maximized 等状态）；
