@@ -860,44 +860,63 @@ async function bootstrap() {
   // 拖到输出中的**目录名**上 → 该词高亮为选中态，上传到该目录。
 
   let dropTarget: { pane: Pane; dir: string | null } | null = null;
+  /** 松手处那个词：dropTarget.dir 受 120ms 节流可能沿用上一个悬停位置，drop 时以此重新确认 */
+  let dropCandidate: { pane: Pane; word: string } | null = null;
   let lastDetect = 0;
   let detectSeq = 0;
 
   const clearDropIndicators = () => {
+    // 令一切在途 statPath 结果作废。否则快速拖放时最后一次检测还在网络往返中，
+    // performDrop 已同步清空高亮，stat 迟到返回时 seq 仍等于 detectSeq → 把
+    // .drop-target-hl 重新点亮，此后不再有 over / OS 拖入也没有 dragend → 只能重启
+    detectSeq++;
     for (const tab of tabs.tabs) for (const p of tab.layout.panes()) p.clearDropHighlight();
     dropTarget = null;
+    dropCandidate = null;
   };
 
-  const updateDropIndicator = (x: number, y: number) => {
+  /** 坐标 → 落点终端 pane（严格：必须真正命中 #content 内的 .pane）。
+   * 文件面板与 #content 是兄弟节点且浮在终端之上，落在面板/工具栏/tab 栏时一律无落点，
+   * 绝不回退到活动 pane——否则拿面板上的坐标去算终端单元格，会误判出一个无关的目录。 */
+  const dropPaneAt = (x: number, y: number): Pane | null => {
     const el = document.elementFromPoint(x, y)?.closest(".pane") as HTMLElement | null;
-    const found = el?.dataset.paneId ? tabs.findPane(el.dataset.paneId) : null;
-    const pane = found?.pane ?? tabs.activePane();
+    if (!el || !content.contains(el)) return null;
+    return (el.dataset.paneId && tabs.findPane(el.dataset.paneId)?.pane) || null;
+  };
+
+  /** 返回落点 pane（远程终端才算合法落点），供 dragover 决定是否接受本次拖放 */
+  const updateDropIndicator = (x: number, y: number): Pane | null => {
+    const pane = dropPaneAt(x, y);
     if (!pane || pane.isLocal) {
       clearDropIndicators();
-      return;
+      return null;
     }
+    // 候选词同步记录（不受下面 stat 节流影响），高亮等异步验证结果
+    const range = pane.wordRangeAtPoint(x, y);
+    dropCandidate = range ? { pane, word: range.word } : null;
     if (dropTarget?.pane !== pane) dropTarget?.pane.clearDropHighlight();
     dropTarget = { pane, dir: dropTarget?.pane === pane ? dropTarget.dir : null };
 
+    const path = range ? pane.resolvePath(range.word.replace(/\/$/, "")) : null;
+    // 落点已不成立（指针离开词 / 词拼不成路径）：清除要同步，不能等到下面 120ms 节流之后。
+    // 依据是两条信息的时间基准不同：高亮表示「上一次验证完成的目录」，performDrop 用的是
+    // 「当前坐标下的候选词」。指针一旦离开那个已验证目录，高亮即为过期信息，此时松手就会
+    // 出现「屏幕上指着 A、实际传到 B」。
+    // 边界：清除只由 over 事件驱动，指针静止时高亮仍会停留——但 drop / cancel 一定清，
+    // 且 detectSeq 已保证在途 stat 不会再把它复活（那才是需要重启才消失的那种残留）。
+    if (!range || !path) {
+      detectSeq++; // 与清除成对：作废在途 stat，否则它回来会把已离开的落点重新点亮
+      pane.clearDropHighlight();
+      dropTarget = { pane, dir: null };
+      return pane; // 落点仍是本终端（空白处 = 当前目录），但不刷新 lastDetect：本次没发请求，不该推迟下一次
+    }
+
     const now = Date.now();
-    if (now - lastDetect < 120) return; // 节流：stat 是网络往返
+    if (now - lastDetect < 120) return pane; // 节流：stat 是网络往返
     lastDetect = now;
     const seq = ++detectSeq;
-
-    const range = pane.wordRangeAtPoint(x, y);
-    if (!range) {
-      pane.clearDropHighlight();
-      dropTarget = { pane, dir: null };
-      return;
-    }
-    const path = pane.resolvePath(range.word.replace(/\/$/, ""));
-    if (!path) {
-      pane.clearDropHighlight();
-      dropTarget = { pane, dir: null };
-      return;
-    }
     void pane.statPath(path).then((meta) => {
-      if (seq !== detectSeq) return; // 指针已移走，结果过期
+      if (seq !== detectSeq) return; // 落点已变更或已释放，结果过期
       if (meta?.isDir) {
         pane.showDropHighlight(range);
         dropTarget = { pane, dir: path };
@@ -906,27 +925,47 @@ async function bootstrap() {
         dropTarget = { pane, dir: null };
       }
     });
+    return pane;
   };
 
   const performDrop = (paths: string[]) => {
     const t = dropTarget;
+    const cand = dropCandidate;
     clearDropIndicators();
     // 拖放期间 xterm 可能创建选区（如从文本区拖到同一终端），释放后残留背景条
     for (const tab of tabs.tabs) for (const p of tab.layout.panes()) p.term.clearSelection();
-    void uploadFiles(paths, t?.pane, t?.dir);
+    const pane = cand?.pane ?? t?.pane;
+    const finish = (dir: string | null) => void uploadFiles(paths, pane, dir);
+    // 以松手处那个词为准重新确认目录，不用节流窗口内可能过期的 t.dir
+    const path = cand ? cand.pane.resolvePath(cand.word.replace(/\/$/, "")) : null;
+    if (cand && path)
+      void cand.pane.statPath(path).then((meta) => finish(meta?.isDir ? path : null));
+    else finish(t?.dir ?? null);
   };
 
-  // OS 文件拖入（Tauri 原生事件，物理坐标 → 逻辑坐标）
+  // OS 文件拖入（Tauri 原生事件，物理坐标 → 逻辑坐标）。
+  // 该事件与 DOM 落点无关：落在文件面板上时面板自身的 drop 也在执行，
+  // 不做归属判定就会「传到面板目录 + 又传到终端」双份上传。
   void getCurrentWebview().onDragDropEvent((event) => {
     const overlay = document.getElementById("drop-overlay")!;
     if (event.payload.type === "over") {
-      overlay.style.display = "flex";
       const { x, y } = event.payload.position;
-      updateDropIndicator(x / window.devicePixelRatio, y / window.devicePixelRatio);
+      const lx = x / window.devicePixelRatio;
+      const ly = y / window.devicePixelRatio;
+      const hit = dropPaneAt(lx, ly);
+      overlay.style.display = hit && !hit.isLocal ? "flex" : "none";
+      updateDropIndicator(lx, ly);
     } else if (event.payload.type === "drop") {
       overlay.style.display = "none";
       const { x, y } = event.payload.position;
-      updateDropIndicator(x / window.devicePixelRatio, y / window.devicePixelRatio);
+      const lx = x / window.devicePixelRatio;
+      const ly = y / window.devicePixelRatio;
+      const hit = dropPaneAt(lx, ly);
+      if (!hit || hit.isLocal) {
+        clearDropIndicators();
+        return; // 无合法终端落点：交还给落点自身的处理（文件面板），或不处理
+      }
+      updateDropIndicator(lx, ly);
       performDrop(event.payload.paths);
     } else {
       overlay.style.display = "none";
@@ -937,13 +976,18 @@ async function bootstrap() {
   // 应用内拖拽（文件管理器条目 → 终端，HTML5 DnD）
   content.addEventListener("dragover", (e) => {
     if (!e.dataTransfer?.types.includes(DND_MIME)) return;
+    // 只有真正落在远程终端上才接受本次拖放（不 preventDefault 即显示「禁止落下」）
+    if (!updateDropIndicator(e.clientX, e.clientY)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
-    updateDropIndicator(e.clientX, e.clientY);
   });
   content.addEventListener("drop", (e) => {
     const raw = e.dataTransfer?.getData(DND_MIME);
     if (!raw) return;
+    if (!dropPaneAt(e.clientX, e.clientY)) {
+      clearDropIndicators();
+      return;
+    }
     e.preventDefault();
     try {
       performDrop(JSON.parse(raw) as string[]);
@@ -965,13 +1009,9 @@ async function bootstrap() {
     dlHlPane?.classList.remove("dl-drop-target");
     dlHlPane = null;
   };
-  const paneUnder = (x: number, y: number): Pane | null => {
-    const el = document.elementFromPoint(x, y)?.closest(".pane") as HTMLElement | null;
-    return (el?.dataset.paneId && tabs.findPane(el.dataset.paneId)?.pane) || null;
-  };
   content.addEventListener("dragover", (e) => {
     if (!e.dataTransfer?.types.includes(DL_MIME)) return;
-    const pane = paneUnder(e.clientX, e.clientY);
+    const pane = dropPaneAt(e.clientX, e.clientY);
     if (!pane) {
       clearDlHighlight();
       return; // 非终端区域不接收，保留默认（禁止落下）
@@ -1039,7 +1079,7 @@ async function bootstrap() {
   content.addEventListener("drop", (e) => {
     const raw = e.dataTransfer?.getData(DL_MIME);
     if (!raw) return;
-    const target = paneUnder(e.clientX, e.clientY);
+    const target = dropPaneAt(e.clientX, e.clientY);
     clearDlHighlight();
     if (!target) return;
     e.preventDefault();

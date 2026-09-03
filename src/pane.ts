@@ -131,8 +131,15 @@ export class Pane {
   private hoverTimer: number | undefined;
   private statCache = new Map<string, { meta: FileMeta | null; at: number }>();
   disposed = false;
-  /** 当前 Ctrl 悬停命中的词（原始相对/绝对词，下载时再异步解析为绝对路径） */
+  /** 当前 Ctrl 悬停命中的词（原始相对/绝对词，下载时再异步解析为绝对路径）。
+   *  仅当 statPath 确认远端存在该路径时才为非空——见 updateCtrlHover。 */
   private ctrlHoverWord: string | null = null;
+  /** Ctrl 悬停验证序号：使一切在途 statPath 结果作废，防止鼠标移走后旧结果点亮 */
+  private ctrlHoverSeq = 0;
+  /** 正在验证中的路径：同词不重复发起网络往返 */
+  private ctrlHoverPending: string | null = null;
+  /** 鼠标按下位置：click 时据此区分「原地单击」与「拖选文本后松手」 */
+  private pressPos: { x: number; y: number } | null = null;
   /** 备用屏幕滚轮节流：rAF 合并帧内多次 wheel，避免触摸板高频 IPC 拥塞 PTY 输入队列 */
   private wheelRafId: number | null = null;
   /** 帧内待发送的累积行数（正=向下滚，负=向上滚），rAF 触发时一次性发出 */
@@ -402,6 +409,8 @@ export class Pane {
           void this.copyText(sel);
           toast("已复制", false, 3000);
           this.term.clearSelection();
+          // 松开 Ctrl 前若不移动鼠标，旧的 hover 词会一直留着被后续 click / dragstart 复用
+          this.clearCtrlHover();
         }
       }
     }, true);
@@ -413,7 +422,10 @@ export class Pane {
       return this.onAppKey?.(e) ? false : true;
     });
 
-    this.element.addEventListener("mousedown", () => this.onFocus?.());
+    this.element.addEventListener("mousedown", (e) => {
+      this.pressPos = { x: e.clientX, y: e.clientY };
+      this.onFocus?.();
+    });
 
     // 双击 → 用系统默认应用打开文件（xterm 已按词选中）
     this.element.addEventListener("dblclick", () => {
@@ -438,18 +450,29 @@ export class Pane {
 
     // Ctrl+单击文件/目录 → 下载（若未拖拽）
     this.element.addEventListener("click", (e) => {
-      if (e.ctrlKey && this.ctrlHoverWord) {
-        e.preventDefault();
-        this.onCtrlClick?.(this.ctrlHoverWord);
-      }
+      if (!e.ctrlKey || !this.ctrlHoverWord) return;
+      // 按下点与松手点偏移超过一个单元格 → 刚才那一下是拖选文本，不是「Ctrl+单击某个路径」。
+      // 少了这道门控，「选中后顺手按 Ctrl」时松手派发的 click 会把选中末端那个词当路径去下载。
+      const p = this.pressPos;
+      this.pressPos = null;
+      const dims = this.cellDims();
+      if (
+        p &&
+        dims &&
+        (Math.abs(e.clientX - p.x) > dims.width || Math.abs(e.clientY - p.y) > dims.height)
+      )
+        return;
+      e.preventDefault();
+      this.onCtrlClick?.(this.ctrlHoverWord);
     });
     // Ctrl+拖拽文件/目录 → 拖到文件管理器下载到对应目录
-    // 无 ctrlHoverWord 时不 preventDefault：WebKitGTK 下 preventDefault(dragstart) 可能
+    // 必须判 e.ctrlKey：pane 进入 draggable 态后，普通拖选文本也会派发 dragstart，
+    // 不判就会把选中内容当远端文件附上 DL_MIME（下载意图只属于 Ctrl+拖拽）。
+    // 无下载意图时不 preventDefault：WebKitGTK 下 preventDefault(dragstart) 可能
     // 停止后续 mousemove 派发，导致 xterm.js 文本选择无法扩展（只能选中首字符）
     this.element.addEventListener("dragstart", (e) => {
-      if (this.ctrlHoverWord && this.onCtrlDragStart) {
-        this.onCtrlDragStart(this.ctrlHoverWord, e);
-      }
+      if (!e.ctrlKey || !this.ctrlHoverWord || !this.onCtrlDragStart) return;
+      this.onCtrlDragStart(this.ctrlHoverWord, e);
     });
 
     this.element.addEventListener("contextmenu", (e) => {
@@ -1103,37 +1126,74 @@ export class Pane {
     return this.wordRangeAtPoint(e.clientX, e.clientY)?.word ?? null;
   }
 
-  /** Ctrl 悬停在文件/目录词上时：手形光标 + 可拖拽（仅远程 pane 有意义） */
+  /**
+   * Ctrl 悬停在文件/目录词上时：手形光标 + 可拖拽（仅远程 pane 有意义）。
+   *
+   * 「是不是文件」必须经 statPath 验证，不能只看词能否拼成路径：resolvePath 对任意
+   * 单词都会拼出 `cwd/词`，于是 vim/less 屏幕上的普通文字曾被认作可下载文件（手形光标
+   * + pane 进入 draggable 态 + 松手那一下触发下载并报「无法解析」）。
+   * 备用屏幕（全屏 TUI）整体不参与这条语义：那里的文字归应用所有，不是 shell 输出的路径候选。
+   */
   private updateCtrlHover(e: MouseEvent) {
     if (this.isLocal || !e.ctrlKey) {
       this.clearCtrlHover();
       return;
     }
-    const word = this.wordUnderMouse(e);
-    // URL 交给 WebLinksAddon（Ctrl 打开浏览器），不当作可下载文件，避免光标/拖拽/点击冲突
-    if (word && /^https?:\/\//i.test(word)) {
+    if (this.term.buffer.active.type === "alternate") {
       this.clearCtrlHover();
       return;
     }
-    // 样式判定用同步 resolvePath 尽力而为；实际下载路径在点击/拖放时再异步解析。
-    const w = word ? word.replace(/\/$/, "") : null;
-    const linkable = !!(w && this.resolvePath(w));
-    this.ctrlHoverWord = linkable ? w : null;
-    this.element.classList.toggle("ctrl-link", linkable);
-    this.element.draggable = linkable;
+    this.ctrlHoverSeq++; // 上一次在途验证的结果一律作废
+    const word = this.wordUnderMouse(e);
+    // URL 交给 WebLinksAddon（Ctrl 打开浏览器），不当作可下载文件，避免光标/拖拽/点击冲突
+    const w = word && !/^https?:\/\//i.test(word) ? word.replace(/\/$/, "") : null;
+    const path = w ? this.resolvePath(w) : null;
+    if (!w || !path) {
+      this.clearCtrlHover();
+      return;
+    }
+    const cached = this.statCached(path);
+    if (cached !== undefined) {
+      this.setCtrlHover(cached ? w : null); // 已有结论：同帧定态，手形光标不闪
+      return;
+    }
+    this.setCtrlHover(null); // 未经验证的词一律不进入可下载态
+    if (this.ctrlHoverPending === path) return; // 该词的往返已在途中
+    this.ctrlHoverPending = path;
+    const seq = this.ctrlHoverSeq;
+    void this.statPath(path).then((meta) => {
+      if (this.ctrlHoverPending === path) this.ctrlHoverPending = null;
+      if (seq !== this.ctrlHoverSeq) return; // 鼠标已移开 / Ctrl 已松开
+      this.setCtrlHover(meta ? w : null);
+    });
+  }
+
+  /** Ctrl 可下载态的唯一写入口：词、手形光标、draggable 三者必须同增同减 */
+  private setCtrlHover(word: string | null): void {
+    this.ctrlHoverWord = word;
+    this.element.classList.toggle("ctrl-link", word !== null);
+    this.element.draggable = word !== null;
   }
 
   private clearCtrlHover() {
+    this.ctrlHoverSeq++; // 丢弃在途验证结果
+    this.ctrlHoverPending = null;
     if (this.ctrlHoverWord === null && !this.element.draggable) return;
     this.ctrlHoverWord = null;
     this.element.classList.remove("ctrl-link");
     this.element.draggable = false;
   }
 
+  /** statCache 的同步读：命中且未过期返回结论（null 表示已验证不存在），否则 undefined */
+  private statCached(path: string): FileMeta | null | undefined {
+    const c = this.statCache.get(path);
+    return c && Date.now() - c.at < 5000 ? c.meta : undefined;
+  }
+
   /** stat（带 5s 缓存），失败返回 null */
   async statPath(path: string): Promise<FileMeta | null> {
-    const cached = this.statCache.get(path);
-    if (cached && Date.now() - cached.at < 5000) return cached.meta;
+    const cached = this.statCached(path);
+    if (cached !== undefined) return cached;
     const meta = await api.sftpStat(this.connId, path).catch(() => null);
     this.statCache.set(path, { meta, at: Date.now() });
     if (this.statCache.size > 200) this.statCache.clear();
