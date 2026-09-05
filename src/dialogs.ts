@@ -3,7 +3,7 @@
 import { api } from "./ipc";
 import { getSettings, loadSettings, updateSettings, sanitizeScrollback } from "./settings";
 import { allThemes, BUILTIN_THEMES, resolveTheme } from "./themes";
-import { customSelect, toast, type CSOption } from "./ui";
+import { confirmDialog, customSelect, showMenu, toast, type CSOption } from "./ui";
 import {
   ACTIONS, comboToLabel, DEFAULT_KEYBINDINGS, eventToCombo, resolveBindings, type Action,
 } from "./keybindings";
@@ -282,14 +282,41 @@ export function showConnectDialog(
       if (p.note) noteEl.textContent = p.note;
       else noteEl.remove();
       item.querySelector(".badge")!.textContent = p.source === "ssh_config" ? "ssh config" : "已保存";
+      // 列表重渲染后恢复选中态：删除其他项后，当前编辑项仍应高亮
+      if (p.id === selectedProfileId) item.classList.add("selected");
       item.addEventListener("click", () => {
         itemsEl.querySelectorAll(".profile-item").forEach((i) => i.classList.remove("selected"));
         item.classList.add("selected");
         fillForm(p);
       });
       item.addEventListener("dblclick", () => form.requestSubmit());
+      // 右键菜单删除：删除属非常用操作，不做常驻按钮。
+      // ssh_config 导入项是只读来源（列表每次重新合并），不可删除，故不提供菜单。
+      if (p.source !== "ssh_config") {
+        item.addEventListener("contextmenu", (e) => {
+          e.preventDefault();
+          showMenu(e.clientX, e.clientY, [
+            { label: "删除连接项", danger: true, action: () => void deleteProfile(p) },
+          ]);
+        });
+      }
       itemsEl.appendChild(item);
     }
+  };
+
+  const deleteProfile = async (p: Profile) => {
+    const label = p.name || `${p.user}@${p.host}`;
+    if (!(await confirmDialog("删除连接项", `确定删除「${label}」？该操作不可撤销。`))) return;
+    try {
+      await api.profileDelete(p.id);
+    } catch (err) {
+      toast(`删除连接项失败: ${err}`, true);
+      return;
+    }
+    // 若删除的正是当前选中的连接项，同步清空右侧表单
+    if (selectedProfileId === p.id) resetForm();
+    toast("连接项已删除");
+    void api.profilesList().then(renderProfiles);
   };
   void api.profilesList().then(renderProfiles).catch(() => renderProfiles([]));
 
