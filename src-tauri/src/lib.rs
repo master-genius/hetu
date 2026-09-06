@@ -743,6 +743,9 @@ mod window_state {
 
     const FILE: &str = ".window-state.json";
 
+    /// 可信尺寸下限：短边小于此值的几何无法交互（标题栏与内容区均不可用），判为不可信。
+    const MIN_SIDE: u64 = 100;
+
     /// 与其他持久化配置同目录（~/.config/hetushell/）：config_dir() 自带 create_dir_all，
     /// 全新安装也能落盘。此前用 app_config_dir()（~/.config/dev.hetushell.app/）时该目录
     /// 已无任何代码创建，写盘静默 ENOENT，导致新装系统「最大化后关闭仍不恢复」必现。
@@ -769,8 +772,9 @@ mod window_state {
     /// 恢复窗口尺寸/位置；返回 true 表示需要恢复最大化（由调用方延迟探测执行）。
     /// 无历史状态（全新安装）时按 restore_size 设定稳定尺寸并同样尝试最大化——先给 WM
     /// 一个合法的「最大化前几何」，新装首次拖拽标题栏也不会塌缩。
-    /// 尺寸超过所有显示器并集边界（跨会话缩放错位）时回退为 restore_size 百分比；
-    /// 位置仅在目标点位于某个显示器内时恢复（换显示器布局后不把窗口甩出屏幕）。
+    /// 尺寸小于交互下限或超过所有显示器并集边界（跨会话缩放错位）时回退为 restore_size
+    /// 百分比；位置仅在可信（非退化读数）且目标点位于某个显示器内时恢复；位置不可用时
+    /// 不写位置并强制尝试最大化——最大化几何由 WM 分配，是不依赖坐标也能保证可操作的落点。
     pub fn restore(window: &WebviewWindow) -> bool {
         let saved = state_path()
             .and_then(|p| std::fs::read_to_string(p).ok())
@@ -796,38 +800,63 @@ mod window_state {
                 (w, h) = size_by_settings(window);
             }
         }
+        // ①先定尺寸：它随后成为窗口管理器的「最大化前几何」(geometryRestore)
         let _ = window.set_size(PhysicalSize::new(w, h));
 
-        if let (Some(x), Some(y)) = (
+        // ②位置可信性优先于位置本身。(0,0) 在 Wayland 下是退化读数而非真实摆位：
+        // tao 的 outer_position 只回读内部缓存，其初值取自 X11 专属的 root_origin，
+        // 且缓存仅由 configure-event 更新（Wayland 不触发），故恒为 (0,0) 且返回 Ok。
+        // 无边框窗口（decorations:false）唯一可拖的是 36px 标题栏，落在显示器原点
+        // 即被桌面面板盖住 → 窗口存在却无法操作；该值还会污染 geometryRestore，使
+        // 「拖标题栏取消最大化」「从最小化恢复」每次都回到这个不可操作位置。
+        // 不可信时不写位置，交给窗口管理器放置，并强制走一次最大化——最大化几何由
+        // 窗口管理器分配、天然避开面板，是不依赖 x/y 也能保证可用的落点。
+        let pos = match (
             main.get("x").and_then(Value::as_i64),
             main.get("y").and_then(Value::as_i64),
         ) {
-            if let Ok(monitors) = window.available_monitors() {
-                let inside = monitors.iter().any(|m| {
-                    let p = m.position();
-                    let s = m.size();
-                    x >= p.x as i64
-                        && x < (p.x + s.width as i32) as i64
-                        && y >= p.y as i64
-                        && y < (p.y + s.height as i32) as i64
-                });
-                if inside {
-                    let _ = window.set_position(PhysicalPosition::new(x as i32, y as i32));
-                }
-            }
+            (Some(x), Some(y)) if x != 0 || y != 0 => Some((x, y)),
+            _ => None,
+        };
+        let placed = pos.filter(|(x, y)| on_screen(window, *x, *y));
+        if let Some((x, y)) = placed {
+            let _ = window.set_position(PhysicalPosition::new(x as i32, y as i32));
         }
 
-        should_maximize
+        // ③尺寸与位置稳定后再由调用方延迟 maximize（顺序保持，保护 geometryRestore）
+        should_maximize || placed.is_none()
     }
 
-    /// 窗口尺寸 (w,h) 是否不超过所有显示器并集边界（允许合法的多屏跨屏布局）。
-    /// 拿不到显示器信息时保守放行（不修改）。
+    /// 点 (x,y) 是否落在某个显示器内：换显示器布局后不把窗口甩出屏幕。
+    /// 注意 available_monitors 在 tao/Linux 上返回的是整屏 geometry（无 work_area 概念），
+    /// 面板遮挡无法在此表达，因此面板带内的贴边坐标仍可能被判可用——这是可接受的
+    /// 宽松方向：误判「可用」只损失一次摆位，误判「不可用」会白丢一次最大化。
+    fn on_screen(window: &WebviewWindow, x: i64, y: i64) -> bool {
+        window.available_monitors().is_ok_and(|monitors| {
+            monitors.iter().any(|m| {
+                let p = m.position();
+                let s = m.size();
+                x >= p.x as i64
+                    && x < (p.x + s.width as i32) as i64
+                    && y >= p.y as i64
+                    && y < (p.y + s.height as i32) as i64
+            })
+        })
+    }
+
+    /// 窗口尺寸 (w,h) 是否在可信区间内：不小于交互下限，且不超过所有显示器并集边界
+    /// （允许合法的多屏跨屏布局）。
+    /// 拿不到显示器信息时判为不可信——没有基准就不放行未知尺寸，退回派生值；
+    /// 读写两侧共用 window.scale_factor，百分比在本基准内自洽，无需额外换算。
     fn within_union(window: &WebviewWindow, w: u64, h: u64) -> bool {
+        if w < MIN_SIDE || h < MIN_SIDE {
+            return false;
+        }
         let Ok(monitors) = window.available_monitors() else {
-            return true;
+            return false;
         };
         if monitors.is_empty() {
-            return true;
+            return false;
         }
         let mut min_x = i32::MAX;
         let mut min_y = i32::MAX;
@@ -931,11 +960,18 @@ mod window_state {
         if let Some(main) = v.get_mut("main") {
             main["maximized"] = Value::Bool(maximized);
             if !maximized {
-                if let (Ok(size), Ok(pos)) = (window.inner_size(), window.outer_position()) {
+                if let Ok(size) = window.inner_size() {
                     main["width"] = Value::from(size.width);
                     main["height"] = Value::from(size.height);
-                    main["x"] = Value::from(pos.x);
-                    main["y"] = Value::from(pos.y);
+                }
+                // 退化读数不落盘：Wayland 下 outer_position 恒 (0,0)，写进文件等于把
+                // 「标题栏被面板盖住」的不可操作位置持久化成下次启动的摆位。读侧同样
+                // 拒绝 (0,0)，两侧语义一致——(0,0) 统一表示「未定位」。
+                if let Ok(pos) = window.outer_position() {
+                    if pos.x != 0 || pos.y != 0 {
+                        main["x"] = Value::from(pos.x);
+                        main["y"] = Value::from(pos.y);
+                    }
                 }
             }
         }
