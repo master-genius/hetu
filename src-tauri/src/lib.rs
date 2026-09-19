@@ -1006,13 +1006,13 @@ mod window_state {
     }
 }
 
-/// 渲染进程内存信息：RSS + WebKit 自杀阈值（系统内存一半，字节）。
+/// 渲染进程内存信息：RSS + 系统内存的一半（字节）。
 /// WebProcess 的 PPid 是本 UI 进程，据此精确匹配当前实例（多实例并存时互不干扰）。
-/// 前端定期采样，RSS 接近阈值时提示用户，防窗口假死。
+/// 前端定期采样，RSS 过高时提示用户（仅预警，WebKit 自杀机制已禁用）。
 #[derive(serde::Serialize)]
 struct WebProcessMem {
     rss: u64,
-    /// WebKit 内存压力机制的自杀阈值（≈ 系统内存一半）
+    /// WebKit 默认内存压力阈值（≈ 系统内存一半）；该自杀机制已禁用，仅作系统总量参考
     threshold: u64,
 }
 
@@ -1052,7 +1052,7 @@ fn webprocess_rss() -> WebProcessMem {
             }
         }
     }
-    // WebKit 内存压力阈值 ≈ 系统总内存的一半（WebKitGTK Linux MemoryPressureHandler 默认）
+    // 仍按「系统内存一半」返回，仅供前端按总量分档预警（WebKit 自杀机制已禁用）
     let threshold = system_memory_kb().saturating_mul(1024) / 2;
     WebProcessMem { rss: max_rss, threshold }
 }
@@ -1073,6 +1073,12 @@ fn system_memory_kb() -> u64 {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 关闭 WebKitGTK 内存压力监控：其默认在 WebProcess RSS ≈ 系统内存一半时直接
+    // 杀死渲染进程，导致窗口全透明假死、正常运行的子进程随应用重启被终止。
+    // 关闭后不再有该人为上限，极端内存压力交由系统 OOM 兜底；前端采样预警保留。
+    // 必须在创建 WebView 前设置，WebProcess 继承本进程环境变量。
+    #[cfg(target_os = "linux")]
+    std::env::set_var("WEBKIT_DISABLE_MEMORY_PRESSURE_MONITOR", "1");
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -1118,7 +1124,7 @@ pub fn run() {
             });
             let _ = window;
             // WebProcess 崩溃自动恢复：渲染进程（WebKitWebProcess）承载全部前端 JS，
-            // 长时间运行可能被 WebKit 内存压力机制杀死，导致窗口全透明假死。
+            // 异常崩溃会导致窗口全透明假死（内存压力自杀已禁用，此为兜底路径）。
             // 连接 web-process-terminated 信号（v2_20 起替代已弃用的 web-process-crashed），
             // 崩溃后自动 reload 恢复界面。
             #[cfg(target_os = "linux")]

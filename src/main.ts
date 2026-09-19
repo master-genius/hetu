@@ -746,10 +746,9 @@ async function bootstrap() {
   window.setInterval(pollLocalTitles, 2000);
 
   // ---------- 渲染进程内存预警 ----------
-  // WebKitWebProcess 长时间运行可能膨胀（堆只涨不缩），接近 WebKit 自杀阈值
-  // （系统内存一半）时窗口会全透明假死。定期采样 RSS，达到阈值提示用户重启避险；
-  // 崩溃本身由 Rust 侧 web-process-terminated 自动 reload 兜底。
-  // 预警阈值按系统总内存分档：
+  // WebKitWebProcess 长时间运行可能膨胀（堆只涨不缩）。WebKit 自带的「内存过半
+  // 即自杀」机制已在后端禁用（WEBKIT_DISABLE_MEMORY_PRESSURE_MONITOR=1），不再
+  // 主动终止进程；此处仅按系统总内存分档预警，提示用户自行重启避险：
   //   ≥64GB→8GB  32GB→5GB  16GB→4GB  <16GB→3GB
   // 崩溃兜底由 Rust 侧 web-process-terminated 自动 reload 负责，不受此阈值影响。
   const GB = 1024 * 1024 * 1024;
