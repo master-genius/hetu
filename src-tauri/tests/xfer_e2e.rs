@@ -249,7 +249,7 @@ async fn overwrite_is_refused_without_force_and_leaves_target_intact() {
 
 #[tokio::test]
 #[ignore = "需要本地 127.0.0.1:2222 隔离 sshd"]
-async fn cancel_removes_partial_files_on_both_ends() {
+async fn cancel_removes_partial_file_when_target_is_new() {
     let local = Scratch::new("cancel");
     let name = local.path("big.bin");
     std::fs::write(&name, vec![0x5A_u8; 3 * 1024 * 1024]).unwrap();
@@ -263,7 +263,7 @@ async fn cancel_removes_partial_files_on_both_ends() {
         .await
         .expect("准备用上传失败");
 
-    // 预置取消位：循环在搬完第 0 块前就退出，但目标文件已经 create——
+    // 预置取消位：循环在搬完第 0 块前就退出，但写入目标已经 create——
     // 这正是「半成品必须被删掉」那段清理逻辑的靶心。
     let cancel = Cancel::new();
     cancel.trigger();
@@ -272,7 +272,10 @@ async fn cancel_removes_partial_files_on_both_ends() {
         .await
         .expect_err("已置位取消时应中止");
     assert!(matches!(err, Error::Cancelled), "应报告取消，实际: {err}");
-    assert!(!local.path("down.bin").exists(), "下载取消后本地不得留下半成品");
+    assert!(
+        !local.path("down.bin").exists(),
+        "目标本不存在时取消，不得留下半成品"
+    );
 
     cleanup(&conn, &remote).await;
     let err = xfer::put(&conn, name.to_str().unwrap(), ROOT, false, &cancel)
@@ -292,7 +295,128 @@ async fn cancel_removes_partial_files_on_both_ends() {
     assert!(remote_has(&conn, &remote).await, "对照组失败：正常上传也没落盘");
 
     cleanup(&conn, &remote).await;
-    println!("PASS: 双向取消均报告 Cancelled 且清除半成品");
+    println!("PASS: 新目标取消 → 半成品被清除，且对照组证明传输本身可用");
+}
+
+/// 回归锁（分析确认的数据丢失路径）：**覆盖既有目标时取消，既有内容必须逐字节无损**。
+/// 旧实现用 File::create / sftp.create 直接打开最终名，O_TRUNC 在写第一字节前就清空了
+/// 用户文件——此时取消无论删不删，数据都已丢。现在覆盖走「临时名 → rename」，
+/// 取消只删临时名，既有文件从未被打开。
+#[tokio::test]
+#[ignore = "需要本地 127.0.0.1:2222 隔离 sshd"]
+async fn cancel_during_forced_overwrite_leaves_existing_content_intact() {
+    let local = Scratch::new("cancel_overwrite");
+    let conn = connect().await;
+    ensure_root(&conn).await;
+    let live = Cancel::new();
+    // 预置取消：任何搬运一开工就中止
+    let cancel = Cancel::new();
+    cancel.trigger();
+
+    // ---- 下载方向：本地目标已存在且有内容 ----
+    let keeper = local.path("keep.bin");
+    std::fs::write(&keeper, b"PRECIOUS-LOCAL-DATA").unwrap();
+    let remote = format!("{ROOT}/keep.bin");
+    std::fs::write(&keeper, b"OTHER-CONTENT-FOR-SOURCE").unwrap();
+    xfer::put(&conn, keeper.to_str().unwrap(), ROOT, true, &live)
+        .await
+        .expect("准备远端源失败");
+    std::fs::write(&keeper, b"PRECIOUS-LOCAL-DATA").unwrap();
+
+    let err = xfer::get(&conn, &remote, keeper.to_str().unwrap(), true, &cancel)
+        .await
+        .expect_err("--force 下载覆盖已存在文件时取消应中止");
+    assert!(matches!(err, Error::Cancelled));
+    assert_eq!(
+        std::fs::read(&keeper).unwrap(),
+        b"PRECIOUS-LOCAL-DATA",
+        "取消不得损坏既有本地文件（旧实现在此处已把它截成 0 长度）"
+    );
+
+    // ---- 上传方向：远端目标已存在且有内容 ----
+    let up = local.path("up.bin");
+    std::fs::write(&up, vec![7_u8; 64 * 1024]).unwrap();
+    xfer::put(&conn, up.to_str().unwrap(), ROOT, true, &live)
+        .await
+        .expect("准备远端目标失败");
+    let remote_target = format!("{ROOT}/up.bin");
+    let before = read_remote(&conn, &remote_target).await;
+    std::fs::write(&up, vec![8_u8; 128 * 1024]).unwrap();
+
+    let err = xfer::put(&conn, up.to_str().unwrap(), ROOT, true, &cancel)
+        .await
+        .expect_err("--force 上传覆盖已存在文件时取消应中止");
+    assert!(matches!(err, Error::Cancelled));
+    assert_eq!(
+        read_remote(&conn, &remote_target).await,
+        before,
+        "取消不得损坏既有远端文件"
+    );
+
+    // 且不得留下任何 .part 垃圾
+    let sess = sftp::session(&conn).await.unwrap();
+    for entry in sess.read_dir(ROOT.to_string()).await.unwrap() {
+        assert!(
+            !entry.file_name().contains(".part"),
+            "取消后远端残留临时名 {}",
+            entry.file_name()
+        );
+    }
+
+    cleanup(&conn, &remote).await;
+    cleanup(&conn, &remote_target).await;
+    println!("PASS: 覆盖场景取消，既有内容双向无损且无临时名残留");
+}
+
+/// 回归锁：`--force` 下载目录到**本地已存在目录**时取消，该目录里与本次下载无关的
+/// 既有文件必须仍在。旧实现的回滚是 `remove_dir_all(root)`，会把整棵树（含用户既有
+/// 内容）一并删掉。
+#[tokio::test]
+#[ignore = "需要本地 127.0.0.1:2222 隔离 sshd"]
+async fn cancel_during_forced_directory_get_keeps_unrelated_existing_files() {
+    let local = Scratch::new("dir_cancel");
+    let conn = connect().await;
+    ensure_root(&conn).await;
+    let live = Cancel::new();
+    let sess = sftp::session(&conn).await.unwrap();
+
+    // 远端源目录：put 的落点名取自本地 basename，故本地文件就叫 in.txt
+    let src_dir = format!("{ROOT}/dsrc");
+    let _ = sess.create_dir(src_dir.clone()).await;
+    let seed = local.path("in.txt");
+    std::fs::write(&seed, vec![9_u8; 128 * 1024]).unwrap();
+    xfer::put(&conn, seed.to_str().unwrap(), &src_dir, false, &live)
+        .await
+        .expect("准备远端源目录内容失败");
+
+    // 本地已存在同名目录，里面有一个本次下载绝不涉及的文件
+    let parent = local.path("mirror");
+    let root = parent.join("dsrc");
+    std::fs::create_dir_all(&root).unwrap();
+    let unrelated = root.join("unrelated.txt");
+    std::fs::write(&unrelated, b"MUST-SURVIVE").unwrap();
+
+    let cancel = Cancel::new();
+    cancel.trigger();
+    let err = xfer::get(&conn, &src_dir, parent.to_str().unwrap(), true, &cancel)
+        .await
+        .expect_err("--force 目录下载取消应中止");
+    assert!(matches!(err, Error::Cancelled));
+
+    assert!(root.exists(), "既有目录不得因取消而被整体删除");
+    assert!(
+        unrelated.exists(),
+        "与本次下载无关的既有文件被删掉了——旧的 remove_dir_all 回滚正是这个缺陷"
+    );
+    assert_eq!(
+        std::fs::read(&unrelated).unwrap(),
+        b"MUST-SURVIVE",
+        "既有文件内容必须原样保留"
+    );
+
+    let _ = sess.remove_file(format!("{src_dir}/in.txt")).await;
+    cleanup(&conn, &src_dir).await;
+    println!("PASS: --force 目录下载取消后，无关既有文件完好（未整树被删）");
 }
 
 #[tokio::test]

@@ -5,14 +5,18 @@
 //! 无法构造 AppHandle。故本模块只复用 sftp 的 pub 原语（`session`/`invalidate`/`stat`），
 //! 搬运循环独立实现。walk / 条目判定的函数形状与 `super::sftp` 刻意对齐，便于将来收敛。
 //!
-//! 与 GUI 路径的三处有意差异：
+//! 与 GUI 路径的四处有意差异：
 //! - 取消：SIGINT 置位 `Cancel`，循环每块前检查（GUI 用 TransferCtl 的 watch 通道，gate 私有）
 //! - 无 SFTP→exec 回退：子系统不可用直接报错，不重复 GUI 的 base64-over-exec 兜底
 //! - 目标已存在默认拒绝（GUI 有前端确认框兜底，CLI 多为脚本无人值守，静默覆盖更危险）
+//! - 覆盖既有目标走「临时名 → rename」，因此取消/失败时既有文件逐字节无损。
+//!   GUI 的 download/upload 是直接 `create(最终名)`（O_TRUNC 先清空），取消时既有内容
+//!   已经没了；目录回滚更用 remove_dir_all 连用户既有文件一起删。本模块修正了这一点，
+//!   **GUI 侧的同源风险仍在**（按约定 sftp.rs 不改动）。
 
 use std::io::IsTerminal;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -62,6 +66,15 @@ impl Cancel {
             Ok(())
         }
     }
+}
+
+/// 覆盖写临时名用的短标识：进程号 + 进程内递增序号，足以区分并发传输。
+/// GUI 侧用 transfer_id 前 8 位做同样的事（见 super::sftp::copy_file_between）。
+static PART_SEQ: AtomicU32 = AtomicU32::new(0);
+
+fn transfer_tag() -> String {
+    let n = PART_SEQ.fetch_add(1, Ordering::Relaxed);
+    format!("{:x}-{:x}", std::process::id(), n)
 }
 
 // ---------- 进度输出 ----------
@@ -193,13 +206,14 @@ type TreeFile = (String, String, u64);
 /// 目录树遍历结果：（相对目录列表, 文件列表, 全部文件的总字节数）
 type Tree = (Vec<String>, Vec<TreeFile>, u64);
 
-/// 遍历本地目录树
-fn walk_local(base: &Path) -> Result<Tree> {
+/// 遍历本地目录树。逐目录检查取消，使大目录树也能即时中止。
+fn walk_local(base: &Path, cancel: &Cancel) -> Result<Tree> {
     let mut dirs = Vec::new();
     let mut files = Vec::new();
     let mut total = 0u64;
     let mut stack = vec![base.to_path_buf()];
     while let Some(dir) = stack.pop() {
+        cancel.check()?;
         for entry in std::fs::read_dir(&dir)? {
             let entry = entry?;
             let path = entry.path();
@@ -225,13 +239,16 @@ fn walk_local(base: &Path) -> Result<Tree> {
     Ok((dirs, files, total))
 }
 
-/// 遍历远端目录树
-async fn walk_remote(sftp: &SftpSession, base: &str) -> Result<Tree> {
+/// 遍历远端目录树。每次 read_dir 前检查取消——GUI 侧用 preempt 包住整个枚举使其可中断
+/// （super::sftp::download），此处用同样的循环内检查达到同一语义：远端大目录枚举期间
+/// Ctrl-C 也能即时生效，而不是等枚举跑完才有反应。
+async fn walk_remote(sftp: &SftpSession, base: &str, cancel: &Cancel) -> Result<Tree> {
     let mut dirs = Vec::new();
     let mut files = Vec::new();
     let mut total = 0u64;
     let mut stack = vec![String::new()];
     while let Some(rel) = stack.pop() {
+        cancel.check()?;
         let full = if rel.is_empty() {
             base.to_string()
         } else {
@@ -332,13 +349,35 @@ fn sh_quote(s: &str) -> String {
 
 // ---------- 存在性判定与覆盖保护 ----------
 
-/// 远端目标是否已存在。metadata 失败按「不存在」处理——父目录尚不存在时必然失败，
-/// 而这正是允许写入的正常情况。
-async fn remote_exists(sftp: &SftpSession, path: &str) -> bool {
-    matches!(
-        tokio::time::timeout(META_TIMEOUT, sftp.metadata(path)).await,
-        Ok(Ok(_))
-    )
+/// 远端目标的类型：None=不存在，Some(true)=目录，Some(false)=普通文件。
+/// metadata 失败按「不存在」处理——父目录尚不存在时必然失败，而这正是允许写入的正常情况。
+async fn remote_kind(sftp: &SftpSession, path: &str) -> Option<bool> {
+    match tokio::time::timeout(META_TIMEOUT, sftp.metadata(path)).await {
+        Ok(Ok(m)) => Some(is_dir_mode(m.permissions.unwrap_or(0))),
+        _ => None,
+    }
+}
+
+/// 本地路径是否为目录（不存在时为 false）。跟随符号链接，与 create_dir_all 的判据一致。
+fn local_is_dir(path: &str) -> bool {
+    Path::new(path).is_dir()
+}
+
+/// 已存在的目标若与本次要写入的类型不符（文件↔目录），提前报可读错误。
+/// 不加这层判定的话，要等到 rename 阶段才炸出底层 errno（EISDIR/ENOTDIR），
+/// 用户看不出是「目标是个目录」。
+fn guard_kind(exists: bool, target: &str, want_dir: bool, is_dir: bool) -> Result<()> {
+    if exists && want_dir != is_dir {
+        let (a, b) = if want_dir {
+            ("目录", "文件")
+        } else {
+            ("文件", "目录")
+        };
+        return Err(Error::msg(format!(
+            "目标已存在且是{b}，无法替换为{a}: {target}"
+        )));
+    }
+    Ok(())
 }
 
 fn local_exists(path: &str) -> bool {
@@ -380,30 +419,48 @@ async fn cleanup_bounded(fut: impl std::future::Future<Output = ()>) {
     let _ = tokio::time::timeout(CLEANUP_TIMEOUT, fut).await;
 }
 
-/// 远端单文件 → 本地文件。取消时删除半成品本地文件。
+/// 远端单文件 → 本地文件。
+///
+/// `overwrite=false`（目标不存在）：直接写最终名，取消/失败时删掉它——本次新建，
+/// 删除不丢任何既有数据，行为与逐字节直写等价（零额外开销）。
+/// `overwrite=true`（目标已存在且已获 --force 授权）：先写 `{最终名}.{tag}.part`，
+/// 全部写完才删旧目标并 rename 覆盖。取消/失败只删临时名，**既有文件逐字节无损**
+/// （与 copy_file 既有的临时名策略同构）。
+/// 反例是原先的 `File::create`：O_TRUNC 在写第一字节之前就把既有文件清成 0 长度，
+/// 此时无论取消时删不删，用户数据都已丢失。
 async fn pull_file(
     sftp: &SftpSession,
     remote: &str,
     local: &str,
+    overwrite: bool,
     cancel: &Cancel,
     prog: &mut Progress,
     done: &mut u64,
 ) -> Result<()> {
+    let tmp = overwrite.then(|| format!("{local}.{}.part", transfer_tag()));
+    let write_to = tmp.as_deref().unwrap_or(local);
+
     let mut src = sftp.open(remote).await?;
-    let mut dst = tokio::fs::File::create(local).await?;
+    let mut dst = tokio::fs::File::create(write_to).await?;
     let mut buf = vec![0u8; CHUNK];
     loop {
         // 取消必须在返回前清掉半成品：CLI 的核心卖点之一就是 Ctrl-C 不留脏文件
         if let Err(e) = cancel.check() {
-            discard_local(dst, local).await;
+            discard_local(dst, write_to).await;
             return Err(e);
         }
-        let n = src.read(&mut buf).await?;
+        let n = match src.read(&mut buf).await {
+            Ok(n) => n,
+            Err(e) => {
+                discard_local(dst, write_to).await;
+                return Err(e.into());
+            }
+        };
         if n == 0 {
             break;
         }
         if let Err(e) = dst.write_all(&buf[..n]).await {
-            discard_local(dst, local).await;
+            discard_local(dst, write_to).await;
             return Err(e.into());
         }
         *done += n as u64;
@@ -411,8 +468,35 @@ async fn pull_file(
     }
     dst.flush().await?;
     drop(dst);
-    preserve_to_local(sftp, remote, local).await;
-    Ok(())
+    // 权限设在临时名上：rename 是同 inode 改名，权限随文件一起落到最终名
+    preserve_to_local(sftp, remote, write_to).await;
+    match tmp {
+        None => Ok(()),
+        Some(tmp) => commit_local(&tmp, local).await,
+    }
+}
+
+/// 覆盖本地既有文件：删旧目标再 rename（与 copy_file 的远端序列一致）。
+/// rename 失败时**保留临时名**——数据已完整写在里面，删它才是真的丢数据。
+async fn commit_local(tmp: &str, final_path: &str) -> Result<()> {
+    let _ = tokio::fs::remove_file(final_path).await;
+    tokio::fs::rename(tmp, final_path).await.map_err(|e| {
+        Error::msg(format!(
+            "覆盖 {final_path} 失败: {e}；已完整传输的数据保留在 {tmp}，请手工移回"
+        ))
+    })
+}
+
+/// 覆盖远端既有文件：同上。SFTP RENAME 对已存在目标可能失败，故先删再改名。
+async fn commit_remote(sftp: &SftpSession, tmp: &str, final_path: &str) -> Result<()> {
+    let _ = sftp.remove_file(final_path).await;
+    sftp.rename(tmp.to_string(), final_path.to_string())
+        .await
+        .map_err(|e| {
+            Error::msg(format!(
+                "覆盖 {final_path} 失败: {e}；已完整传输的数据保留在 {tmp}，请手工移回"
+            ))
+        })
 }
 
 /// 下载（文件或整棵目录）。
@@ -433,24 +517,29 @@ pub async fn get(
         let mut done = 0u64;
 
         if !is_dir_mode(meta.permissions.unwrap_or(0)) {
-            let target = if local_exists(&local) && Path::new(&local).is_dir() {
+            let target = if local_is_dir(&local) {
                 format!("{}/{}", local.trim_end_matches('/'), name)
             } else {
                 local.clone()
             };
-            guard(force, local_exists(&target), &target)?;
+            let target_existed = local_exists(&target);
+            guard(force, target_existed, &target)?;
+            guard_kind(target_existed, &target, false, local_is_dir(&target))?;
             let total = meta.size.unwrap_or(0);
             let mut prog = Progress::new(total);
             prog.label(&format!("{name} → {target}"));
-            pull_file(&sftp, remote, &target, cancel, &mut prog, &mut done).await?;
+            // 目标已存在（--force 授权）→ 走临时名，取消/失败绝不触碰既有内容
+            pull_file(&sftp, remote, &target, target_existed, cancel, &mut prog, &mut done).await?;
             prog.finish();
             return Ok(());
         }
 
         // 目录：local 是父目录，先建骨架再逐文件下载
         let root = format!("{}/{}", local.trim_end_matches('/'), name);
-        guard(force, local_exists(&root), &root)?;
-        let (dirs, files, total) = walk_remote(&sftp, remote).await?;
+        let root_existed = local_exists(&root);
+        guard(force, root_existed, &root)?;
+        guard_kind(root_existed, &root, true, local_is_dir(&root))?;
+        let (dirs, files, total) = walk_remote(&sftp, remote, cancel).await?;
         let count = files.len();
         tokio::fs::create_dir_all(&root).await?;
         for d in &dirs {
@@ -459,11 +548,22 @@ pub async fn get(
         let mut prog = Progress::new(total);
         for (i, (rpath, rel, _)) in files.iter().enumerate() {
             prog.label(&format!("{name}/{rel} ({}/{count})", i + 1));
-            if let Err(e) =
-                pull_file(&sftp, rpath, &format!("{root}/{rel}"), cancel, &mut prog, &mut done).await
+            if let Err(e) = pull_file(
+                &sftp,
+                rpath,
+                &format!("{root}/{rel}"),
+                root_existed,
+                cancel,
+                &mut prog,
+                &mut done,
+            )
+            .await
             {
-                // 取消：回滚整棵已下载的目录树，不留半成品
-                if matches!(e, Error::Cancelled) {
+                // 取消：root 是本次 mkdir 出来的 → 整树删掉不丢任何既有数据；
+                // root 本就存在（--force）→ 什么都不删。此时每个文件的半成品都是临时名，
+                // 已由 pull_file 自行清理，既有内容从未被触碰；批量删除既有目录树
+                // 才是不可逆的丢数据。
+                if matches!(e, Error::Cancelled) && !root_existed {
                     let _ = tokio::time::timeout(CLEANUP_TIMEOUT, tokio::fs::remove_dir_all(&root)).await;
                 }
                 return Err(e);
@@ -482,30 +582,46 @@ pub async fn get(
 
 // ---------- 上传 ----------
 
-/// 本地单文件 → 远端文件。写失败或取消时删除半成品远端文件。
+/// 本地单文件 → 远端文件。取消语义与 pull_file 完全对称：
+/// `overwrite=false` 直写最终名并清理；`overwrite=true` 写临时名，全部写完才替换既有文件。
 async fn push_file(
     sftp: &SftpSession,
     local: &str,
     remote: &str,
+    overwrite: bool,
     cancel: &Cancel,
     prog: &mut Progress,
     done: &mut u64,
 ) -> Result<()> {
+    let tmp = overwrite.then(|| format!("{remote}.{}.part", transfer_tag()));
+    let write_to = tmp.as_deref().unwrap_or(remote);
+
     let mut src = tokio::fs::File::open(local).await?;
-    let mut dst = sftp.create(remote).await?;
+    let mut dst = sftp.create(write_to).await?;
     let mut buf = vec![0u8; CHUNK];
     loop {
-        // 取消必须在返回前清掉远端半成品，否则远端留下一个静默截断的文件
+        // 取消/失败必须清掉正在写的目标；写临时名时既有远端文件根本未被触碰
         if let Err(e) = cancel.check() {
             cleanup_bounded(async {
                 let _ = dst.shutdown().await;
                 drop(dst);
-                let _ = sftp.remove_file(remote).await;
+                let _ = sftp.remove_file(write_to).await;
             })
             .await;
             return Err(e);
         }
-        let n = src.read(&mut buf).await?;
+        let n = match src.read(&mut buf).await {
+            Ok(n) => n,
+            Err(e) => {
+                cleanup_bounded(async {
+                    let _ = dst.shutdown().await;
+                    drop(dst);
+                    let _ = sftp.remove_file(write_to).await;
+                })
+                .await;
+                return Err(e.into());
+            }
+        };
         if n == 0 {
             break;
         }
@@ -513,7 +629,7 @@ async fn push_file(
             cleanup_bounded(async {
                 let _ = dst.shutdown().await;
                 drop(dst);
-                let _ = sftp.remove_file(remote).await;
+                let _ = sftp.remove_file(write_to).await;
             })
             .await;
             return Err(e.into());
@@ -524,8 +640,12 @@ async fn push_file(
     dst.flush().await?;
     dst.shutdown().await?;
     drop(dst);
-    preserve_to_remote(sftp, local, remote).await;
-    Ok(())
+    // 权限设在临时名上，rename 是同 inode 改名，权限随文件落到最终名
+    preserve_to_remote(sftp, local, write_to).await;
+    match tmp {
+        None => Ok(()),
+        Some(tmp) => commit_remote(sftp, &tmp, remote).await,
+    }
 }
 
 /// 上传（文件或整棵目录）到远端目录 `remote_dir` 下，返回远端根路径。
@@ -547,34 +667,48 @@ pub async fn put(
     let sftp = sftp::session(conn).await?;
     let result = async {
         let meta = tokio::fs::metadata(local_path).await?;
-        let exists = remote_exists(&sftp, &remote_root).await;
-        guard(force, exists, &remote_root)?;
+        let kind = remote_kind(&sftp, &remote_root).await;
+        let root_existed = kind.is_some();
+        guard(force, root_existed, &remote_root)?;
+        guard_kind(root_existed, &remote_root, meta.is_dir(), kind == Some(true))?;
         let mut done = 0u64;
 
         if !meta.is_dir() {
             let total = meta.len();
             let mut prog = Progress::new(total);
             prog.label(&format!("{name} → {remote_root}"));
-            push_file(&sftp, &local, &remote_root, cancel, &mut prog, &mut done).await?;
+            push_file(&sftp, &local, &remote_root, root_existed, cancel, &mut prog, &mut done).await?;
             prog.finish();
             return Ok(());
         }
 
-        // 目录：先建远端骨架（子目录已存在则忽略），再逐文件上传。
-        // 根目录存在性已由 guard 拦下，故取消时可安全整树回滚——整棵树都属于本次新建
-        let (dirs, files, total) = walk_local(local_path)?;
+        // 目录：先建远端骨架（子目录已存在则忽略），再逐文件上传
+        let (dirs, files, total) = walk_local(local_path, cancel)?;
         let count = files.len();
-        ensure_remote_dir(&sftp, &remote_root, !exists).await?;
+        ensure_remote_dir(&sftp, &remote_root, !root_existed).await?;
         for d in &dirs {
+            cancel.check()?;
             let _ = sftp.create_dir(format!("{remote_root}/{d}")).await;
         }
         let mut prog = Progress::new(total);
         for (i, (lpath, rel, _)) in files.iter().enumerate() {
             prog.label(&format!("{name}/{rel} ({}/{count})", i + 1));
-            if let Err(e) =
-                push_file(&sftp, lpath, &format!("{remote_root}/{rel}"), cancel, &mut prog, &mut done).await
+            if let Err(e) = push_file(
+                &sftp,
+                lpath,
+                &format!("{remote_root}/{rel}"),
+                root_existed,
+                cancel,
+                &mut prog,
+                &mut done,
+            )
+            .await
             {
-                if matches!(e, Error::Cancelled) {
+                // 取消回滚的前提是「整棵树都属于本次新建」。root 本就存在时（--force 覆盖）
+                // 树里可能有用户的既有内容，rollback 里的 remove_dir 会连带删掉空目录、
+                // 已完成的文件则是本次覆盖写入的——删它等于删用户数据，故此处什么都不做。
+                // 每个文件的半成品都是临时名，已由 push_file 自行清理。
+                if matches!(e, Error::Cancelled) && !root_existed {
                     rollback_remote(&sftp, &remote_root, &dirs, &files).await;
                 }
                 return Err(e);
@@ -627,7 +761,8 @@ async fn copy_file(
     done: &mut u64,
 ) -> Result<()> {
     let mut sf = src_sftp.open(src).await?;
-    let tmp = format!("{dst}.part");
+    // 临时名带进程唯一标识：两个传输进程指向同一目标时不会互相踩同一个 .part
+    let tmp = format!("{dst}.{}.part", transfer_tag());
     let mut df = dst_sftp.create(&tmp).await?;
     let mut buf = vec![0u8; CHUNK];
     loop {
@@ -640,7 +775,18 @@ async fn copy_file(
             .await;
             return Err(e);
         }
-        let n = sf.read(&mut buf).await?;
+        let n = match sf.read(&mut buf).await {
+            Ok(n) => n,
+            Err(e) => {
+                cleanup_bounded(async {
+                    let _ = df.shutdown().await;
+                    drop(df);
+                    let _ = dst_sftp.remove_file(tmp.as_str()).await;
+                })
+                .await;
+                return Err(e.into());
+            }
+        };
         if n == 0 {
             break;
         }
@@ -659,10 +805,7 @@ async fn copy_file(
     df.flush().await?;
     df.shutdown().await?;
     drop(df);
-    // SFTP RENAME 在目标已存在时可能失败：先删旧目标（此处必然已获 --force 授权）再改名
-    let _ = dst_sftp.remove_file(dst).await;
-    dst_sftp.rename(&tmp, dst).await?;
-    Ok(())
+    commit_remote(dst_sftp, &tmp, dst).await
 }
 
 /// 远程 → 远程复制（文件或目录）。同一服务器优先 `cp -a`（零中转带宽），
@@ -705,8 +848,13 @@ pub async fn cp(
                 return Err(Error::msg("不能把目录复制到它自己的子目录中"));
             }
         }
-        let exists = remote_exists(&dst_sftp, &dst_root).await;
-        guard(force, exists, &dst_root)?;
+        let exists = {
+            let kind = remote_kind(&dst_sftp, &dst_root).await;
+            let exists = kind.is_some();
+            guard(force, exists, &dst_root)?;
+            guard_kind(exists, &dst_root, is_dir, kind == Some(true))?;
+            exists
+        };
 
         // 快路径：同一连接 → 服务器内 cp -a，不占任何上行/下行带宽
         if same_conn {
@@ -727,20 +875,23 @@ pub async fn cp(
         }
 
         let mut done = 0u64;
-        let total = if is_dir { walk_total(&src_sftp, &canon_src).await? } else { meta.size.unwrap_or(0) };
-        let mut prog = Progress::new(total);
         if !is_dir {
+            let total = meta.size.unwrap_or(0);
+            let mut prog = Progress::new(total);
             prog.label(&format!("{name} → {dst_root}"));
             copy_file(&src_sftp, &dst_sftp, &canon_src, &dst_root, cancel, &mut prog, &mut done).await?;
             prog.finish();
             return Ok(dst_root);
         }
-        let (dirs, files, _) = walk_remote(&src_sftp, &canon_src).await?;
+        // 目录：只遍历一次，(dirs, files, total) 同时供骨架创建与进度分母使用
+        let (dirs, files, total) = walk_remote(&src_sftp, &canon_src, cancel).await?;
         let count = files.len();
         ensure_remote_dir(&dst_sftp, &dst_root, !exists).await?;
         for d in &dirs {
+            cancel.check()?;
             let _ = dst_sftp.create_dir(format!("{dst_root}/{d}")).await;
         }
+        let mut prog = Progress::new(total);
         for (i, (spath, rel, _)) in files.iter().enumerate() {
             prog.label(&format!("{name}/{rel} ({}/{count})", i + 1));
             copy_file(&src_sftp, &dst_sftp, spath, &format!("{dst_root}/{rel}"), cancel, &mut prog, &mut done).await?;
@@ -754,12 +905,6 @@ pub async fn cp(
         sftp::invalidate(dst_conn).await;
     }
     result
-}
-
-/// 目录复制前算总量用于进度分母；随后 walk_remote 会再遍历一次。
-/// 大目录多一趟往返，但进度条没有分母就不可能显示百分比——取这个代价。
-async fn walk_total(sftp: &SftpSession, base: &str) -> Result<u64> {
-    Ok(walk_remote(sftp, base).await?.2)
 }
 
 #[cfg(test)]
@@ -835,6 +980,43 @@ mod tests {
         assert!(guard(false, true, "/t").is_err());
         assert!(guard(true, true, "/t").is_ok());
         assert!(guard(false, false, "/t").is_ok());
+    }
+
+    /// 类型不符必须提前拦下（文件↔目录不可互相替换），类型一致或目标不存在都放行。
+    /// 不拦的话要等 commit_* 的 rename 才炸出底层 errno。
+    #[test]
+    fn guard_kind_rejects_only_type_mismatch() {
+        assert!(guard_kind(false, "/t", false, false).is_ok(), "目标不存在应放行");
+        assert!(guard_kind(true, "/t", false, false).is_ok(), "文件覆盖文件应放行");
+        assert!(guard_kind(true, "/t", true, true).is_ok(), "目录合并目录应放行");
+        assert!(guard_kind(true, "/t", false, true).is_err(), "不得用文件替换目录");
+        assert!(guard_kind(true, "/t", true, false).is_err(), "不得用目录替换文件");
+    }
+
+    /// 临时名每次调用必须唯一：两个传输指向同一目标时不能踩同一个 .part。
+    #[test]
+    fn transfer_tag_is_unique_per_call() {
+        assert_ne!(transfer_tag(), transfer_tag());
+    }
+
+    /// 覆盖写的临时名与最终名同目录、同前缀，且绝不等于最终名本身
+    /// （跨目录 rename 在 SFTP 上可能不被支持，同目录才保证 rename 是原子的）。
+    #[test]
+    fn part_name_stays_in_target_directory() {
+        let dir = "/srv/data";
+        let final_path = format!("{dir}/ckpt.bin");
+        let tmp = format!("{dir}/ckpt.bin.{}.part", transfer_tag());
+        assert!(tmp.starts_with(&final_path));
+        assert!(tmp.ends_with(".part"));
+        assert_ne!(tmp, final_path);
+        assert_eq!(tmp.rsplit('/').next().unwrap().split('.').next().unwrap(), "ckpt");
+    }
+
+    /// local_is_dir 对不存在的路径必须返回 false（不能把「不存在」误判成「是文件」）。
+    #[test]
+    fn local_is_dir_handles_absent_path() {
+        assert!(!local_is_dir("/nonexistent-path-for-hsshx-test"));
+        assert!(local_is_dir(env!("CARGO_MANIFEST_DIR")));
     }
 
     #[test]

@@ -106,6 +106,12 @@ fn is_job_flag(a: &str) -> bool {
     matches!(a, "--get" | "--put" | "--cp" | "--ls" | "--stat")
 }
 
+/// hsshx 自有选项。出现在操作数位置时**不能**当路径取走——
+/// 否则 `--get --force /x` 会把 `--force` 静默当成远端路径发给服务器。
+fn is_hsshx_option(a: &str) -> bool {
+    is_job_flag(a) || matches!(a, "--force" | "-f" | "--file")
+}
+
 /// 解析 `<连接项>` 及其后的参数。
 ///
 /// 兼容性规则：
@@ -179,12 +185,13 @@ fn parse_args(args: &[String]) -> Result<Spec, String> {
 /// 从 `i` 处按 `flag` 的元数取走操作数。可选操作数有默认值：
 /// `--get` 的落点默认当前目录，`--ls` 的路径默认远端 home。
 fn take_job(flag: &str, args: &[String], i: &mut usize) -> Result<Job, String> {
-    let mut take = || {
-        let s = args.get(*i).cloned();
-        if s.is_some() {
+    let mut take = || match args.get(*i) {
+        Some(a) if is_hsshx_option(a) => None,
+        Some(a) => {
             *i += 1;
+            Some(a.clone())
         }
-        s
+        None => None,
     };
     Ok(match flag {
         "--get" => Job::Get {
@@ -290,6 +297,32 @@ async fn run_job(job: Job, force: bool, profile: Profile) -> ExitCode {
         }
     };
 
+    // 跨机 --cp 的第二条连接在此建立、留在外层：这样无论成功还是失败，
+    // 结束时都能对两条连接统一优雅 disconnect（此前它在外层块的分支里被 drop，
+    // 只有 TCP 关闭、没有 SSH 层的告别）。同机（目标无前缀）时为 None，复用源连接。
+    let profiles = load_profiles();
+    let dst_conn: Option<Arc<Connection>> = match &job {
+        Job::Cp { dst, .. } => match split_dst(dst, &profiles).0 {
+            None => None,
+            Some(n) => match find_profile(&n) {
+                None => {
+                    eprintln!("hsshx: 未找到连接项「{n}」");
+                    close(&src_conn).await;
+                    return ExitCode::from(2);
+                }
+                Some(p) => match attach(conn_params(&p)).await {
+                    Ok(c) => Some(c),
+                    Err(e) => {
+                        eprintln!("hsshx: {e}");
+                        close(&src_conn).await;
+                        return ExitCode::from(255);
+                    }
+                },
+            },
+        },
+        _ => None,
+    };
+
     let outcome: Result<(), Error> = async {
         match &job {
             Job::Get { remote, local } => {
@@ -302,17 +335,9 @@ async fn run_job(job: Job, force: bool, profile: Profile) -> ExitCode {
                 Ok(())
             }
             Job::Cp { src, dst } => {
-                let (dst_name, dst_path) = split_dst(dst);
-                let dst_conn = match dst_name {
-                    None => src_conn.clone(),
-                    Some(n) => match find_profile(&n) {
-                        Some(p) => attach(conn_params(&p)).await?,
-                        None => {
-                            return Err(Error::msg(format!("未找到连接项「{n}」")))
-                        }
-                    },
-                };
-                let root = xfer::cp(&src_conn, &dst_conn, src, dst_path, force, &cancel).await?;
+                let (_, dst_path) = split_dst(dst, &profiles);
+                let dst_conn = dst_conn.as_ref().unwrap_or(&src_conn);
+                let root = xfer::cp(&src_conn, dst_conn, src, dst_path, force, &cancel).await?;
                 eprintln!("→ {root}");
                 Ok(())
             }
@@ -333,6 +358,9 @@ async fn run_job(job: Job, force: bool, profile: Profile) -> ExitCode {
     .await;
 
     close(&src_conn).await;
+    if let Some(conn) = &dst_conn {
+        close(conn).await;
+    }
 
     match outcome {
         Ok(()) => ExitCode::SUCCESS,
@@ -349,14 +377,11 @@ async fn run_job(job: Job, force: bool, profile: Profile) -> ExitCode {
 
 /// `--cp` 目标解析：`<连接项>:<路径>` → 跨机复制；无前缀 → 目标即源连接（同机 `cp -a`）。
 /// 只在冒号前缀命中已保存连接项时才拆分，避免把 `/tmp/a:b` 这类含冒号的真实路径切坏。
-fn split_dst(dst: &str) -> (Option<String>, &str) {
+/// 连接项表由调用方一次载入并传入——避免每个目标都重读一遍 profiles.json。
+fn split_dst<'a>(dst: &'a str, profiles: &[Profile]) -> (Option<String>, &'a str) {
     match dst.split_once(':') {
-        Some((head, rest)) if !head.is_empty() => {
-            if load_profiles().iter().any(|p| p.name == head) {
-                (Some(head.to_string()), rest)
-            } else {
-                (None, dst)
-            }
+        Some((head, rest)) if !head.is_empty() && profiles.iter().any(|p| p.name == head) => {
+            (Some(head.to_string()), rest)
         }
         _ => (None, dst),
     }
@@ -753,12 +778,18 @@ fn print_doc() {
     println!("  属主/属组/mtime 不保留（需 root，跨机无意义）。");
     println!("- 覆盖保护：目标已存在时默认**拒绝**并退出码 1，须显式 --force。");
     println!("  这是刻意与 GUI 不同：GUI 有确认框，CLI 多为脚本无人值守，静默截断更危险。");
-    println!("  检查发生在写第一字节之前，拒绝不会破坏既有内容。");
-    println!("- Ctrl-C 取消：在块边界退出并删除半成品（本地文件 / 远端文件 / 复制临时名），");
-    println!("  目录上传取消会回滚本次新建的整棵远端树；下载目录同理回滚本地树。");
-    println!("  退出码 130（128+SIGINT）。第二次 Ctrl-C 立即退出（清理可能卡在停滞网络上）。");
+    println!("  判定发生在任何写入之前，拒绝不会破坏既有内容。");
+    println!("- 覆盖写入是原子替换：--force 覆盖既有文件时先写 `<目标名>.<标识>.part`，");
+    println!("  全部传完才删旧目标并 rename 过去。所以取消、断连、写失败都**不会损坏既有");
+    println!("  文件**——直写最终名的话 O_TRUNC 会在传输出错前就把用户文件清空。");
+    println!("  替换阶段万一 rename 失败，保留 .part 并把其路径写进错误信息，绝不静默丢数据。");
+    println!("- 目标类型不符（要用文件替换目录，或反过来）在任何传输之前就报错。");
+    println!("- Ctrl-C 取消：数据块边界、远端目录枚举、建目录骨架处都可中止，退出码 130。");
+    println!("  清理原则是「只删本次写入的临时名，绝不批量删除既有内容」：");
+    println!("  目标目录本次新建 → 整树回滚；目标目录本就存在（--force 覆盖）→ 一个文件都不删。");
+    println!("  第二次 Ctrl-C 立即退出（清理可能卡在停滞网络上）。");
     println!("- 跨机 --cp：数据在两个 SSH 连接间流式中转，**不落本地盘**；目标先写");
-    println!("  <名>.part 再 rename，故中断/同名别名都不会截断已有数据。");
+    println!("  <名>.<标识>.part 再 rename，故中断/同名别名都不会截断已有数据。");
     println!("- 同机 --cp（同一连接项）：走服务器内 cp -a，零中转带宽且保留 mtime/权限。");
     println!("  不同连接项即使 host 相同、端口不同，也按跨机处理（保守，不误判同机）。");
     println!("- 恶意服务器防护：下载时拒绝 \".\"/\"..\"/含路径分隔符的条目名，写到不了目标目录外。");
@@ -788,7 +819,7 @@ fn print_doc() {
     println!("  0     成功（命令类：远程退出码为 0）");
     println!("  1-255 跟随远程命令退出码（命令类）");
     println!("  1     文件传输失败（含目标已存在未加 --force、远端路径不存在、权限不足）");
-    println!("  130   文件传输被 Ctrl-C 取消（半成品已清理）");
+    println!("  130   文件传输被 Ctrl-C 取消（本次写入的临时名已清理，既有内容未受影响）");
     println!("  2     参数错误 / 连接项未找到");
     println!("  255   SSH 连接或 channel 建立失败");
     println!();
@@ -831,6 +862,12 @@ fn print_doc() {
     println!("- 目录复制（--cp 目录）被取消时不回滚已复制部分：目标树与源可能存在");
     println!("  未检出的别名重叠，批量删除的风险高于留半成品。");
     println!("- 不做增量/校验和比对（非 rsync）：整树按字节搬运，是否覆盖由 --force 决定。");
+    println!("- 目录上传/下载是**合并**语义：只增改同名内容，不删除目标侧多出来的文件");
+    println!("  （不等价于 rsync --delete）。");
+    println!("- 覆盖既有大文件时，传输期间临时名与旧文件并存，磁盘峰值约 2×；");
+    println!("  这是「既有文件不会被传输出错损坏」的代价，空间紧张时可能 ENOSPC。");
+    println!("- 目录的权限位不保留（下载目录用本地 umask，上传目录用远端默认），");
+    println!("  只有文件保留 0o777 位——与 GUI 行为一致。");
     println!();
     println!("安全提示");
     println!("--------");
@@ -960,10 +997,57 @@ mod tests {
         assert!(err.contains("--force"), "实际错误: {err}");
     }
 
+    /// 回归锁：hsshx 自有选项绝不能被当成操作数取走。
+    /// 曾发生 `--get --force /x` 把字符串 "--force" 当作远端路径发给服务器（静默传错目标）。
     #[test]
-    fn cp_dst_without_colon_is_same_machine() {
-        let (conn, path) = split_dst("/plain/path");
+    fn option_is_never_taken_as_operand() {
+        assert!(
+            parse(&["hsshx", "web", "--get", "--force", "/x"]).is_err(),
+            "--force 不得被当成远端路径"
+        );
+        assert!(
+            parse(&["hsshx", "web", "--put", "./a", "--force"]).is_err(),
+            "--force 不得被当成远端目录"
+        );
+        assert!(
+            parse(&["hsshx", "web", "--stat", "--ls"]).is_err(),
+            "--ls 不得被当成 --stat 的路径"
+        );
+        // 以 -- 开头的真实路径仍要能用（它不等于任何自有选项）
+        match parse(&["hsshx", "web", "--get", "./--weird-name"]).unwrap().mode {
+            Mode::Job(Job::Get { remote, .. }) => assert_eq!(remote, "./--weird-name"),
+            _ => panic!("应解析为 Get"),
+        }
+    }
+
+    /// `--cp` 目标拆分：只有冒号前缀命中已保存连接项才算跨机，
+    /// 否则整串按路径处理（含冒号的真实文件名不被切坏）。
+    #[test]
+    fn cp_dst_split_only_on_known_profile() {
+        let profiles = [profile_named("gpu"), profile_named("web")];
+
+        let (conn, path) = split_dst("gpu:/models", &profiles);
+        assert_eq!(conn.as_deref(), Some("gpu"));
+        assert_eq!(path, "/models");
+
+        let (conn, path) = split_dst("/plain/path", &profiles);
         assert!(conn.is_none());
         assert_eq!(path, "/plain/path");
+
+        let (conn, path) = split_dst("/tmp/log:2026", &profiles);
+        assert!(conn.is_none(), "未知前缀不得被当成连接项名");
+        assert_eq!(path, "/tmp/log:2026");
+
+        // 空前缀（":/x"）不拆分，避免把空串当连接项名去查
+        let (conn, path) = split_dst(":/x", &profiles);
+        assert!(conn.is_none());
+        assert_eq!(path, ":/x");
+    }
+
+    fn profile_named(name: &str) -> Profile {
+        serde_json::from_str(&format!(
+            r#"{{"id":"{name}","name":"{name}","host":"h","port":22,"user":"u","auth":"key","source":"manual"}}"#
+        ))
+        .unwrap_or_else(|e| panic!("构造 Profile 失败: {e}"))
     }
 }
