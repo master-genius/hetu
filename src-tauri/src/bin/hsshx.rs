@@ -787,7 +787,10 @@ fn print_doc() {
     println!("- Ctrl-C 取消：数据块边界、远端目录枚举、建目录骨架处都可中止，退出码 130。");
     println!("  清理原则是「只删本次写入的临时名，绝不批量删除既有内容」：");
     println!("  目标目录本次新建 → 整树回滚；目标目录本就存在（--force 覆盖）→ 一个文件都不删。");
-    println!("  第二次 Ctrl-C 立即退出（清理可能卡在停滞网络上）。");
+    println!("  既有目录覆盖场景下，本次新建但尚未写入任何文件的**空目录骨架会留在原处**——这是");
+    println!("  「绝不批量删除既有内容」的必然代价，手工删除即可。");
+    println!("  第二次 Ctrl-C 立即退出（清理可能卡在停滞网络上）。进程被 SIGKILL 强杀、或清理被");
+    println!("  强行中止时会留下 `<名>.<标识>.part` 临时文件；下次传输不受影响，可手工清理。");
     println!("- 跨机 --cp：数据在两个 SSH 连接间流式中转，**不落本地盘**；目标先写");
     println!("  <名>.<标识>.part 再 rename，故中断/同名别名都不会截断已有数据。");
     println!("- 同机 --cp（同一连接项）：走服务器内 cp -a，零中转带宽且保留 mtime/权限。");
@@ -899,8 +902,10 @@ mod tests {
         parse_args(&argv.iter().map(|s| s.to_string()).collect::<Vec<_>>())
     }
 
-    fn temp_script() -> String {
-        let dir = std::env::temp_dir().join("hsshx-parse-tests");
+    /// 每个用例独占一份脚本文件。共用同一路径会 flaky：cargo test 并行执行时，
+    /// 另一用例的 std::fs::write（O_TRUNC）可能正撞在本用例读取的瞬间，读到空内容。
+    fn temp_script(tag: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("hsshx-parse-tests-{tag}"));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("s.sh");
         std::fs::write(&path, "uptime\n").unwrap();
@@ -919,7 +924,7 @@ mod tests {
     /// 远端收到 `bash --login -c '-f'` 并报 `bash: - : invalid option`。
     #[test]
     fn file_option_after_name_is_still_parsed() {
-        let script = temp_script();
+        let script = temp_script("after-name");
         let spec = parse(&["hsshx", "web", "-f", &script]).unwrap();
         assert_eq!(spec.name, "web");
         assert_eq!(exec_command(&spec), Some("uptime\n"), "-f 文件内容应成为命令");
@@ -928,7 +933,7 @@ mod tests {
     /// `-f` 也可出现在连接项名之前（原 parsing_flags 允许的位置）。
     #[test]
     fn file_option_before_name_works_too() {
-        let script = temp_script();
+        let script = temp_script("before-name");
         let spec = parse(&["hsshx", "-f", &script, "web"]).unwrap();
         assert_eq!(spec.name, "web");
         assert_eq!(exec_command(&spec), Some("uptime\n"));

@@ -144,10 +144,21 @@ impl Progress {
     }
 
     /// 任务收尾：TTY 下结束那一行进度（一帧都没画过则不产生任何输出）。
+    /// 幂等——收尾后置位，保证 Drop 不会重复换行。
     fn finish(&mut self) {
         if self.tty && self.painted {
             eprintln!();
+            self.painted = false;
         }
+    }
+}
+
+impl Drop for Progress {
+    /// 错误/取消路径靠它来收尾：进度器在 `?` 或提前 `return` 时离开作用域，
+    /// 若该行还在原地刷新状态就必须换行，否则紧随其后的错误信息会拼在进度后面。
+    /// 成功路径已显式 `finish()` 并把 painted 置位，故此处不会重复输出。
+    fn drop(&mut self) {
+        self.finish();
     }
 }
 
