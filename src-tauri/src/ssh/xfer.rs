@@ -559,11 +559,15 @@ pub async fn get(
         let mut prog = Progress::new(total);
         for (i, (rpath, rel, _)) in files.iter().enumerate() {
             prog.label(&format!("{name}/{rel} ({}/{count})", i + 1));
+            // 覆盖目录（--force）时按文件决策：本地 stat 无网络成本，逐文件查存在性，
+            // 只有确实已存在的文件才走临时名，新增文件直写最终名（省一次 rename）。
+            let target = format!("{root}/{rel}");
+            let overwrite = root_existed && local_exists(&target);
             if let Err(e) = pull_file(
                 &sftp,
                 rpath,
-                &format!("{root}/{rel}"),
-                root_existed,
+                &target,
+                overwrite,
                 cancel,
                 &mut prog,
                 &mut done,
@@ -677,6 +681,19 @@ pub async fn put(
     let remote_root = format!("{}/{}", remote_dir.trim_end_matches('/'), name);
     let sftp = sftp::session(conn).await?;
     let result = async {
+        // 落点父目录必须已存在：不会自动创建父级，缺失时底层只会炸出
+        // 「SFTP 错误: No such file」，用户看不出是目录没建，故显式探测。
+        match remote_kind(&sftp, remote_dir).await {
+            Some(true) => {}
+            Some(false) => {
+                return Err(Error::msg(format!("远端路径不是目录: {remote_dir}")));
+            }
+            None => {
+                return Err(Error::msg(format!(
+                    "远端目录不存在: {remote_dir}（先创建它，或用 --ls 确认路径）"
+                )));
+            }
+        }
         let meta = tokio::fs::metadata(local_path).await?;
         let kind = remote_kind(&sftp, &remote_root).await;
         let root_existed = kind.is_some();
@@ -701,6 +718,16 @@ pub async fn put(
             cancel.check()?;
             let _ = sftp.create_dir(format!("{remote_root}/{d}")).await;
         }
+        // 覆盖目录（--force）时按文件决策是否走临时名：目标树先整体枚举一次
+        // （read_dir 批量返回，一次往返取回大量条目），只有远端确实已存在的文件
+        // 才付出 remove+rename 两次额外往返；新增文件直写最终名，零额外开销。
+        // 相比按根目录存在与否一刀切，大目录覆盖场景可省约 2×文件数 次 SFTP 往返。
+        let existing: std::collections::HashSet<String> = if root_existed {
+            let (_, efiles, _) = walk_remote(&sftp, &remote_root, cancel).await?;
+            efiles.into_iter().map(|(_, rel, _)| rel).collect()
+        } else {
+            std::collections::HashSet::new()
+        };
         let mut prog = Progress::new(total);
         for (i, (lpath, rel, _)) in files.iter().enumerate() {
             prog.label(&format!("{name}/{rel} ({}/{count})", i + 1));
@@ -708,7 +735,7 @@ pub async fn put(
                 &sftp,
                 lpath,
                 &format!("{remote_root}/{rel}"),
-                root_existed,
+                existing.contains(rel.as_str()),
                 cancel,
                 &mut prog,
                 &mut done,

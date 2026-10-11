@@ -756,6 +756,7 @@ fn print_doc() {
     println!("  -f, --file <文件>    从文件读取命令内容");
     println!("  --get <远端> [本地]  下载。本地省略或指向已存在目录时，按远端同名落盘");
     println!("  --put <本地> <目录>  上传到远端目录，落点为 <目录>/<本地basename>");
+    println!("                     远端目录必须已存在（不会自动创建父级），否则直接报错");
     println!("  --cp <源> <目标>     目标不带前缀=同机复制；写成「连接项:目录」=跨机复制");
     println!("  --ls [目录]          列目录（远端 home 缺省）；输出为「大小 名字」，目录尾随 /");
     println!("  --stat <路径>        输出 JSON：size/isDir/isLink/perms/mtime/uid/gid/owner/group");
