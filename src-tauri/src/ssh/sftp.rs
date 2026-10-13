@@ -492,6 +492,32 @@ mod tests {
         // 命令体（base64 -d >）本身不含用户可控内容
         assert!(cmd.starts_with("base64 -d > "));
     }
+
+    /// 目录名提取：尾斜杠必须被剥掉。
+    /// 回归场景——终端右键取到的词来自 `ls -F` 输出（目录自带 `/`），
+    /// 旧写法 `remote.rsplit('/').next()` 会得到空串，使下载 root 退化成父目录，
+    /// 把整个目录的内容平铺进下载目录（与文件面板行为不一致）。
+    #[test]
+    fn base_name_strips_trailing_slash() {
+        // 正常路径（文件面板给的 entry.path）：逐字节等价，不带斜杠时结果与原实现相同
+        assert_eq!(base_name("/home/u/proj"), Some("proj"));
+        assert_eq!(base_name("proj"), Some("proj"));
+        // 尾斜杠：修复的核心场景
+        assert_eq!(base_name("/home/u/proj/"), Some("proj"));
+        assert_eq!(base_name("/home/u/proj///"), Some("proj"));
+        // 旧写法在这两条上都会返回 Some("")，即平铺下载的根因
+        assert_eq!("/home/u/proj/".rsplit('/').next().unwrap_or("x"), "");
+        // 目录名本身含空格/特殊字符不受影响
+        assert_eq!(base_name("/a b/c d/"), Some("c d"));
+    }
+
+    /// 空名保护：根目录与空串一律拒绝，否则会把整个文件系统平铺到下载目录。
+    #[test]
+    fn base_name_rejects_root_and_empty() {
+        assert_eq!(base_name("/"), None);
+        assert_eq!(base_name("///"), None);
+        assert_eq!(base_name(""), None);
+    }
 }
 
 #[cfg(not(unix))]
@@ -644,6 +670,14 @@ async fn cleanup_bounded(fut: impl std::future::Future<Output = ()>) {
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), fut).await;
 }
 
+/// 远端路径 → 末段名（POSIX 语义，不做本地分隔符解释）。
+/// 尾斜杠必须先剥掉：调用方传的词可能来自终端 `ls -F` 原始输出（目录自带 `/`），
+/// 直接 `rsplit('/')` 会取到空串当目录名。剥完仍为空即根目录，返回 None 由上层拒绝。
+fn base_name(path: &str) -> Option<&str> {
+    let name = path.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+    (!name.is_empty()).then_some(name)
+}
+
 /// 目录条目名安全校验：拒绝 "."/".." 与含路径分隔符的名字。
 /// 防止恶意/异常服务器通过 "../x" 让下载写到目标目录之外，或用 "." 造成无限递归。
 fn is_safe_entry_name(name: &str) -> bool {
@@ -740,7 +774,13 @@ pub async fn download(
     transfer_id: &str,
 ) -> Result<()> {
     let sftp = session(conn).await?;
-    let name = remote.rsplit('/').next().unwrap_or(remote).to_string();
+    // 尾斜杠必须剥掉再算 name：调用方（终端右键取词）的词可能带 `ls -F` 的目录斜杠，
+    // 不剥则 name 为空串，root 退化成父目录本身，把整个目录的内容平铺进下载目录。
+    // 归一化后的 remote 一并给下游 metadata/walk_remote，避免 `dir//` 之类的重复分隔符。
+    let remote = remote.trim_end_matches('/');
+    let name = base_name(remote)
+        .ok_or_else(|| Error::msg("不支持下载根目录"))?
+        .to_string();
     // 主体失败即失效缓存的 SFTP 会话（会话可能已随连接中断而失效），下次自动重建
     let result = async {
         let meta = ctl.preempt(async { Ok(sftp.metadata(remote).await?) }).await?;
