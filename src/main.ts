@@ -324,8 +324,9 @@ async function bootstrap() {
       // 归属判据用发起控制面的本地 pane id：后端据此算 killable（只允许杀本 pane 起的）
       await api.connsReport(spec.out, pane.id, spec.json);
     } catch (err) {
-      // 只提示，不做重试：connsReport 失败时后端已把错误写进响应文件（见 conns_report），
-      // 重试同一个调用只会得到同一个错误。脚本侧的 10s 超时是最后的兜底。
+      // 只提示、不重试：conns_report 在「路径已校验通过」之后失败时会把错误写进响应文件
+      // （脚本能立刻读到并以此退出非零）；但若 guard_out_path 本身就拒绝，后端不能写任何
+      // 文件——那种情况脚本只能等满超时，故超时文案里也列了这一因。重试同一调用只会得到同一错误。
       toast(`hssh：${String(err)}`, true);
     }
   };

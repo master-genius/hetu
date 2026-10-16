@@ -467,11 +467,10 @@ fn kill_connection(rest: &[String]) -> ExitCode {
     );
     // 有界确认：对方退出前租约不会消失。等不到不等于失败（回滚可能卡在已停滞的网络上），
     // 所以文案要区分「已终止」与「已发信号但仍在收尾」。
+    // 用 still_alive 而非每轮全量 scan()：scan 会顺带回收别的僵尸条目，让等待用的只读轮询
+    // 带上写副作用，也做了多余的事。
     for _ in 0..100 {
-        let alive = lease::scan()
-            .map(|v| v.iter().any(|x| x.id == l.id))
-            .unwrap_or(false);
-        if !alive {
+        if !lease::still_alive(&l.id) {
             println!("已终止 {}", lease::short_id(&l.id));
             return ExitCode::SUCCESS;
         }

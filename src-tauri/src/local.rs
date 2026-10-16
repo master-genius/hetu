@@ -337,9 +337,16 @@ if [ "$listconn_mode" = 1 ]; then
   i=0
   while [ ! -s "$out" ]; do
     i=$((i + 1))
-    [ "$i" -gt 200 ] && { rm -f "$out"; echo "hssh: 等待宿主应答超时（10s）" >&2; exit 1; }
+    [ "$i" -gt 200 ] && { rm -f "$out"; echo "hssh: 等待宿主应答超时（10s）——前端不含 listconn（需重启应用），或 shell 的 TMPDIR 与宿主不一致导致响应文件被拒绝" >&2; exit 1; }
     sleep 0.05
   done
+  # 失败必须能用退出码判别：后端取数失败会把「hssh: 查询失败: …」写进同一文件；
+  # 正常输出（表头「来源」、「（当前没有活跃连接）」、JSON 的 [）都不以 "hssh: " 开头，可作哨兵。
+  if [ "$(head -c 6 "$out")" = "hssh: " ]; then
+    cat "$out" >&2
+    rm -f "$out"
+    exit 1
+  fi
   cat "$out"
   rm -f "$out"
   exit 0

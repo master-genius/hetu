@@ -303,6 +303,27 @@ pub fn find_kill_target(id: &str) -> Result<Lease> {
     resolve_id(&all, id).map_err(Error::msg)
 }
 
+/// 单条租约是否仍被持有：用与 `scan` 同一条判据（试加排他锁），但**不做任何回收**。
+///
+/// killconn 发信号后的确认走这个，而不是每轮全量 `scan()`：整体扫描会顺带回收其他进程
+/// 的僵尸条目，让一个「等对方退出」的轮询带上写副作用，也做了多余的事。
+/// 判据与 scan 一致：拿得到锁=没人持有=已退出；拿不到=仍在持有；锁文件打不开=已消失。
+pub fn still_alive(id: &str) -> bool {
+    let Ok(dir) = settings::conns_dir() else { return false };
+    still_alive_in(&dir, id)
+}
+
+/// 指定目录版（与 `scan_in`/`acquire_in` 同构：可注入目录才能离线单测，不碰真实配置）
+pub fn still_alive_in(dir: &Path, id: &str) -> bool {
+    if guard_id(id).is_err() {
+        return false; // 非法 id 不去拼路径（防穿越）
+    }
+    match std::fs::OpenOptions::new().write(true).open(lock_path(dir, id)) {
+        Ok(f) => fs2::FileExt::try_lock_exclusive(&f).is_err(),
+        Err(_) => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -444,6 +465,24 @@ mod tests {
             fs2::FileExt::try_lock_exclusive(&f).is_err(),
             "json 已存在却拿得到锁 = 登记顺序被写反了"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// still_alive 必须与 scan 用同一条判据，否则 killconn 的「等对方退出」会和
+    /// listconn 的「谁活着」互相矛盾。三个方向都测：持有中为真、释放后为假、非法 id 为假。
+    #[test]
+    fn still_alive_matches_scan_liveness() {
+        let dir = temp_dir("alive");
+        let mut lease = sample(&uuidish(8));
+        let id = lease.id.clone();
+        let h = acquire_in(&dir, &mut lease).unwrap();
+
+        assert!(still_alive_in(&dir, &id), "持锁期间必须判活（否则 killconn 会误报已终止）");
+        assert_eq!(scan_in(&dir).unwrap().iter().any(|l| l.id == id), true, "与 scan 判据不一致");
+
+        drop(h);
+        assert!(!still_alive_in(&dir, &id), "释放后必须判死");
+        assert!(!still_alive_in(&dir, "../../etc/passwd"), "穿越 id 必须判死且不碰路径");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
