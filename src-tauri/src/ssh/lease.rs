@@ -24,10 +24,12 @@ pub struct Lease {
     pub id: String,
     /// 持有进程 pid。终止 CLI 连接即对该 pid 发信号
     pub pid: u32,
-    /// "interactive" | "get" | "put" | "cp"
+    /// "gui" | "interactive" | "get" | "put" | "cp"
     pub kind: String,
     pub profile: String,
     pub host: String,
+    #[serde(default)]
+    pub port: u16,
     pub user: String,
     /// 发起方标记（`--by`）。None = 人在终端手敲
     #[serde(default)]
@@ -36,6 +38,31 @@ pub struct Lease {
     #[serde(default)]
     pub detail: String,
     pub started_unix: u64,
+}
+
+/// 发起方标记的规范化显示：None/空串都按「user」呈现（用户在 GUI 或终端直接发起）。
+pub fn by_label(by: &Option<String>) -> &str {
+    match by.as_deref() {
+        Some(t) if !t.is_empty() => t,
+        _ => "user",
+    }
+}
+
+/// 终止授权判定（唯一实现点：listconn 的「可否终止」与 killconn 的执行共用同一规则）。
+///
+/// 规则（开发者拍板）：只允许终止「明确非 user 发起」或「本 pane 发起」的连接。
+/// token 只证明请求来自哪个终端，不证明对任意连接的处置权，所以必须叠加这一层。
+///
+/// 参数取三元组而非 `&Lease`：GUI 行的 pane 归属在 `ConnInfo` 里、不在租约里
+/// （GUI 不写租约，避免为可观测性去动 ssh_connect/ssh_disconnect 核心路径）。
+pub fn kill_allowed(by: &Option<String>, origin_pane: Option<&str>, req_pane: Option<&str>) -> bool {
+    if by_label(by) != "user" {
+        return true;
+    }
+    match (origin_pane, req_pane) {
+        (Some(o), Some(r)) => o == r,
+        _ => false,
+    }
 }
 
 /// detail 的净化：控制字符一律替换为 U+25A1 并限长 200 字符。
@@ -237,6 +264,7 @@ mod tests {
             kind: "put".into(),
             profile: "web".into(),
             host: "10.0.0.9".into(),
+            port: 22,
             user: "root".into(),
             by: Some("qwen".into()),
             detail: "--put ./a → /srv/in".into(),

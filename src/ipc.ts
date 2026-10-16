@@ -4,7 +4,6 @@ import { invoke, Channel } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   ConnParams,
-  ConnSnapshot,
   ConnStateEvent,
   FileMeta,
   LocalEntry,
@@ -32,8 +31,10 @@ export const api = {
 
   sshConnect: (params: ConnParams) => invoke<string>("ssh_connect", { params }),
   sshDisconnect: (connId: string) => invoke<void>("ssh_disconnect", { connId }),
-  /** 本实例全部 SSH 连接的脱敏快照（供 hssh listconn 与前端消费，绝不含凭据字段） */
-  connsList: () => invoke<ConnSnapshot[]>("conns_list"),
+  /** listconn 数据出口：后端合并 GUI 连接与 CLI 租约，渲染后写入脚本预先建好的响应文件。
+   *  返回行数；路径校验与写入全在后端（webview 无 fs 权限，也不该有）。 */
+  connsReport: (out: string, reqPane: string, json: boolean) =>
+    invoke<number>("conns_report", { out, reqPane, json }),
   /** 查询连接是否有进行中的传输（gcConnections 判断是否可安全断开） */
   connHasTransfers: (connId: string) => invoke<boolean>("conn_has_transfers", { connId }),
 

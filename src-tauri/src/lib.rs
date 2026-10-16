@@ -19,6 +19,7 @@ use tokio::sync::{mpsc, Mutex};
 use error::{Error, Result};
 use settings::{Profile, SessionTab, Settings};
 use ssh::conn::{ConnInfo, ConnParams, Connection};
+use ssh::lease::{self, Lease};
 use ssh::pane::{PaneCmd, PaneCtl};
 
 /// 全局状态：连接注册表 + pane 注册表 + 设置 + 连接项 + 传输控制表
@@ -241,11 +242,10 @@ async fn conn_has_transfers(state: State<'_>, conn_id: String) -> Result<bool> {
         .any(|t| t.conn_id() == conn_id))
 }
 
-/// 当前实例所有 SSH 连接的脱敏快照（供 `hssh listconn` 与前端消费）。
+/// GUI 侧连接采集：脱敏快照（listconn 与后续 killconn 共用同一份锁序，避免各写一遍）。
 /// 只出展示与授权判定所需字段；password/keyData/passphrase/keyPath 一律不出
 /// （见 `ssh::conn::ConnInfo` 的白名单约束）。排序稳定，多次调用输出可 diff。
-#[tauri::command]
-async fn conns_list(state: State<'_>) -> Result<Vec<ConnInfo>> {
+async fn collect_gui_conns(state: &AppState) -> Result<Vec<ConnInfo>> {
     let conns: Vec<Arc<Connection>> = state.conns.lock().await.values().cloned().collect();
     // 锁内只建索引、随即放锁：下面的 is_alive 要 await 连接的 handle 锁（重连退避期间
     // 可能长时间持有），跨 await 持有 panes/transfers 锁会阻塞 pane_open 与传输注册。
@@ -280,6 +280,450 @@ async fn conns_list(state: State<'_>) -> Result<Vec<ConnInfo>> {
     }
     out.sort_by(|a, b| (&a.name, &a.host, &a.id).cmp(&(&b.name, &b.host, &b.id)));
     Ok(out)
+}
+
+// ---------- hssh 控制面（listconn / killconn 的数据出口） ----------
+
+/// listconn 的统一行：GUI 连接（本进程 AppState）与 CLI 租约（跨进程文件）合并后的视图。
+///
+/// 为什么必须在后端合并而不是让 CLI 纯读文件：GUI 连接只活在 AppState 里（刻意不让
+/// ssh_connect 写租约，避免为可观测性去动建连/断开的核心路径）。所以「合并两个宇宙」
+/// 只能由持有 AppState 的这个进程应答；AI 场景的可用性则由脚本把 OSC 写 /dev/tty、
+/// 结果经响应文件回到 stdout 来保证。
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnRow {
+    /// "gui" | "cli"
+    pub source: &'static str,
+    pub id: String,
+    pub name: String,
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    /// 发起方标记；渲染时用 `lease::by_label` 归一为「user」
+    pub by: Option<String>,
+    pub panes: Vec<String>,
+    /// CLI 行的操作摘要（`--put … → …`）
+    pub detail: String,
+    pub alive: bool,
+    pub reconnecting: bool,
+    pub transfers: usize,
+    pub uptime_secs: u64,
+    /// CLI 行的持有进程号（killconn 对其发 SIGINT）；GUI 行为 None
+    pub pid: Option<u32>,
+    /// 按 `lease::kill_allowed` 算出的本请求方可终止性（与 conn_kill 同一规则）
+    pub killable: bool,
+}
+
+/// 合并两侧数据成稳定排序的统一行。纯函数，便于离线单测。
+///
+/// 按 id 去重：同一 id 若同时出现在两侧（不应发生，防御代价为零），以 GUI 行为准——
+/// 它带 pane 归属与传输计数这些租约没有的信息。
+fn rows_from(gui: Vec<ConnInfo>, cli: Vec<Lease>, req_pane: &str) -> Vec<ConnRow> {
+    let mut out: Vec<ConnRow> = Vec::with_capacity(gui.len() + cli.len());
+    // 拥有所有权而非 &str：下面要 move gui 逐项构建行，借用会与移动冲突
+    let mut gui_ids: Vec<String> = gui.iter().map(|g| g.id.clone()).collect();
+    gui_ids.sort_unstable();
+    for g in gui {
+        out.push(ConnRow {
+            source: "gui",
+            killable: lease::kill_allowed(&g.by, g.origin_pane.as_deref(), Some(req_pane)),
+            id: g.id,
+            name: g.name,
+            host: g.host,
+            port: g.port,
+            user: g.user,
+            by: g.by,
+            panes: g.panes,
+            detail: String::new(),
+            alive: g.alive,
+            reconnecting: g.reconnecting,
+            transfers: g.transfers,
+            uptime_secs: g.uptime_secs,
+            pid: None,
+        });
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default();
+    for c in cli {
+        if gui_ids.binary_search(&c.id).is_ok() {
+            continue;
+        }
+        out.push(ConnRow {
+            source: "cli",
+            // 租约没有 pane 归属：终止授权只看 tag，跨终端的 CLI 连接不得被随手杀
+            killable: lease::kill_allowed(&c.by, None, Some(req_pane)),
+            id: c.id,
+            name: c.profile,
+            host: c.host,
+            port: c.port,
+            user: c.user,
+            by: c.by,
+            panes: Vec::new(),
+            detail: c.detail,
+            alive: true, // 活着才会被 scan 列出
+            reconnecting: false,
+            transfers: 0,
+            uptime_secs: now.saturating_sub(c.started_unix),
+            pid: Some(c.pid),
+        });
+    }
+    out.sort_by(|a, b| (&a.source, &a.name, &a.id).cmp(&(&b.source, &b.name, &b.id)));
+    out
+}
+
+/// 渲染人类可读表格。所有用户可控字段一律过 `lease::sanitize`：它们来自 profiles.json
+/// 与租约文件，含 ESC/CR 时会被原样 cat 进宿主终端（转义注入）。
+fn render_table(rows: &[ConnRow]) -> String {
+    if rows.is_empty() {
+        return "（当前没有活跃连接）\n".to_string();
+    }
+    let clean = |s: &str| lease::sanitize(s);
+    let pad = |v: &str, n: usize| -> String {
+        let t = v.trim_end();
+        let len = t.chars().count();
+        if len >= n { t.to_string() } else { format!("{t}{}", " ".repeat(n - len)) }
+    };
+    let width = |s: &str| s.chars().count();
+    let name_w = rows.iter().map(|r| width(&clean(&r.name))).max().unwrap_or(4).clamp(4, 24);
+    let host_w = rows
+        .iter()
+        .map(|r| width(&clean(&r.host)) + if r.port == 0 { 0 } else { 1 + r.port.to_string().len() })
+        .max()
+        .unwrap_or(4)
+        .clamp(4, 40);
+    let mut s = String::new();
+    s.push_str(&format!(
+        "{}  {}  {}  {}  {}  {}\n",
+        pad("来源", 4), pad("发起", 10), pad("名称", name_w), pad("主机", host_w), pad("用户", 8), "状态 / 详情"
+    ));
+    for r in rows {
+        let host = if r.port == 0 {
+            clean(&r.host)
+        } else {
+            format!("{}:{}", clean(&r.host), r.port)
+        };
+        let state = if r.source == "cli" {
+            "CLI 活跃".to_string()
+        } else if r.reconnecting {
+            "重连中".to_string()
+        } else if !r.alive {
+            "已断开".to_string()
+        } else {
+            "已连接".to_string()
+        };
+        let mut tail = format!("{state} {}m", r.uptime_secs / 60);
+        if r.source == "cli" {
+            let d = clean(&r.detail);
+            if !d.is_empty() {
+                tail.push_str(&format!("  {d}"));
+            }
+        } else if !r.panes.is_empty() {
+            tail.push_str(&format!("  {} pane", r.panes.len()));
+        }
+        if r.transfers > 0 {
+            tail.push_str(&format!("  传输×{}", r.transfers));
+        }
+        if !r.killable {
+            tail.push_str("  [不可终止]");
+        }
+        s.push_str(&format!(
+            "{}  {}  {}  {}  {}  {}\n",
+            pad(if r.source == "gui" { "终端" } else { "CLI" }, 4),
+            pad(lease::by_label(&r.by), 10),
+            pad(&clean(&r.name), name_w),
+            pad(&host, host_w),
+            pad(&clean(&r.user), 8),
+            tail,
+        ));
+    }
+    s
+}
+
+/// 校验 hssh 传来的响应文件路径。**必须**限制在本机临时目录下的 `hssh_out.*` 普通文件：
+/// 这等于给 webview 一条「写文件」能力，放开任意路径即成为任意覆盖写。
+/// 要求目标是已存在的普通文件（脚本 mktemp 建好的空文件），符号链接一律拒绝。
+fn guard_out_path(raw: &str) -> Result<std::path::PathBuf> {
+    use std::path::Path;
+    let p = Path::new(raw);
+    let name = p
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| Error::msg("响应文件路径非法"))?;
+    if !name.starts_with("hssh_out.") {
+        return Err(Error::msg("响应文件名必须以 hssh_out. 开头"));
+    }
+    let meta = std::fs::symlink_metadata(p).map_err(|_| Error::msg("响应文件不存在"))?;
+    if !meta.is_file() {
+        return Err(Error::msg("响应文件不是普通文件（拒绝符号链接/目录）"));
+    }
+    // 父目录必须就是本机临时目录（两侧都 canonicalize，挡掉 ../ 与软链绕道）
+    let want = std::env::temp_dir()
+        .canonicalize()
+        .map_err(|e| Error::msg(format!("无法解析系统临时目录: {e}")))?;
+    let got = p
+        .parent()
+        .and_then(|d| d.canonicalize().ok())
+        .ok_or_else(|| Error::msg("响应文件父目录无法解析"))?;
+    if got != want {
+        return Err(Error::msg("响应文件必须位于系统临时目录"));
+    }
+    Ok(p.to_path_buf())
+}
+
+/// 把渲染结果**原子地**写入已校验的响应文件（0600 + O_EXCL + O_NOFOLLOW + 限长）。
+///
+/// 为什么必须原子：hssh 脚本靠「轮询文件非空」判断宿主已应答。若直接 `write` 到目标路径，
+/// 轮询可能读到半截内容。故写同目录临时文件（O_EXCL 拒绝他人预置的文件）再 rename 覆盖——
+/// rename 同目录内原子，脚本见到非空即完整。
+fn write_out_file(path: &std::path::Path, content: &str) -> Result<()> {
+    if content.len() > 4 << 20 {
+        return Err(Error::msg("响应内容过大（上限 4 MiB）"));
+    }
+    use std::io::Write;
+    let dir = path
+        .parent()
+        .ok_or_else(|| Error::msg("响应文件缺少父目录"))?;
+    let name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| Error::msg("响应文件名非法"))?;
+    let tmp = dir.join(format!("{name}.tmp"));
+    {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true); // 已存在（含他人预置的符号链接）即失败，不覆盖
+        #[cfg(unix)]
+        {
+            // O_NOFOLLOW：校验与打开之间不得跟随符号链接（TOCTOU）
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.custom_flags(libc::O_NOFOLLOW);
+        }
+        let mut f = opts.open(&tmp)?;
+        f.write_all(content.as_bytes())?;
+        f.flush()?;
+        settings::set_owner_only(&tmp);
+    }
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        Error::msg(format!("响应文件落盘失败: {e}"))
+    })?;
+    Ok(())
+}
+
+/// `hssh listconn` 的数据出口：合并 GUI 连接与 CLI 租约，渲染成文本或 JSON 写入响应文件。
+/// 返回行数。路径已校验合法后的任何失败都必须落盘一句错误：脚本靠「文件非空」判断
+/// 宿主已应答，不给它写东西它就会白等满 10s 轮询超时。
+#[tauri::command]
+async fn conns_report(
+    state: State<'_>,
+    out: String,
+    req_pane: String,
+    json: bool,
+) -> Result<u32> {
+    let path = guard_out_path(&out)?;
+    let built: Result<(String, u32)> = async {
+        let gui = collect_gui_conns(&state).await?;
+        // 租约读取失败不影响 GUI 侧展示：降级为空列表，连接表仍可用
+        let cli = lease::scan().unwrap_or_default();
+        let rows = rows_from(gui, cli, &req_pane);
+        let text = if json {
+            serde_json::to_string_pretty(&rows)
+                .map_err(|e| Error::msg(format!("序列化失败: {e}")))?
+        } else {
+            render_table(&rows)
+        };
+        Ok((text, rows.len() as u32))
+    }
+    .await;
+    let (text, n) = match built {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = write_out_file(&path, &format!("hssh: 查询失败: {e}\n"));
+            return Err(e);
+        }
+    };
+    write_out_file(&path, &text)?;
+    Ok(n)
+}
+
+#[cfg(test)]
+mod hctl_tests {
+    use super::*;
+
+    fn gui_row(id: &str, by: Option<&str>, origin: Option<&str>) -> ConnInfo {
+        ConnInfo {
+            id: id.into(),
+            name: "web".into(),
+            host: "10.0.0.9".into(),
+            port: 22,
+            user: "root".into(),
+            by: by.map(Into::into),
+            origin_pane: origin.map(Into::into),
+            panes: vec!["p1".into()],
+            alive: true,
+            reconnecting: false,
+            auto_reconnect: true,
+            uptime_secs: 60,
+            transfers: 0,
+        }
+    }
+
+    fn cli_row(id: &str, by: Option<&str>) -> Lease {
+        Lease {
+            id: id.into(),
+            pid: 4242,
+            kind: "put".into(),
+            profile: "cy2".into(),
+            host: "121.28.83.29".into(),
+            port: 6004,
+            user: "kemove".into(),
+            by: by.map(Into::into),
+            detail: "--put ./a → /srv".into(),
+            started_unix: 0,
+        }
+    }
+
+    /// 授权规则（开发者拍板）：只允许杀「非 user 发起」或「本 pane 发起」。
+    /// 这条锁死的是权限边界本身——写反就是 AI 能随手杀用户的连接。
+    #[test]
+    fn kill_authorization_follows_tag_or_owning_pane() {
+        let req = "pane-A";
+        // 非 user 发起 → 任何请求方都可终止
+        assert!(lease::kill_allowed(&Some("qwen".into()), None, Some(req)));
+        // user 发起但同 pane → 可终止
+        assert!(lease::kill_allowed(&None, Some("pane-A"), Some("pane-A")));
+        // user 发起且跨 pane → 拒绝
+        assert!(!lease::kill_allowed(&None, Some("pane-B"), Some("pane-A")));
+        // 显式 by="user" 等同于未标记
+        assert!(!lease::kill_allowed(&Some("user".into()), Some("pane-B"), Some("pane-A")));
+        // CLI 租约无 pane 归属：只有打了 tag 的可杀
+        assert!(!lease::kill_allowed(&None, None, Some(req)));
+    }
+
+    /// 合并视图：GUI 与 CLI 两侧都要出现，且按 id 去重时以 GUI 行为准。
+    #[test]
+    fn merged_rows_cover_both_universes_and_dedupe() {
+        let rows = rows_from(
+            vec![gui_row("dup", Some("qwen"), Some("pane-A"))],
+            vec![cli_row("dup", Some("ci")), cli_row("solo", None)],
+            "pane-A",
+        );
+        // 同 id 只留 GUI 行（带 pane 与传输计数）
+        let dups: Vec<_> = rows.iter().filter(|r| r.id == "dup").collect();
+        assert_eq!(dups.len(), 1, "去重失效");
+        assert_eq!(dups[0].source, "gui", "去重必须保留信息更全的 GUI 行");
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().any(|r| r.source == "cli" && r.id == "solo"));
+        // 排序确定性：同样输入两次结果一致（listconn 输出要可 diff）
+        let again = rows_from(
+            vec![gui_row("dup", Some("qwen"), Some("pane-A"))],
+            vec![cli_row("dup", Some("ci")), cli_row("solo", None)],
+            "pane-A",
+        );
+        assert_eq!(
+            rows.iter().map(|r| &r.id).collect::<Vec<_>>(),
+            again.iter().map(|r| &r.id).collect::<Vec<_>>()
+        );
+    }
+
+    /// 渲染层必须掐断转义序列：name/host/user/detail 来自 profiles.json 与租约文件，
+    /// 一旦含 ESC，`hssh listconn` 的输出被 cat 进宿主终端即为转义注入。
+    #[test]
+    fn rendered_table_never_emits_control_characters() {
+        let mut hostile = gui_row("x", Some("qwen"), Some("pane-A"));
+        hostile.name = "a\u{1b}[2Jb".into();
+        hostile.host = "h\u{7}".into();
+        hostile.user = "u\u{8}".into();
+        let mut cli = cli_row("c", Some("ci"));
+        cli.detail = "d\u{1b}]0;evil\u{7}".into();
+        let text = render_table(&rows_from(vec![hostile], vec![cli], "pane-A"));
+        for c in ['\u{1b}', '\u{7}', '\u{8}'] {
+            assert!(!text.contains(c), "渲染结果泄漏控制字符 {:?}：{}", c, text);
+        }
+        // 且不得因此丢行（净化是替换而非删除）
+        assert!(text.contains('a') && text.contains('b'), "净化把内容删没了：{text}");
+    }
+
+    #[test]
+    fn empty_report_is_not_blank() {
+        let text = render_table(&[]);
+        assert!(!text.trim().is_empty(), "空视图也要有内容：脚本靠『非空』判定宿主已应答");
+    }
+
+    /// 路径白名单：这是给 webview 开放的一条写文件能力，必须只认
+    /// 「系统临时目录下的 hssh_out.* 普通文件」。
+    #[test]
+    fn out_path_accepts_only_plain_files_in_temp_dir() {
+        let ok = std::env::temp_dir().join(format!("hssh_out.allow-std{}", std::process::id()));
+        std::fs::write(&ok, b"").unwrap();
+        assert!(guard_out_path(&ok.to_string_lossy()).is_ok(), "合法路径被拒");
+
+        // 前缀不对
+        let bad_name = std::env::temp_dir().join(format!("evil-{}", std::process::id()));
+        std::fs::write(&bad_name, b"").unwrap();
+        assert!(guard_out_path(&bad_name.to_string_lossy()).is_err(), "非 hssh_out. 前缀必须拒");
+
+        // 文件不存在（不得凭空建文件）
+        let missing = std::env::temp_dir().join(format!("hssh_out.missing-{}", std::process::id()));
+        assert!(guard_out_path(&missing.to_string_lossy()).is_err(), "不存在的路径必须拒");
+
+        // 目录冒充
+        let dir = std::env::temp_dir().join(format!("hssh_out.dir-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(guard_out_path(&dir.to_string_lossy()).is_err(), "目录必须拒");
+
+        // 临时目录的子目录里（父目录不等于 temp dir）
+        let sub = dir.join(format!("hssh_out.sub-{}", std::process::id()));
+        std::fs::write(&sub, b"").unwrap();
+        assert!(guard_out_path(&sub.to_string_lossy()).is_err(), "子目录里的文件必须拒");
+
+        // 穿越写法：/tmp/../etc/hssh_out.x 规范化后父目录不是 /tmp
+        assert!(guard_out_path("/tmp/../etc/hssh_out.pwn").is_err(), "路径穿越必须拒");
+
+        let _ = std::fs::remove_file(&ok);
+        let _ = std::fs::remove_file(&bad_name);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 符号链接必须被拒：否则脚本目录里放一个软链指向 /etc/xxx 就能借道覆盖写。
+    #[cfg(unix)]
+    #[test]
+    fn out_path_rejects_symlink() {
+        let victim = std::env::temp_dir().join(format!("hssh_out-victim-{}", std::process::id()));
+        let link = std::env::temp_dir().join(format!("hssh_out.lnk-{}", std::process::id()));
+        std::fs::write(&victim, b"do-not-overwrite").unwrap();
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(&victim, &link).unwrap();
+        assert!(guard_out_path(&link.to_string_lossy()).is_err(), "符号链接必须拒");
+        // 目标内容未被改动
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "do-not-overwrite");
+        let _ = std::fs::remove_file(&link);
+        let _ = std::fs::remove_file(&victim);
+    }
+
+    /// 写入必须是「临时文件 + rename」原子替换：脚本用『文件非空』判应答，
+    /// 半截内容被读到就会输出残缺表格。
+    #[test]
+    fn out_file_write_is_atomic_and_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let p = std::env::temp_dir().join(format!("hssh_out.write-std{}", std::process::id()));
+        std::fs::write(&p, b"").unwrap();
+        let payload = "来源  名称\nCLI   cy2\n";
+        write_out_file(&p, payload).expect("写入失败");
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), payload);
+        let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "响应文件必须 0600（内容含主机与用户名）");
+        // 不得留下 .tmp 残骸
+        let tmp = format!("{}.tmp", p.to_string_lossy());
+        assert!(!std::path::Path::new(&tmp).exists(), "遗留临时文件: {tmp}");
+
+        // 超限内容必须拒（防被大量连接撑爆磁盘）
+        let huge = "x".repeat((4 << 20) + 1);
+        assert!(write_out_file(&p, &huge).is_err(), "超过 4 MiB 必须拒绝");
+        let _ = std::fs::remove_file(&p);
+    }
 }
 
 // ---------- Pane（PTY channel）----------
@@ -1221,7 +1665,7 @@ pub fn run() {
             ssh_connect,
             ssh_disconnect,
             conn_has_transfers,
-            conns_list,
+            conns_report,
             pane_open,
             pane_open_local,
             pane_input,

@@ -238,6 +238,7 @@ prod 模式选项（仅在 --prod 下生效）:
   --quiet                     静默模式：不输出连接提示和退出状态码
   --debug                     详细模式：输出连接提示和退出状态码（与 --quiet 相反）
   -l, --list                  列出已保存的连接项（名称/主机/备注）
+  listconn [--json]           列出当前活跃连接（GUI 与 hsshx 发起的都算，--json 出机读）
   -h, --help                  显示此帮助
 
 示例:
@@ -261,6 +262,7 @@ done
 # 单遍参数解析：连接信息（连接项名或 user@host）可在任意位置出现
 host=""; user=""; port=""; pass=""; ident=""; name=""; adhoc=0
 feed=""; feed_file=""; feed_stdin=0; do_exit=0; quiet=0; debug=0; list_mode=0
+listconn_mode=0; json_flag=0
 by=""
 _first_pos=1
 
@@ -282,10 +284,13 @@ while [ $# -gt 0 ]; do
     -x|--exit)     [ "$prod_mode" = 1 ] || { echo "hssh: --exit 需要 --prod 模式" >&2; exit 1; }; do_exit=1; shift;;
     --quiet)       quiet=1; shift;;
     --debug)       debug=1; shift;;
+    --json)        json_flag=1; shift;;
     -l|--list)     list_mode=1; shift;;
     -*)            echo "hssh: 未知选项 $1" >&2; exit 1;;
     *)             if [ "$_first_pos" = 1 ]; then
                      case "$1" in
+                       # 子命令而非连接项名：listconn 是查询已存在的连接，不建连
+                       listconn)  listconn_mode=1;;
                        *@*) user="${1%@*}"; host="${1#*@}"; adhoc=1;;
                        *)   name="$1";;
                      esac
@@ -309,6 +314,34 @@ if [ "$list_mode" = 1 ]; then
   tok=$(b64 "${HSSH_TOKEN:-}")
   emit "v=1;tok=$tok;mode=list"
   read _hssh_list_done
+  exit 0
+fi
+
+# listconn：列出当前活跃连接（GUI 连接 + hsshx 租约）。与 -l（列已保存连接项）不同。
+# 两条与既有模式不同的关键设计：
+# ① OSC 写 /dev/tty 而非 stdout —— AI 工具调用时 stdout 是管道，写 stdout 宿主永远收不到
+#    （这正是 hssh 在 agent 里不可用的根因）；/dev/tty 与 stdout 重定向无关。
+# ② 结果经响应文件回传后 cat 到 stdout，用「轮询文件非空」等宿主应答，不走既有的
+#    「回发送换行解锁 read」——stdin 被重定向时 read 会立刻拿到 EOF，脚本会在宿主写完前
+#    cat 到空文件。轮询对交互终端与管道两种场景都成立。
+if [ "$listconn_mode" = 1 ]; then
+  [ -n "${HSSH_TOKEN:-}" ] || { echo "hssh: listconn 需在 HetuShell 本地终端内运行" >&2; exit 1; }
+  out=$(mktemp "${TMPDIR:-/tmp}/hssh_out.XXXXXX") || { echo "hssh: 创建响应文件失败" >&2; exit 1; }
+  tok=$(b64 "$HSSH_TOKEN")
+  if ! printf '\033]1734;v=1;tok=%s;mode=listconn;out=%s;json=%s\007' \
+       "$tok" "$(b64 "$out")" "$([ "$json_flag" = 1 ] && echo 1 || echo 0)" > /dev/tty 2>/dev/null; then
+    rm -f "$out"
+    echo "hssh: 无法通知宿主（/dev/tty 不可写？非 HetuShell 本地终端）" >&2; exit 1
+  fi
+  # 后端以「临时文件 + rename」落盘，故「非空」即等价于「内容完整」
+  i=0
+  while [ ! -s "$out" ]; do
+    i=$((i + 1))
+    [ "$i" -gt 200 ] && { rm -f "$out"; echo "hssh: 等待宿主应答超时（10s）" >&2; exit 1; }
+    sleep 0.05
+  done
+  cat "$out"
+  rm -f "$out"
   exit 0
 fi
 

@@ -21,6 +21,10 @@ const HEXIT_OSC = 1730;
 const HIMAGE_OSC = 1731;
 /** hfile 内建命令通过此 OSC 标识符通知前端打开文件管理器面板。 */
 const HFILE_OSC = 1732;
+/** hssh 控制面（listconn 等）通过此 OSC 标识符查询/处置已存在的连接。
+ *  与 1729 分开：1729 的语义是「建连意图」，其解析与 park/喂入时序深耦合；
+ *  控制面操作的是已存在的连接，生命周期不同。分开后 1729 那条路径零改动。 */
+const HCTL_OSC = 1734;
 
 // FitAddon 在 scrollback>0 时预留滚动条宽度：overviewRuler?.width || 14。
 // 初始化时传 overviewRuler: { width: 10 } 覆盖默认 14，减少 4px 预留。
@@ -39,6 +43,15 @@ export type HfileSpec = {
   withShell: boolean;
   dir: string | null;
   remote: string | null;
+};
+
+/** hssh 控制面命令解析结果：out 为脚本预先 mktemp 的响应文件路径，
+ *  后端把结果写进去、脚本 cat 到 stdout——这样在 stdout 是管道的场景（AI 工具捕获）
+ *  也能拿到数据；OSC 本身则改写 /dev/tty，不占用管道。 */
+export type HctlSpec = {
+  mode: "listconn";
+  out: string;
+  json: boolean;
 };
 
 /** base64 → UTF-8 字符串（hssh 各字段单独 base64，避免分隔符冲突）。失败返回空串。 */
@@ -195,6 +208,8 @@ export class Pane {
   onHimage: ((paths: string[], withShell: boolean, pane: Pane) => void) | null = null;
   /** 内建 hfile 命令：仅本地终端触发，打开文件管理器面板 */
   onHfile: ((spec: HfileSpec, pane: Pane) => void) | null = null;
+  /** 内建 hssh 控制面命令（listconn）：仅本地终端触发，宿主查合并视图并写响应文件 */
+  onHctl: ((spec: HctlSpec, pane: Pane) => void) | null = null;
   /** pane channel 关闭回调（shell 退出或连接断开），宿主据此切连接/关 pane */
   onClose: ((exited: boolean) => void) | null = null;
   /** hssh 来源校验令牌：随本地 shell 注入 $HSSH_TOKEN，OSC 载荷须回带一致值才受理，
@@ -337,6 +352,29 @@ export class Pane {
         }
       } catch {
         /* 忽略 */
+      }
+      return true;
+    });
+
+    // hssh 控制面（OSC 1734）：仅本地终端接受，安全模型同 hssh——令牌校验防伪造。
+    // 与 1729 分开的理由见 HCTL_OSC 注释：控制面不建连，只查询/处置既有连接。
+    this.term.parser.registerOscHandler(HCTL_OSC, (data) => {
+      try {
+        if (this.isLocal) {
+          const f: Record<string, string> = {};
+          for (const kv of data.split(";")) {
+            const i = kv.indexOf("=");
+            if (i > 0) f[kv.slice(0, i)] = kv.slice(i + 1);
+          }
+          const tok = b64utf8(f.tok ?? "");
+          const out = b64utf8(f.out ?? "");
+          // out 是脚本预先 mktemp 的路径；后端 guard_out_path 再做权威校验（此处只挡空值）
+          if (tok && tok === this.hsshToken && out && f.mode === "listconn") {
+            this.onHctl?.({ mode: "listconn", out, json: f.json === "1" }, this);
+          }
+        }
+      } catch {
+        /* 忽略：绝不因辅助命令影响终端本身 */
       }
       return true;
     });

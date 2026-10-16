@@ -350,6 +350,7 @@ fn register_lease(
         kind: kind.to_string(),
         profile: profile.name.clone(),
         host: profile.host.clone(),
+        port: profile.port,
         user: profile.user.clone(),
         by,
         detail,

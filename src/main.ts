@@ -9,7 +9,7 @@ import { availableMonitors, getCurrentWindow } from "@tauri-apps/api/window";
 import { api, events, b64encode } from "./ipc";
 import { loadSettings, getSettings, onSettingsChange, activeTheme, fontStack, computeMcr, sanitizeScrollback } from "./settings";
 import { TabManager, type Tab } from "./tabs";
-import { Pane, type HsshSpec, type HfileSpec } from "./pane";
+import { Pane, type HsshSpec, type HfileSpec, type HctlSpec } from "./pane";
 import {
   DND_MIME,
   DL_MIME,
@@ -314,6 +314,22 @@ async function bootstrap() {
     showHimageViewer(items, anchor, mount);
   };
 
+  /**
+   * hssh 控制面（OSC 1734）。与 handleHssh 的本质区别：**不建连、不 park、不等解锁**。
+   * 结果由后端 conns_report 原子写入脚本预先 mktemp 的响应文件，脚本轮询该文件非空即读
+   * ——所以这里不回发送换行（`hssh -l` 那种解锁方式在 stdin 被重定向的 AI 场景下无效）。
+   */
+  const handleHctl = async (spec: HctlSpec, pane: Pane) => {
+    try {
+      // 归属判据用发起控制面的本地 pane id：后端据此算 killable（只允许杀本 pane 起的）
+      await api.connsReport(spec.out, pane.id, spec.json);
+    } catch (err) {
+      // 只提示，不做重试：connsReport 失败时后端已把错误写进响应文件（见 conns_report），
+      // 重试同一个调用只会得到同一个错误。脚本侧的 10s 超时是最后的兜底。
+      toast(`hssh：${String(err)}`, true);
+    }
+  };
+
   // hfile：在终端内打开文件管理器面板
   const handleHfile = async (spec: HfileSpec, pane: Pane) => {
     // -w 模式：浮动覆盖层（独立 DOM，非独占，ESC 关闭）
@@ -519,6 +535,8 @@ async function bootstrap() {
     pane.onHimage = (paths, withShell, p) => handleHimage(paths, withShell, p);
     // 内建 hfile 命令：打开文件管理器面板
     pane.onHfile = (spec, p) => handleHfile(spec, p);
+    // hssh 控制面命令（listconn）：查合并视图并写响应文件
+    pane.onHctl = (spec, p) => void handleHctl(spec, p);
     // pane channel 关闭：shell 正常退出→切回本地/关 pane；连接断开→保留等待重连
     pane.onClose = (exited) => {
       if (!exited) return; // 连接断开（exited=false）→ 保留等待重连

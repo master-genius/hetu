@@ -134,24 +134,6 @@ export interface ConnParams {
   originPane?: string;
 }
 
-/** 后端 conns_list 的脱敏连接快照：绝不含 password/keyData/keyPath/passphrase 字段
- *  （Rust 侧 ConnInfo 逐字段白名单构造，单测锁死）。 */
-export interface ConnSnapshot {
-  id: string;
-  name: string;
-  host: string;
-  port: number;
-  user: string;
-  by?: string;
-  originPane?: string;
-  panes: string[];
-  alive: boolean;
-  reconnecting: boolean;
-  autoReconnect: boolean;
-  uptimeSecs: number;
-  transfers: number;
-}
-
 export interface FileMeta {
   path: string;
   size: number | null;
