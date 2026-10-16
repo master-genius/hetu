@@ -27,6 +27,7 @@ use uuid::Uuid;
 use hetushell_lib::error::Error;
 use hetushell_lib::settings::{load_profiles, Profile};
 use hetushell_lib::ssh::conn::{establish, valid_tag, ConnParams, Connection};
+use hetushell_lib::ssh::lease::{self, Holder};
 use hetushell_lib::ssh::sftp;
 use hetushell_lib::ssh::xfer::{self, Cancel};
 
@@ -283,7 +284,7 @@ async fn run_exec(profile: Profile, by: Option<String>, command: Option<String>)
         }
     }
 
-    let params = conn_params(&profile, by);
+    let params = conn_params(&profile, by.clone());
     let handle = match establish(&params).await {
         Ok(h) => h,
         Err(e) => {
@@ -291,6 +292,13 @@ async fn run_exec(profile: Profile, by: Option<String>, command: Option<String>)
             return ExitCode::from(255);
         }
     };
+
+    // 只给交互模式登记租约：exec 是一次性命令、秒级完成，登记只会带来锁文件高频创删
+    // 与残留竞态，却没有「去看/去杀」的对象。
+    let _lease = command
+        .is_none()
+        .then(|| register_lease(&profile, by, "interactive", String::new()))
+        .flatten();
 
     let code = match command {
         Some(cmd) => exec_mode(&handle, cmd).await,
@@ -302,6 +310,47 @@ async fn run_exec(profile: Profile, by: Option<String>, command: Option<String>)
         .await;
 
     ExitCode::from(code)
+}
+
+/// 登记跨进程租约，让 GUI 侧的 `hssh listconn` 能看见并终止这条 CLI 连接。
+///
+/// **登记失败绝不阻断本次操作**：只 warn 到 stderr 并返回 None。租约是可观测性附加层，
+/// 传输成败不该取决于它（与 `install_hssh` 的「安装失败即跳过」同一取向）。
+/// 返回的 `Holder` 靠调用方持有到函数结束，drop 时自动释放 flock 并清理文件。
+fn register_lease(
+    profile: &Profile,
+    by: Option<String>,
+    kind: &str,
+    detail: String,
+) -> Option<Holder> {
+    let mut lease = lease::Lease {
+        id: Uuid::new_v4().to_string(),
+        pid: 0,
+        kind: kind.to_string(),
+        profile: profile.name.clone(),
+        host: profile.host.clone(),
+        user: profile.user.clone(),
+        by,
+        detail,
+        started_unix: 0,
+    };
+    match lease::acquire(&mut lease) {
+        Ok(h) => Some(h),
+        Err(e) => {
+            eprintln!("hsshx: 租约登记失败（不影响本次操作）: {e}");
+            None
+        }
+    }
+}
+
+/// 传输类操作的租约摘要（`--ls/--stat` 是瞬时探查，按约定不登记租约）。
+fn job_lease_kind(job: &Job) -> Option<(&'static str, String)> {
+    match job {
+        Job::Get { remote, local } => Some(("get", format!("--get {remote} → {local}"))),
+        Job::Put { local, remote_dir } => Some(("put", format!("--put {local} → {remote_dir}"))),
+        Job::Cp { src, dst } => Some(("cp", format!("--cp {src} → {dst}"))),
+        Job::Ls { .. } | Job::Stat { .. } => None,
+    }
 }
 
 /// 文件搬运路径：组装 `Arc<Connection>`（`ssh::sftp` 的 pub 原语按连接缓存懒创建的
@@ -317,6 +366,10 @@ async fn run_job(job: Job, force: bool, by: Option<String>, profile: Profile) ->
             return ExitCode::from(255);
         }
     };
+
+    // 传输进行中才可被 listconn 看见并终止（Ctrl-C 走的是既有的 Cancel + 回滚路径）
+    let _lease = job_lease_kind(&job)
+        .and_then(|(kind, detail)| register_lease(&profile, by.clone(), kind, detail));
 
     // 跨机 --cp 的第二条连接在此建立、留在外层：这样无论成功还是失败，
     // 结束时都能对两条连接统一优雅 disconnect（此前它在外层块的分支里被 drop，

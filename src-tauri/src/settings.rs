@@ -268,6 +268,24 @@ pub fn known_hosts_path() -> Result<PathBuf> {
     Ok(config_dir()?.join("known_hosts.json"))
 }
 
+/// hsshx 活跃连接的租约目录（跨进程可见）。
+///
+/// 为什么需要：hsshx 是独立二进制，它的连接不进 Tauri 进程的 AppState.conns，GUI 侧
+/// 看不见，也就无法被 `hssh listconn` 列出或被终止。此目录把「GUI 连接」与「CLI 连接」
+/// 两个宇宙拼成一张视图。pub 是因为 hsshx bin 只能通过库 crate 访问路径。
+pub fn conns_dir() -> Result<PathBuf> {
+    let dir = config_dir()?.join("conns");
+    std::fs::create_dir_all(&dir)?;
+    // 目录 0700（同 bin_dir，不能用 set_owner_only——那是 0600，会抹掉目录 x 权限
+    // 导致后续 open 全部失败）；目录里是本人连接的主机/用户清单，不给其他用户读
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    }
+    Ok(dir)
+}
+
 /// 随应用注入本地 shell 的辅助命令目录（config/hetushell/bin），如 hssh。
 /// 仅本地终端会把它追加到 PATH 末尾；远程连接不注入。目录置 0700，避免他人写入植入可执行。
 pub fn bin_dir() -> Result<PathBuf> {
