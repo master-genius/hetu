@@ -18,7 +18,7 @@ use tokio::sync::{mpsc, Mutex};
 
 use error::{Error, Result};
 use settings::{Profile, SessionTab, Settings};
-use ssh::conn::{ConnParams, Connection};
+use ssh::conn::{ConnInfo, ConnParams, Connection};
 use ssh::pane::{PaneCmd, PaneCtl};
 
 /// 全局状态：连接注册表 + pane 注册表 + 设置 + 连接项 + 传输控制表
@@ -182,6 +182,15 @@ async fn session_set(tabs: Vec<SessionTab>, state: State<'_>) -> Result<()> {
 
 #[tauri::command]
 async fn ssh_connect(state: State<'_>, params: ConnParams) -> Result<String> {
+    // 发起方标记在此复核：by 会被 hssh listconn 原样输出到宿主终端与 AI 上下文，
+    // 前端/脚本传入不可直接信任（CLI 已校验，但 Webview 是另一条入口）。None 不动。
+    let params = match params.by.as_deref() {
+        Some(tag) => ConnParams {
+            by: Some(ssh::conn::valid_tag(tag).map_err(Error::msg)?),
+            ..params
+        },
+        None => params,
+    };
     let handle = ssh::conn::establish(&params).await?;
     let conn_id = uuid::Uuid::new_v4().to_string();
     let auto = state.settings.lock().await.auto_reconnect;
@@ -230,6 +239,47 @@ async fn conn_has_transfers(state: State<'_>, conn_id: String) -> Result<bool> {
         .await
         .values()
         .any(|t| t.conn_id() == conn_id))
+}
+
+/// 当前实例所有 SSH 连接的脱敏快照（供 `hssh listconn` 与前端消费）。
+/// 只出展示与授权判定所需字段；password/keyData/passphrase/keyPath 一律不出
+/// （见 `ssh::conn::ConnInfo` 的白名单约束）。排序稳定，多次调用输出可 diff。
+#[tauri::command]
+async fn conns_list(state: State<'_>) -> Result<Vec<ConnInfo>> {
+    let conns: Vec<Arc<Connection>> = state.conns.lock().await.values().cloned().collect();
+    // 锁内只建索引、随即放锁：下面的 is_alive 要 await 连接的 handle 锁（重连退避期间
+    // 可能长时间持有），跨 await 持有 panes/transfers 锁会阻塞 pane_open 与传输注册。
+    let pane_ids = {
+        let mut m: HashMap<String, Vec<String>> = HashMap::new();
+        for (pid, ctl) in state.panes.lock().await.iter() {
+            // "local" 是本地终端的伪 conn_id，不属于任何 SSH 连接
+            if ctl.conn_id != "local" {
+                m.entry(ctl.conn_id.clone()).or_default().push(pid.clone());
+            }
+        }
+        for v in m.values_mut() {
+            v.sort();
+        }
+        m
+    };
+    let transfers = {
+        let mut m: HashMap<String, usize> = HashMap::new();
+        for t in state.transfers.lock().await.values() {
+            *m.entry(t.conn_id().to_string()).or_default() += 1;
+        }
+        m
+    };
+    let mut out = Vec::with_capacity(conns.len());
+    for conn in conns {
+        let alive = conn.is_alive().await;
+        out.push(conn.view(
+            alive,
+            pane_ids.get(&conn.id).cloned().unwrap_or_default(),
+            transfers.get(&conn.id).copied().unwrap_or_default(),
+        ));
+    }
+    out.sort_by(|a, b| (&a.name, &a.host, &a.id).cmp(&(&b.name, &b.host, &b.id)));
+    Ok(out)
 }
 
 // ---------- Pane（PTY channel）----------
@@ -1171,6 +1221,7 @@ pub fn run() {
             ssh_connect,
             ssh_disconnect,
             conn_has_transfers,
+            conns_list,
             pane_open,
             pane_open_local,
             pane_input,

@@ -186,7 +186,9 @@ async function bootstrap() {
       const { tab } = found;
       // 替换当前 pane 的连接（复用已验证的 switchPaneConnection 路径，不新建标签）
       const onConnect = async (params: ConnParams, profileId?: string | null) => {
-        const connId = await api.sshConnect(params);
+        // 只在建连那一刻附加来源信息：by（谁发起）与 originPane（哪个终端发起，
+        // killconn 的授权判据之一）。面板点击建连不带这两个字段，语义即 user 发起。
+        const connId = await api.sshConnect({ ...params, by: spec.by, originPane: pane.id });
         recordConn(connId, params, profileId ?? null);
         try {
           if (pane.isLocal) {

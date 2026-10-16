@@ -27,11 +27,12 @@ const HFILE_OSC = 1732;
 // 必须在构造时设置——运行时改 overviewRuler 会触发 OverviewRulerRenderer 重建。
 
 /** hssh 解析出的连接意图（tok 为来源校验令牌）：直连已保存连接项，或临时连接。
- *  feedPath/exitAfter 为自动化喂入字段，旧版 OSC 不携带时为 undefined/false（向后兼容）。 */
+ *  feedPath/exitAfter 为自动化喂入字段，旧版 OSC 不携带时为 undefined/false（向后兼容）。
+ *  by 为发起方标记（--by），旧版 OSC 不携带时为 undefined（后端按 user 处理）。 */
 export type HsshSpec =
   | { tok: string; mode: "list" }
-  | { tok: string; mode: "profile"; name: string; feedPath?: string; exitAfter?: boolean; quiet?: boolean; debug?: boolean }
-  | { tok: string; mode: "adhoc"; host: string; user: string; port: string; password: string; identity: string; feedPath?: string; exitAfter?: boolean; quiet?: boolean; debug?: boolean };
+  | { tok: string; mode: "profile"; name: string; feedPath?: string; exitAfter?: boolean; quiet?: boolean; debug?: boolean; by?: string }
+  | { tok: string; mode: "adhoc"; host: string; user: string; port: string; password: string; identity: string; feedPath?: string; exitAfter?: boolean; quiet?: boolean; debug?: boolean; by?: string };
 
 /** hfile 命令解析结果（tok 为来源校验令牌） */
 export type HfileSpec = {
@@ -62,12 +63,13 @@ export function parseHssh(data: string): HsshSpec | null {
   const exitAfter = b64utf8(f.exit) === "1";
   const quiet = b64utf8(f.quiet) === "1";
   const debug = b64utf8(f.debug) === "1";
+  const by = b64utf8(f.by) || undefined;
   if (f.mode === "list") {
     return { tok, mode: "list" };
   }
   if (f.mode === "profile") {
     const name = b64utf8(f.name);
-    return name ? { tok, mode: "profile", name, feedPath, exitAfter, quiet, debug } : null;
+    return name ? { tok, mode: "profile", name, feedPath, exitAfter, quiet, debug, by } : null;
   }
   if (f.mode === "adhoc") {
     const host = b64utf8(f.host);
@@ -84,6 +86,7 @@ export function parseHssh(data: string): HsshSpec | null {
       exitAfter,
       quiet,
       debug,
+      by,
     };
   }
   return null;

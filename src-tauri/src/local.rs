@@ -228,6 +228,7 @@ usage() {
   -u, --user <用户名>         用户名（也可写成 用户@主机）
   -w, --password <密码>       密码（明文，注意会进 shell 历史）
   -i, --identity <私钥文件>   私钥文件路径
+  --by <标记>                 发起方标记（AI/脚本自命名，如 qwen/ci），供 listconn 区分归属
 
 prod 模式选项（仅在 --prod 下生效）:
   -e, --exec <命令>           连接后自动执行命令（多条用分号分隔）
@@ -260,6 +261,7 @@ done
 # 单遍参数解析：连接信息（连接项名或 user@host）可在任意位置出现
 host=""; user=""; port=""; pass=""; ident=""; name=""; adhoc=0
 feed=""; feed_file=""; feed_stdin=0; do_exit=0; quiet=0; debug=0; list_mode=0
+by=""
 _first_pos=1
 
 need() { [ "$1" -ge 2 ] || { echo "hssh: 选项 $2 缺少参数" >&2; exit 1; }; }
@@ -271,6 +273,9 @@ while [ $# -gt 0 ]; do
     -u|--user)     need $# "$1"; user="$2"; adhoc=1; shift 2;;
     -w|--password) need $# "$1"; pass="$2"; adhoc=1; shift 2;;
     -i|--identity) need $# "$1"; ident="$2"; adhoc=1; shift 2;;
+    # --by 是元信息、不是连接参数：绝不可置 adhoc=1，否则 `hssh myserver --by qwen`
+    # 会被下面「裸名+连接选项→临时连接」规则误判成连接主机 myserver。
+    --by)          need $# "$1"; by="$2"; shift 2;;
     -e|--exec)     [ "$prod_mode" = 1 ] || { echo "hssh: --exec 需要 --prod 模式" >&2; exit 1; }; need $# "$1"; feed="$2"; shift 2;;
     -f|--file)     [ "$prod_mode" = 1 ] || { echo "hssh: --file 需要 --prod 模式" >&2; exit 1; }; need $# "$1"; feed_file="$2"; shift 2;;
     -s|--stdin)    [ "$prod_mode" = 1 ] || { echo "hssh: --stdin 需要 --prod 模式" >&2; exit 1; }; feed_stdin=1; shift;;
@@ -338,14 +343,17 @@ feed_b64=""; [ -n "$feed_path" ] && feed_b64=$(b64 "$feed_path")
 exit_b64=""; [ "$do_exit" = 1 ] && exit_b64=$(b64 "1")
 quiet_b64=""; [ "$quiet" = 1 ] && [ "$debug" = 0 ] && quiet_b64=$(b64 "1")
 debug_b64=""; [ "$debug" = 1 ] && debug_b64=$(b64 "1")
+# --by 为空时整个键省略（不是留个空值）：不带 --by 的 payload 与引入该选项之前逐字节一致，
+# 老连接路径的字节流不受任何影响。前端缺键即 by=undefined，后端按 user 发起处理。
+by_field=""; [ -n "$by" ] && by_field=";by=$(b64 "$by")"
 if [ -n "$name" ]; then
-  emit "v=1;tok=$tok;mode=profile;name=$(b64 "$name");feed=$feed_b64;exit=$exit_b64;quiet=$quiet_b64;debug=$debug_b64"
+  emit "v=1;tok=$tok;mode=profile;name=$(b64 "$name");feed=$feed_b64;exit=$exit_b64;quiet=$quiet_b64;debug=$debug_b64$by_field"
   # --quiet 静默连接提示；--debug 覆盖 --quiet 强制输出
   [ "$quiet" = 1 ] && [ "$debug" = 0 ] || printf '→ 正在打开连接项「%s」…\n' "$name"
 else
   [ -z "$host" ] && { echo 'hssh: 缺少主机' >&2; exit 1; }
   user="${user:-$(id -un)}"
-  emit "v=1;tok=$tok;mode=adhoc;host=$(b64 "$host");user=$(b64 "$user");port=$(b64 "$port");pass=$(b64 "$pass");ident=$(b64 "$ident");feed=$feed_b64;exit=$exit_b64;quiet=$quiet_b64;debug=$debug_b64"
+  emit "v=1;tok=$tok;mode=adhoc;host=$(b64 "$host");user=$(b64 "$user");port=$(b64 "$port");pass=$(b64 "$pass");ident=$(b64 "$ident");feed=$feed_b64;exit=$exit_b64;quiet=$quiet_b64;debug=$debug_b64$by_field"
   [ "$quiet" = 1 ] && [ "$debug" = 0 ] || printf '→ 正在连接 %s@%s …\n' "$user" "$host"
 fi
 # 阻塞等待前端信号：SSH 退出后前端发换行符解锁，脚本退出 → bash 回到 prompt

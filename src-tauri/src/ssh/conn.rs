@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use russh::client::{self, AuthResult};
 use russh::keys::{HashAlg, PrivateKeyWithHashAlg};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 
@@ -44,6 +44,43 @@ pub struct ConnParams {
     /// 连接超时（秒），None 用默认 20s
     #[serde(default)]
     pub timeout: Option<u64>,
+    /// 发起方标记（`hssh --by <tag>` / `hsshx --by <tag>`）：让 listconn 能区分这条连接
+    /// 是谁起的。None = GUI 面板点击或手输参数，按「user」展示。
+    #[serde(default)]
+    pub by: Option<String>,
+    /// 发起该连接的本地 pane id（仅 hssh 建连路径有值）：killconn 授权判据之一——
+    /// 同一终端里发起的连接，其发起者有权自行终止。
+    #[serde(default)]
+    pub origin_pane: Option<String>,
+}
+
+/// `by` 发起方标记的取值校验（唯一实现点：hsshx CLI 与后端 `ssh_connect` 共用）。
+///
+/// 为什么必须校验：tag 会被 `hssh listconn` 原样输出到宿主终端与 AI 上下文，含 ESC/CR
+/// 即构成转义序列注入；另外前导 `-` 会让 `--by --force` 把 `--force` 吞成 tag，
+/// 使传输静默失去覆盖保护。
+///
+/// 返回 std 的 `Result<_, String>` 而非 crate 别名 `Result`：调用方（CLI 参数解析、
+/// Tauri command）各自决定如何把错误字符串包成自己的错误类型。
+pub fn valid_tag(raw: &str) -> std::result::Result<String, String> {
+    if raw.is_empty() {
+        return Err("不能为空".to_string());
+    }
+    if raw.len() > 32 {
+        return Err(format!("过长（{} 字节，上限 32）", raw.len()));
+    }
+    if raw.starts_with('-') {
+        return Err(format!("不能以 - 开头（会吞掉后续选项）: {raw:?}"));
+    }
+    if !raw
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@' | '/' | ':' | '+'))
+    {
+        return Err(format!(
+            "含非法字符（仅允许字母数字与 - _ . @ / : +）: {raw:?}"
+        ));
+    }
+    Ok(raw.to_string())
 }
 
 /// 一条 SSH 连接。分屏/标签内的每个 pane 在此连接上开独立 channel，复用 TCP。
@@ -54,6 +91,32 @@ pub struct Connection {
     pub sftp: Mutex<Option<Arc<russh_sftp::client::SftpSession>>>,
     reconnecting: AtomicBool,
     pub auto_reconnect: AtomicBool,
+    /// 建连时刻，供 listconn 报告存活时长
+    pub created_at: std::time::SystemTime,
+}
+
+/// `listconn` 的连接视图。**安全约束**：字段全部白名单枚举，绝不从 ConnParams 整体序列化——
+/// ConnParams 含 password/keyData/passphrase，一旦入视图就会经响应文件落到 /tmp 供任意本地
+/// 进程读取。新增字段必须逐项显式判断是否为机密。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnInfo {
+    pub id: String,
+    pub name: String,
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    /// 发起方标记；None = GUI 面板点击或手输参数（消费侧显示为「user」）
+    pub by: Option<String>,
+    /// 发起该连接的 pane id（仅 hssh 路径有值）
+    pub origin_pane: Option<String>,
+    /// 该连接上正在使用的 pane id 列表
+    pub panes: Vec<String>,
+    pub alive: bool,
+    pub reconnecting: bool,
+    pub auto_reconnect: bool,
+    pub uptime_secs: u64,
+    pub transfers: usize,
 }
 
 /// russh 客户端回调：TOFU（首次信任）模型校验主机指纹。
@@ -269,6 +332,36 @@ impl Connection {
             sftp: Mutex::new(None),
             reconnecting: AtomicBool::new(false),
             auto_reconnect: AtomicBool::new(auto_reconnect),
+            created_at: std::time::SystemTime::now(),
+        }
+    }
+
+    /// 是否正处于重连退避中（trigger_reconnect 任务存活期间为 true）
+    pub fn is_reconnecting(&self) -> bool {
+        self.reconnecting.load(Ordering::SeqCst)
+    }
+
+    /// 构造脱敏视图。`alive` 由调用方异步查（`is_alive`）后传入，保持本函数纯同步可测。
+    /// 逐字段显式取值，绝不 `serde` 整个 params——params 含 password/keyData/passphrase。
+    pub fn view(&self, alive: bool, panes: Vec<String>, transfers: usize) -> ConnInfo {
+        ConnInfo {
+            id: self.id.clone(),
+            name: self.params.name.clone(),
+            host: self.params.host.clone(),
+            port: self.params.port,
+            user: self.params.user.clone(),
+            by: self.params.by.clone(),
+            origin_pane: self.params.origin_pane.clone(),
+            panes,
+            alive,
+            reconnecting: self.is_reconnecting(),
+            auto_reconnect: self.auto_reconnect.load(Ordering::SeqCst),
+            uptime_secs: self
+                .created_at
+                .elapsed()
+                .map(|d| d.as_secs())
+                .unwrap_or_default(),
+            transfers,
         }
     }
 
@@ -341,5 +434,90 @@ impl Connection {
             }
             self.reconnecting.store(false, Ordering::SeqCst);
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn params_with_secrets() -> ConnParams {
+        ConnParams {
+            name: "web".into(),
+            host: "10.0.0.9".into(),
+            port: 2222,
+            user: "root".into(),
+            auth: "password".into(),
+            password: Some("SECRETPW".into()),
+            key_path: Some("/secret/path/id_ed25519".into()),
+            key_data: Some("-----BEGIN KEY-----SECRETPEM-----END KEY-----".into()),
+            passphrase: Some("SECRETPHRASE".into()),
+            keepalive: None,
+            timeout: None,
+            by: None,
+            origin_pane: None,
+        }
+    }
+
+    /// 回归锁：`conns_list` 的视图经响应文件落到 /tmp 供任意本地进程读取，
+    /// 因此凭据字段必须一个都不出现在序列化结果里。改 ConnInfo 时若不小心
+    /// 整体序列化 params，本测试即刻失败。
+    #[test]
+    fn conn_view_never_carries_credentials() {
+        let mut params = params_with_secrets();
+        params.by = Some("qwen".into());
+        params.origin_pane = Some("pane-1".into());
+        let conn = Connection::new("conn-1".into(), params, true);
+
+        let view = conn.view(
+            true,
+            vec!["pane-a".into(), "pane-b".into()],
+            2,
+        );
+        let json = serde_json::to_string(&view).expect("ConnInfo 应可序列化");
+
+        for secret in ["SECRETPW", "SECRETPHRASE", "SECRETPEM", "id_ed25519"] {
+            assert!(!json.contains(secret), "视图泄漏凭据 {secret}: {json}");
+        }
+        // 该出的字段要出全：发起方标记与归属 pane 是 killconn 授权判据的依据
+        assert_eq!(view.by.as_deref(), Some("qwen"));
+        assert_eq!(view.origin_pane.as_deref(), Some("pane-1"));
+        assert_eq!(view.panes, vec!["pane-a", "pane-b"]);
+        assert_eq!(view.transfers, 2);
+        assert!(view.alive && view.auto_reconnect && !view.reconnecting);
+    }
+
+    /// 回归锁：旧版前端/旧版 hssh 脚本发的 payload 不含新字段，必须照旧建连成功。
+    /// 少了 serde(default) 会让所有既有连接因反序列化失败而全线报「缺少字段」。
+    #[test]
+    fn legacy_params_payload_without_origin_still_deserializes() {
+        let legacy = r#"{"name":"web","host":"10.0.0.9","port":22,"user":"root","auth":"key"}"#;
+        let params: ConnParams = serde_json::from_str(legacy).expect("旧 payload 必须仍可解析");
+        assert_eq!(params.by, None, "缺省即 user 发起");
+        assert_eq!(params.origin_pane, None);
+        assert_eq!(params.keepalive, None);
+    }
+
+    /// 驼峰线格式：前端 types.ts 与 hssh listconn 的 JSON 都按 camelCase 消费，
+    /// 键名退化成 snake_case 会让前端静默读到 undefined（by 永远显示 user）。
+    /// 断言写成「必须含 camelCase 且不含 snake_case」——用 || 等于没验。
+    #[test]
+    fn origin_fields_use_camel_case_on_the_wire() {
+        let mut params = params_with_secrets();
+        params.by = Some("qwen".into());
+        params.origin_pane = Some("pane-1".into());
+        let conn = Connection::new("c".into(), params, true);
+        let json = serde_json::to_string(&conn.view(true, vec![], 0)).unwrap();
+        assert!(json.contains("\"originPane\":\"pane-1\""), "实际: {json}");
+        assert!(!json.contains("origin_pane"), "snake_case 泄漏进线格式: {json}");
+    }
+
+    /// `is_reconnecting` 反映 trigger_reconnect 的幂等占位标志（视图据此区分
+    /// 「正在重连」与「已放弃」两种断开态）。
+    #[test]
+    fn reconnecting_flag_starts_false() {
+        let conn = Connection::new("c".into(), params_with_secrets(), false);
+        assert!(!conn.is_reconnecting());
+        assert!(!conn.auto_reconnect.load(Ordering::SeqCst));
     }
 }

@@ -26,7 +26,7 @@ use uuid::Uuid;
 
 use hetushell_lib::error::Error;
 use hetushell_lib::settings::{load_profiles, Profile};
-use hetushell_lib::ssh::conn::{establish, ConnParams, Connection};
+use hetushell_lib::ssh::conn::{establish, valid_tag, ConnParams, Connection};
 use hetushell_lib::ssh::sftp;
 use hetushell_lib::ssh::xfer::{self, Cancel};
 
@@ -72,8 +72,8 @@ async fn main() -> ExitCode {
     };
 
     match spec.mode {
-        Mode::Exec { command } => run_exec(profile, command).await,
-        Mode::Job(job) => run_job(job, spec.force, profile).await,
+        Mode::Exec { command } => run_exec(profile, spec.by, command).await,
+        Mode::Job(job) => run_job(job, spec.force, spec.by, profile).await,
     }
 }
 
@@ -82,6 +82,8 @@ async fn main() -> ExitCode {
 struct Spec {
     name: String,
     force: bool,
+    /// 发起方标记（`--by <tag>`）。None = 人在终端手敲，listconn 按「user」展示。
+    by: Option<String>,
     mode: Mode,
 }
 
@@ -109,7 +111,13 @@ fn is_job_flag(a: &str) -> bool {
 /// hsshx 自有选项。出现在操作数位置时**不能**当路径取走——
 /// 否则 `--get --force /x` 会把 `--force` 静默当成远端路径发给服务器。
 fn is_hsshx_option(a: &str) -> bool {
-    is_job_flag(a) || matches!(a, "--force" | "-f" | "--file")
+    is_job_flag(a) || matches!(a, "--force" | "--by" | "-f" | "--file")
+}
+
+/// `--by <tag>` 取值：复用后端唯一实现点 `ssh::conn::valid_tag`，在此只加 CLI 前缀。
+/// 两处各写一份规则必然漂移——后端 ssh_connect 也要校验（前端可传任意值）。
+fn cli_tag(raw: &str) -> Result<String, String> {
+    valid_tag(raw).map_err(|e| format!("选项 --by {e}"))
 }
 
 /// 解析 `<连接项>` 及其后的参数。
@@ -127,6 +135,7 @@ fn parse_args(args: &[String]) -> Result<Spec, String> {
     let mut cmd_parts: Vec<String> = Vec::new();
     let mut job: Option<Job> = None;
     let mut force = false;
+    let mut by: Option<String> = None;
     let mut flags_open = true;
 
     let mut i = 1;
@@ -136,6 +145,15 @@ fn parse_args(args: &[String]) -> Result<Spec, String> {
         if flags_open && arg == "--force" {
             force = true;
             i += 1;
+            continue;
+        }
+
+        if flags_open && arg == "--by" {
+            let Some(v) = args.get(i + 1) else {
+                return Err(format!("选项 {arg} 缺少参数"));
+            };
+            by = Some(cli_tag(v)?);
+            i += 2;
             continue;
         }
 
@@ -179,7 +197,7 @@ fn parse_args(args: &[String]) -> Result<Spec, String> {
             command: resolve_command(file_path, cmd_parts)?,
         },
     };
-    Ok(Spec { name, force, mode })
+    Ok(Spec { name, force, by, mode })
 }
 
 /// 从 `i` 处按 `flag` 的元数取走操作数。可选操作数有默认值：
@@ -238,7 +256,7 @@ fn find_profile(name: &str) -> Option<Profile> {
     load_profiles().into_iter().find(|p| p.name == name)
 }
 
-fn conn_params(profile: &Profile) -> ConnParams {
+fn conn_params(profile: &Profile, by: Option<String>) -> ConnParams {
     ConnParams {
         name: profile.name.clone(),
         host: profile.host.clone(),
@@ -251,18 +269,21 @@ fn conn_params(profile: &Profile) -> ConnParams {
         passphrase: None,
         keepalive: profile.keepalive,
         timeout: profile.timeout,
+        by,
+        // hsshx 是独立进程，没有 pane 归属概念：它的终止授权凭据是租约里的 pid（见 ssh::lease）
+        origin_pane: None,
     }
 }
 
 /// 原有执行路径：exec 模式或交互模式，退出码跟随远程命令。
-async fn run_exec(profile: Profile, command: Option<String>) -> ExitCode {
+async fn run_exec(profile: Profile, by: Option<String>, command: Option<String>) -> ExitCode {
     if let Some(cmd) = &command {
         if cmd.trim().is_empty() {
             return ExitCode::SUCCESS;
         }
     }
 
-    let params = conn_params(&profile);
+    let params = conn_params(&profile, by);
     let handle = match establish(&params).await {
         Ok(h) => h,
         Err(e) => {
@@ -285,11 +306,11 @@ async fn run_exec(profile: Profile, command: Option<String>) -> ExitCode {
 
 /// 文件搬运路径：组装 `Arc<Connection>`（`ssh::sftp` 的 pub 原语按连接缓存懒创建的
 /// SFTP 会话，故必须走 Connection 而非裸 handle），再分发到具体操作。
-async fn run_job(job: Job, force: bool, profile: Profile) -> ExitCode {
+async fn run_job(job: Job, force: bool, by: Option<String>, profile: Profile) -> ExitCode {
     let cancel = Cancel::new();
     watch_cancel(&cancel);
 
-    let src_conn = match attach(conn_params(&profile)).await {
+    let src_conn = match attach(conn_params(&profile, by.clone())).await {
         Ok(c) => c,
         Err(e) => {
             eprintln!("hsshx: {e}");
@@ -310,7 +331,7 @@ async fn run_job(job: Job, force: bool, profile: Profile) -> ExitCode {
                     close(&src_conn).await;
                     return ExitCode::from(2);
                 }
-                Some(p) => match attach(conn_params(&p)).await {
+                Some(p) => match attach(conn_params(&p, by.clone())).await {
                     Ok(c) => Some(c),
                     Err(e) => {
                         eprintln!("hsshx: {e}");
@@ -709,6 +730,7 @@ fn usage() {
     eprintln!("  hsshx <连接项> --ls [远端目录]     列远端目录（默认 home）");
     eprintln!("  hsshx <连接项> --stat <远端路径>   取远端元数据（JSON）");
     eprintln!("  hsshx <连接项> ... --force         允许覆盖已存在的目标");
+    eprintln!("  hsshx <连接项> ... --by <标记>     标注发起方（AI/脚本自命名，供 listconn 区分归属）");
     eprintln!("  hsshx -l                           列出已保存的连接项");
     eprintln!("  hsshx -h                           显示简要帮助");
     eprintln!("  hsshx --doc                        显示完整文档（含示例，适合人与 AI 参考）");
@@ -917,6 +939,65 @@ mod tests {
         match &spec.mode {
             Mode::Exec { command } => command.as_deref(),
             _ => None,
+        }
+    }
+
+    /// `--by <tag>` 在连接项名之后、命令之前被识别，且不影响命令收集。
+    #[test]
+    fn by_tag_is_captured_without_disturbing_the_command() {
+        let spec = parse(&["hsshx", "web", "--by", "qwen", "uptime"]).unwrap();
+        assert_eq!(spec.name, "web");
+        assert_eq!(spec.by.as_deref(), Some("qwen"));
+        assert_eq!(exec_command(&spec), Some("uptime"));
+    }
+
+    /// 回归锁：不带 `--by` 时 by 必须为 None（listconn 据此显示 user），
+    /// 且命令解析与带 tag 时完全一致——新选项不得动到既有路径。
+    #[test]
+    fn absent_by_tag_stays_none_and_command_is_untouched() {
+        let spec = parse(&["hsshx", "web", "uptime", "-f", "all"]).unwrap();
+        assert_eq!(spec.by, None, "缺省即 user 发起，不能凭空补 tag");
+        assert_eq!(exec_command(&spec), Some("uptime -f all"));
+    }
+
+    /// tag 会被 `hssh listconn` 原样 cat 到宿主终端，含 ESC/CR 即转义序列注入入口，
+    /// 必须在 CLI 边界拒绝——这条锁住的是 valid_tag 的白名单本身。
+    #[test]
+    fn by_tag_rejects_terminal_injection_payloads() {
+        for bad in ["qwen\u{1b}[2J", "a\nb", "a b", "--force", "中文", "", &"x".repeat(33)] {
+            let err = parse(&["hsshx", "web", "--by", bad, "uptime"])
+                .err()
+                .unwrap_or_else(|| panic!("非法 tag {bad:?} 必须被拒绝"));
+            assert!(err.contains("--by"), "报错应指向 --by，实际: {err}");
+        }
+    }
+
+    /// `--by` 缺值必须直接报错，不能把下一个 token（可能是远端命令）当 tag 吞掉。
+    #[test]
+    fn by_tag_without_value_is_an_error() {
+        let err = parse(&["hsshx", "web", "--by"]).err().expect("--by 缺值必须报错");
+        assert!(err.contains("缺少参数"), "实际: {err}");
+    }
+
+    /// 传输模式下 tag 同样可用：`--by` 已登记进 is_hsshx_option，
+    /// 否则会被 take_job 当成远端路径静默发给服务器。
+    #[test]
+    fn by_tag_coexists_with_transfer_jobs() {
+        match parse(&["hsshx", "web", "--by", "ci", "--get", "/r/a.log"]).unwrap().mode {
+            Mode::Job(Job::Get { remote, local }) => {
+                assert_eq!(remote, "/r/a.log");
+                assert_eq!(local, ".");
+            }
+            _ => panic!("应解析为 Get 任务"),
+        }
+    }
+
+    /// 白名单字符集要放行真实会用的写法（工具名带斜杠/冒号/点/加号）。
+    #[test]
+    fn by_tag_accepts_common_tool_names() {
+        for ok in ["qwen-code", "claude.code", "ci:runner", "ha1/+@:_"] {
+            let spec = parse(&["hsshx", "web", "--by", ok, "uptime"]).unwrap();
+            assert_eq!(spec.by.as_deref(), Some(ok), "{ok} 应被放行");
         }
     }
 

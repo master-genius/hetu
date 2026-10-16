@@ -128,6 +128,28 @@ export interface ConnParams {
   passphrase?: string;
   keepalive?: number;
   timeout?: number;
+  /** 发起方标记（hssh/hsshx 的 --by）：缺省即 user 发起，供 listconn 区分归属 */
+  by?: string;
+  /** 发起该连接的本地 pane id（仅 hssh 路径有值），killconn 授权判据之一 */
+  originPane?: string;
+}
+
+/** 后端 conns_list 的脱敏连接快照：绝不含 password/keyData/keyPath/passphrase 字段
+ *  （Rust 侧 ConnInfo 逐字段白名单构造，单测锁死）。 */
+export interface ConnSnapshot {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  user: string;
+  by?: string;
+  originPane?: string;
+  panes: string[];
+  alive: boolean;
+  reconnecting: boolean;
+  autoReconnect: boolean;
+  uptimeSecs: number;
+  transfers: number;
 }
 
 export interface FileMeta {
