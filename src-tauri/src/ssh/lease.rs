@@ -65,6 +65,26 @@ pub fn kill_allowed(by: &Option<String>, origin_pane: Option<&str>, req_pane: Op
     }
 }
 
+/// 对 CLI 持有者发 SIGINT —— 等价于用户在它终端里按 Ctrl-C。
+///
+/// 为什么用 SIGINT 而非 SIGTERM：hsshx 的传输只在 SIGINT 上走 `watch_cancel` → 块边界退出
+/// → 删远端半成品 → 回滚未存在的目录树（退出码 130）。SIGTERM 没装处理器，会直接终止进程、
+/// 把半成品留在远端。**绝不能用 SIGKILL**：那会跳过租约文件的自我清理（只能等下次 scan 回收）。
+pub fn signal_int(pid: u32) -> Result<()> {
+    let rc = unsafe { libc::kill(pid as libc::pid_t, libc::SIGINT) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        let e = std::io::Error::last_os_error();
+        // ESRCH：进程已死但锁还没被 scan 回收（正常竞态），报可读文案而不是裸 errno
+        Err(Error::msg(if e.raw_os_error() == Some(libc::ESRCH) {
+            format!("进程 {pid} 已不存在（连接已随其退出而终止）")
+        } else {
+            format!("向进程 {pid} 发信号失败: {e}")
+        }))
+    }
+}
+
 /// detail 的净化：控制字符一律替换为 U+25A1 并限长 200 字符。
 ///
 /// 这不是装饰性校验：detail 会被 `hssh listconn` 原样 cat 到宿主终端，而它可以来自
@@ -243,6 +263,44 @@ pub fn scan_in(dir: &Path) -> Result<Vec<Lease>> {
     }
     out.sort_by(|a, b| a.started_unix.cmp(&b.started_unix));
     Ok(out)
+}
+
+/// 短 id（listconn 表格展示用，也是 killconn 可接受的前缀形式）
+pub fn short_id(id: &str) -> &str {
+    match id.get(..8) {
+        Some(s) => s,
+        None => id,
+    }
+}
+
+/// 在给定租约集合里定位目标：完整 id 优先，否则按唯一前缀匹配。纯函数便于单测。
+///
+/// 歧义与缺失都报错而不是「取第一个」——杀错连接比杀不掉更糟。
+pub fn resolve_id(all: &[Lease], want: &str) -> std::result::Result<Lease, String> {
+    if want.is_empty() {
+        return Err("目标 id 为空".to_string());
+    }
+    let exact = all.iter().filter(|l| l.id == want).collect::<Vec<_>>();
+    let picked = if exact.len() == 1 {
+        exact
+    } else {
+        all.iter().filter(|l| l.id.starts_with(want)).collect::<Vec<_>>()
+    };
+    match picked.len() {
+        0 => Err(format!(
+            "没有 id 为 {want} 的活跃连接（listconn 只列存活连接，已结束的自然杀不到）"
+        )),
+        1 => Ok(picked[0].clone()),
+        n => Err(format!("前缀 {want} 匹配到 {n} 条连接，请给出更长的 id")),
+    }
+}
+
+/// 定位可终止目标。**只接受 `scan()` 的结果**：残留条目（持有者已死、文件未回收）的 pid
+/// 可能已被系统复用，对它发信号会误杀无关进程；而 flock 由内核随进程死亡释放，故「仍在
+/// scan 列表里」严格等价于「该 pid 就是当时登记的那个持有者」。
+pub fn find_kill_target(id: &str) -> Result<Lease> {
+    let all = scan()?;
+    resolve_id(&all, id).map_err(Error::msg)
 }
 
 #[cfg(test)]

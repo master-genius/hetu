@@ -50,6 +50,15 @@ async fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
+    // 免连接的本地子命令：只读写租约目录，不开 SSH、不查 profiles。
+    // 放在连接项解析之前，否则 listconn/killconn 会被当成连接项名去找配置。
+    if args.get(1).map(String::as_str) == Some("listconn") {
+        return list_connections(&args[2..]);
+    }
+    if args.get(1).map(String::as_str) == Some("killconn") {
+        return kill_connection(&args[2..]);
+    }
+
     if args.len() < 2 {
         usage();
         return ExitCode::from(2);
@@ -331,6 +340,158 @@ async fn run_exec(profile: Profile, by: Option<String>, command: Option<String>)
         .await;
 
     ExitCode::from(code)
+}
+
+/// `hsshx listconn [--json]`：只列 **CLI 侧**活跃连接（读租约目录），免连接、纯本地。
+///
+/// 与 `hssh listconn` 的差别必须说清：后者由 GUI 应答，能同时看到面板建的连接；本命令
+/// 读不到别的进程的内存，只覆盖 hsshx 自己登记的租约。好处是不依赖宿主在跑、stdout 直接
+/// 可被脚本与 AI 捕获。
+fn list_connections(rest: &[String]) -> ExitCode {
+    let leases = match lease::scan() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("hsshx: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    if rest.iter().any(|a| a == "--json") {
+        // 每行附带 killable：授权规则只在 lease::kill_allowed 一处，不让调用方自己复制
+        let rows: Vec<serde_json::Value> = leases
+            .iter()
+            .map(|l| {
+                let mut v = serde_json::to_value(l).unwrap_or(serde_json::Value::Null);
+                if let Some(o) = v.as_object_mut() {
+                    o.insert(
+                        "killable".into(),
+                        serde_json::json!(lease::kill_allowed(&l.by, None, None)),
+                    );
+                }
+                v
+            })
+            .collect();
+        match serde_json::to_string_pretty(&rows) {
+            Ok(s) => {
+                println!("{s}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("hsshx: 序列化失败: {e}");
+                ExitCode::from(1)
+            }
+        }
+    } else {
+        if leases.is_empty() {
+            println!("（没有由 hsshx 发起的活跃连接；GUI 面板建的连接请用 hssh listconn 查看）");
+            return ExitCode::SUCCESS;
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_default();
+        println!(
+            "{}  {}  {}  {}  {}  {}",
+            pad("发起", 10),
+            pad("连接项", 10),
+            pad("主机", 22),
+            pad("用户", 8),
+            pad("ID", 8),
+            "状态 / 详情"
+        );
+        for l in &leases {
+            // 全部字段过 sanitize：它们源自 profiles.json 与命令行，含 ESC 会注入宿主终端
+            let can = lease::kill_allowed(&l.by, None, None);
+            let mut tail = format!("{} {}m", l.kind, now.saturating_sub(l.started_unix) / 60);
+            if !l.detail.is_empty() {
+                tail.push_str(&format!("  {}", lease::sanitize(&l.detail)));
+            }
+            tail.push_str(if can { "" } else { "  [不可终止]" });
+            println!(
+                "{}  {}  {}  {}  {}  {}",
+                pad(lease::by_label(&l.by), 10),
+                pad(&lease::sanitize(&l.profile), 10),
+                pad(&format!("{}:{}", lease::sanitize(&l.host), l.port), 22),
+                pad(&lease::sanitize(&l.user), 8),
+                pad(lease::short_id(&l.id), 8),
+                tail,
+            );
+        }
+        ExitCode::SUCCESS
+    }
+}
+
+/// `hsshx killconn <id>`：终止一条由 hsshx 发起的传输（发 SIGINT，等价于用户按 Ctrl-C）。
+///
+/// 三道约束：
+/// 1. 目标必须来自 `lease::scan()`（锁仍被持有 = 那个 pid 就是当时登记人），否则残留条目里
+///    被复用的 pid 会让信号打到无关进程上。
+/// 2. 授权：`lease::kill_allowed` 只放行打了 `--by` 的租约。CLI 侧没有 pane 归属概念，
+///    所以「本 pane 发起」这条判据在这里恒不成立——用户手敲的会话不得被随手杀。
+/// 3. 发 SIGINT 而非 SIGTERM/KILL：交互式有 termios 恢复处理、传输式有 Cancel+回滚，
+///    两条路径都能干净收尾并自删租约。
+///
+/// 本进程是一次性 CLI（无并发任务），故用同步 thread::sleep 做有界等待，不引入 async。
+fn kill_connection(rest: &[String]) -> ExitCode {
+    let Some(target) = rest.first() else {
+        eprintln!("hsshx: killconn 需要目标 id（hsshx listconn 查看）");
+        return ExitCode::from(2);
+    };
+    if target.starts_with('-') {
+        eprintln!("hsshx: killconn 需要目标 id，收到选项 {target}");
+        return ExitCode::from(2);
+    }
+    let l = match lease::find_kill_target(target) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("hsshx: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    if !lease::kill_allowed(&l.by, None, None) {
+        eprintln!(
+            "hsshx: 拒绝终止 {}（{}）：未标记 --by，按授权规则只能终止明确由脚本/AI 发起的连接",
+            lease::short_id(&l.id),
+            l.profile
+        );
+        return ExitCode::from(1);
+    }
+    if let Err(e) = lease::signal_int(l.pid) {
+        eprintln!("hsshx: {e}");
+        return ExitCode::from(1);
+    }
+    eprintln!(
+        "hsshx: 已向 {}（{} pid {}）发 SIGINT",
+        lease::short_id(&l.id),
+        l.kind,
+        l.pid
+    );
+    // 有界确认：对方退出前租约不会消失。等不到不等于失败（回滚可能卡在已停滞的网络上），
+    // 所以文案要区分「已终止」与「已发信号但仍在收尾」。
+    for _ in 0..100 {
+        let alive = lease::scan()
+            .map(|v| v.iter().any(|x| x.id == l.id))
+            .unwrap_or(false);
+        if !alive {
+            println!("已终止 {}", lease::short_id(&l.id));
+            return ExitCode::SUCCESS;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    eprintln!(
+        "hsshx: 租约仍在（{}）——对方可能在等网络超时做回滚清理，可用 listconn 再确认",
+        lease::short_id(&l.id)
+    );
+    ExitCode::from(1)
+}
+
+fn pad(v: &str, n: usize) -> String {
+    let t = v.trim_end();
+    let len = t.chars().count();
+    if len >= n {
+        t.to_string()
+    } else {
+        format!("{t}{}", " ".repeat(n - len))
+    }
 }
 
 /// 登记跨进程租约，让 GUI 侧的 `hssh listconn` 能看见并终止这条 CLI 连接。
@@ -742,7 +903,21 @@ async fn interactive_mode(
     let mut stderr = std::io::stderr().lock();
     let mut code: u8 = 0;
 
-    while let Some(msg) = read_half.wait().await {
+    // 外部 SIGINT（hsshx killconn 或用户手动 kill -INT）必须先恢复 termios 再退出：
+    // enable_raw_mode 关掉了 ISIG，键盘 Ctrl-C 不会变成信号（它照常发给远端 shell），
+    // 所以这个分支只接外部信号。而默认动作终止进程会把本地终端留在 raw 状态
+    // （回显与行缓冲全丢），等于毁掉发起者的终端——那是本模块的真实缺陷，不只是 killconn 的前置。
+    let mut sig = std::pin::pin!(tokio::signal::ctrl_c());
+    let mut interrupted = false;
+    loop {
+        let msg = tokio::select! {
+            m = read_half.wait() => m,
+            _ = &mut sig => {
+                interrupted = true;
+                None
+            }
+        };
+        let Some(msg) = msg else { break };
         match msg {
             ChannelMsg::Data { ref data } => {
                 let _ = stdout.write_all(data);
@@ -757,6 +932,10 @@ async fn interactive_mode(
             }
             _ => {}
         }
+    }
+    // 130 = 128+SIGINT，Unix 惯例：让上层脚本能把「被信号终止」与远端退出码区分开
+    if interrupted {
+        code = 130;
     }
 
     restore_termios(stdin_fd, &orig_termios);
@@ -818,6 +997,8 @@ fn usage() {
     eprintln!("  hsshx <连接项> ... --force         允许覆盖已存在的目标");
     eprintln!("  hsshx <连接项> ... --by <标记>     标注发起方（AI/脚本自命名，供 listconn 区分归属）");
     eprintln!("  hsshx <连接项> --put <本地> <目录> -p  远端目录缺失时逐级自动创建（--mkdir 同义）");
+    eprintln!("  hsshx listconn [--json]            列出活跃的 hsshx 连接（免连接，只读租约）");
+    eprintln!("  hsshx killconn <id>                终止一条带 --by 标记的 hsshx 连接");
     eprintln!("  hsshx -l                           列出已保存的连接项");
     eprintln!("  hsshx -h                           显示简要帮助");
     eprintln!("  hsshx --doc                        显示完整文档（含示例，适合人与 AI 参考）");
@@ -853,6 +1034,15 @@ fn print_doc() {
     println!("  6. 远端复制: hsshx <连接项> --cp <远端源> <目标>");
     println!("  7. 列目录: hsshx <连接项> --ls [远端目录]");
     println!("  8. 取元数据: hsshx <连接项> --stat <远端路径>");
+    println!();
+    println!("C. 免连接的本地子命令（不读 profiles、不开 SSH，只操作租约目录）");
+    println!("  9.  看连接: hsshx listconn [--json]");
+    println!("      只列 hsshx 自己发起的活跃连接（交互会话与进行中的传输）。");
+    println!("      GUI 面板/终端 hssh 建的连接不在此列——它们在另一个进程的记忆体里，");
+    println!("      要用 `hssh listconn` 看（那份是合并视图，需 HetuShell 正在运行）。");
+    println!("  10. 终止连接: hsshx killconn <id>");
+    println!("      id 取 listconn 的短 ID（唯一前缀即可）。只对带 --by 标记的连接放行——");
+    println!("      用户手敲的会话不会被脚本随手杀。发 SIGINT，对方按既有路径取消回滚并自删租约。");
     println!();
     println!("命令来源优先级");
     println!("--------------");

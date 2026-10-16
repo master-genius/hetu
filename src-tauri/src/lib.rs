@@ -396,8 +396,9 @@ fn render_table(rows: &[ConnRow]) -> String {
         .clamp(4, 40);
     let mut s = String::new();
     s.push_str(&format!(
-        "{}  {}  {}  {}  {}  {}\n",
-        pad("来源", 4), pad("发起", 10), pad("名称", name_w), pad("主机", host_w), pad("用户", 8), "状态 / 详情"
+        "{}  {}  {}  {}  {}  {}  {}\n",
+        pad("来源", 4), pad("发起", 10), pad("名称", name_w), pad("主机", host_w),
+        pad("用户", 8), pad("ID", 8), "状态 / 详情"
     ));
     for r in rows {
         let host = if r.port == 0 {
@@ -430,12 +431,14 @@ fn render_table(rows: &[ConnRow]) -> String {
             tail.push_str("  [不可终止]");
         }
         s.push_str(&format!(
-            "{}  {}  {}  {}  {}  {}\n",
+            "{}  {}  {}  {}  {}  {}  {}\n",
             pad(if r.source == "gui" { "终端" } else { "CLI" }, 4),
             pad(lease::by_label(&r.by), 10),
             pad(&clean(&r.name), name_w),
             pad(&host, host_w),
             pad(&clean(&r.user), 8),
+            // ID 列必须有：killconn 拿的就是它，缺这列等于表可读但不可操作
+            pad(lease::short_id(&r.id), 8),
             tail,
         ));
     }
