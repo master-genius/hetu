@@ -510,8 +510,32 @@ async fn commit_remote(sftp: &SftpSession, tmp: &str, final_path: &str) -> Resul
         })
 }
 
+/// 单文件下载的落点计算（纯函数，可离线单测）。
+///
+/// 尾斜杠按终端既有约定视为**目录意图**（`ls -F` 的目录就是带 `/` 的），因此目录不存在时
+/// 按需建出来。此前这个分支把 `/tmp/x/` 整串当**文件名**传给 `File::create`，底层只炸出
+/// 难懂的 ENOTDIR；而同函数的目录下载分支早就 `trim_end_matches('/')` 了——两个分支不一致
+/// 才是坑源，所以归一化放在这个共享入口，不在调用方各自打补丁。
+/// 第二项返回「需要创建的目录」：只在用户显式写了目录斜杠、而它尚未存在时才是 Some。
+fn local_landing(local: &str, name: &str, exists_as_dir: bool) -> (String, Option<String>) {
+    // 无尾斜杠且不是已存在目录 → 原样返回（对既有调用者是恒等路径，逐字节不变）
+    if !(local.ends_with('/') || exists_as_dir) {
+        return (local.to_string(), None);
+    }
+    let dir = local.trim_end_matches('/');
+    // 根目录：直接以 "/" 为前缀拼接（绝不能写成 "//name"），且无需 mkdir
+    if dir.is_empty() {
+        return (format!("/{name}"), None);
+    }
+    (
+        format!("{dir}/{name}"),
+        if exists_as_dir { None } else { Some(dir.to_string()) },
+    )
+}
+
 /// 下载（文件或整棵目录）。
-/// - remote 为文件：local 若是已存在目录 → 落到 `<local>/<basename>`，否则视为完整目标路径。
+/// - remote 为文件：local 是目录（或带尾斜杠表目录意图）→ 落到 `<local>/<basename>`，
+///   否则视为完整目标路径。
 /// - remote 为目录：local 视为父目录，在其下创建同名目录。
 pub async fn get(
     conn: &Arc<Connection>,
@@ -528,11 +552,13 @@ pub async fn get(
         let mut done = 0u64;
 
         if !is_dir_mode(meta.permissions.unwrap_or(0)) {
-            let target = if local_is_dir(&local) {
-                format!("{}/{}", local.trim_end_matches('/'), name)
-            } else {
-                local.clone()
-            };
+            let (target, need_dir) = local_landing(&local, &name, local_is_dir(&local));
+            if let Some(d) = need_dir {
+                // 用户显式写了目录斜杠 → 按 mkdir -p 建出来（与 --put -p 同一取向）。
+                // 建失败就是真错（权限/路径上是文件），照直报，不退回「当文件名」老路——
+                // 那会把一个明确意图变成 ENOTDIR 的怪错。
+                tokio::fs::create_dir_all(&d).await?;
+            }
             let target_existed = local_exists(&target);
             guard(force, target_existed, &target)?;
             guard_kind(target_existed, &target, false, local_is_dir(&target))?;
@@ -1121,6 +1147,37 @@ mod tests {
         assert!(!is_safe_entry_name(""));
         assert!(is_safe_entry_name(".hidden"));
         assert!(is_safe_entry_name("正常文件名"));
+    }
+
+    /// 回归锁：`--get` 落点归一化只在「带尾斜杠」或「已是目录」时改变行为，其余必须恒等。
+    /// 第二项（需创建的目录）若非 None 就会真的 mkdir，所以错判比错路径更危险。
+    #[test]
+    fn local_landing_leaves_plain_paths_untouched() {
+        // 完整目标路径：原样返回、绝不建目录
+        assert_eq!(local_landing("/tmp/out.log", "a.log", false), ("/tmp/out.log".into(), None));
+        assert_eq!(local_landing("a.log", "a.log", false), ("a.log".into(), None));
+        // 反斜杠不是 POSIX 分隔符，也不带尾斜杠 → 同样原样
+        assert_eq!(local_landing("/tmp/we\\ird", "a.log", false), ("/tmp/we\\ird".into(), None));
+        // 已是目录：与改动前同一算法（trim 后拼名），不建目录
+        assert_eq!(local_landing("/tmp/x", "a.log", true), ("/tmp/x/a.log".into(), None));
+    }
+
+    /// 目录意图（尾斜杠）：落点进目录内，并在缺失时要求建目录。
+    #[test]
+    fn local_landing_honours_trailing_slash_dir_intent() {
+        // 目录不存在 → 建，再落进去（旧行为是把 "/tmp/x/" 当文件名，炸 ENOTDIR）
+        assert_eq!(
+            local_landing("/tmp/x/", "a.log", false),
+            ("/tmp/x/a.log".into(), Some("/tmp/x".into()))
+        );
+        // 目录已存在 → 不重复建
+        assert_eq!(local_landing("/tmp/x/", "a.log", true), ("/tmp/x/a.log".into(), None));
+        // 多重尾斜杠同义
+        assert_eq!(local_landing("/tmp/x///", "a.log", true), ("/tmp/x/a.log".into(), None));
+        // 相对目录意图：不把不存在的相对路径凭空补成绝对路径
+        assert_eq!(local_landing("dl/", "a.log", false), ("dl/a.log".into(), Some("dl".into())));
+        // 根目录特例：trim 后为空必须退回 "/"，否则拼出 "/a.log" 之外的畸形路径
+        assert_eq!(local_landing("/", "a.log", true), ("/a.log".into(), None));
     }
 
     #[test]

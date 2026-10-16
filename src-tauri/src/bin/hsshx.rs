@@ -932,9 +932,18 @@ async fn interactive_mode(
             _ => {}
         }
     }
-    // 130 = 128+SIGINT，Unix 惯例：让上层脚本能把「被信号终止」与远端退出码区分开
+    // 外部 SIGINT（hssh killconn 或用户手动 kill -INT）：raw 模式关掉了 ISIG，键盘 Ctrl-C
+    // 不会变成信号（照常发给远端 shell），所以这个分支只接外部信号。
+    // 恢复 termios 后必须直接结束进程，不能回到正常的 disconnect + 运行时 Drop 路径：
+    // stdin 读取在 spawn_blocking 线程里阻塞等本地终端输入，Drop 会等它，而被杀的会话
+    // 不会再有输入 —— 实测会让"已终止"的会话滞留 90s 以上，killconn 因此确认不到终止。
+    // 代价：跳过 Holder 的 Drop，租约文件留待下次 scan 回收（flock 随进程退出释放，
+    // 所以 still_alive/listconn 的判活始终是对的）。
+    // 正常退出（远端 shell 自己 exit）仍走原路径，行为与改动前逐字节一致。
     if interrupted {
-        code = 130;
+        restore_termios(stdin_fd, &orig_termios);
+        // 130 = 128+SIGINT，Unix 惯例：让上层脚本把「被信号终止」与远端退出码区分开
+        std::process::exit(130);
     }
 
     restore_termios(stdin_fd, &orig_termios);
