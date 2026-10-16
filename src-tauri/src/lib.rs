@@ -110,8 +110,46 @@ async fn profiles_list(state: State<'_>) -> Result<Vec<Profile>> {
     Ok(list)
 }
 
+/// hssh 把这两个裸词当子命令，它们占用「首个位置参数」的名空间——同名连接项会被静默抢占，
+/// 用户只会看到"连不上"而不知原因，故在写盘前拒绝。
+/// 刻意保留裸词写法（不改 hssh 解析），也不做大小写折叠：hssh 的子命令匹配本就是大小写敏感的，
+/// `Listconn` 不会被抢占，拒绝它属于误伤。
+const RESERVED_PROFILE_NAMES: &[&str] = &["listconn", "killconn"];
+
+fn reserved_profile_name(name: &str) -> bool {
+    RESERVED_PROFILE_NAMES.contains(&name)
+}
+
+#[cfg(test)]
+mod profile_name_tests {
+    use super::reserved_profile_name;
+
+    /// 保留字校验锁：两个子命令名不得能存成连接项。
+    #[test]
+    fn hssh_subcommand_names_are_reserved() {
+        assert!(reserved_profile_name("listconn"), "listconn 必须被拒");
+        assert!(reserved_profile_name("killconn"), "killconn 必须被拒");
+    }
+
+    /// 反向锁（防误伤扩权）：只有真会抢占位置参数的裸词才拒。
+    /// `Listconn` 大小写不同、hssh 的子命令匹配本就大小写敏感 → 不会被抢占，不该拒绝；
+    /// `list` 对应的是 `-l/--list` 选项而非裸词子命令，同样不该拒绝。
+    #[test]
+    fn legitimate_names_are_not_blocked() {
+        for ok in ["Listconn", "listconnx", "xlistconn", "list", "kill", "web", ""] {
+            assert!(!reserved_profile_name(ok), "{ok:?} 不该被误判为保留字");
+        }
+    }
+}
+
 #[tauri::command]
 async fn profile_save(state: State<'_>, profile: Profile) -> Result<()> {
+    if reserved_profile_name(&profile.name) {
+        return Err(Error::msg(format!(
+            "连接项名称「{}」与 hssh 子命令冲突，请换一个名字",
+            profile.name
+        )));
+    }
     // 跨进程文件锁保护的读-改-写：从磁盘读最新值再改再写，防多进程并发增删互覆盖
     let updated = settings::update_locked_return::<Vec<Profile>, _>(
         &settings::profiles_path()?,
