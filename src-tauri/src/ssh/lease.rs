@@ -276,15 +276,29 @@ pub fn short_id(id: &str) -> &str {
 /// 在给定租约集合里定位目标：完整 id 优先，否则按唯一前缀匹配。纯函数便于单测。
 ///
 /// 歧义与缺失都报错而不是「取第一个」——杀错连接比杀不掉更糟。
+///
+/// 策略唯一实现点是 [`resolve_id_in`]（完整 id 优先，否则唯一前缀）：CLI 租约与 GUI 连接
+/// 必须用同一套解析，否则 listconn 表里都是 8 位短 id，却只有一半边能按短 id 被终止。
 pub fn resolve_id(all: &[Lease], want: &str) -> std::result::Result<Lease, String> {
+    let ids: Vec<String> = all.iter().map(|l| l.id.clone()).collect();
+    let hit = resolve_id_in(&ids, want)?;
+    all.iter()
+        .find(|l| l.id == hit)
+        .cloned()
+        .ok_or_else(|| format!("内部错误：解析出的 id {hit} 不在集合内"))
+}
+
+/// 从一组 id 里按「完整匹配优先，否则唯一前缀」定位一个。
+/// 返回命中的完整 id；缺失或有歧义都报错（绝不取第一个）。
+pub fn resolve_id_in(ids: &[String], want: &str) -> std::result::Result<String, String> {
     if want.is_empty() {
         return Err("目标 id 为空".to_string());
     }
-    let exact = all.iter().filter(|l| l.id == want).collect::<Vec<_>>();
-    let picked = if exact.len() == 1 {
+    let exact: Vec<&String> = ids.iter().filter(|i| **i == want).collect();
+    let picked: Vec<&String> = if exact.len() == 1 {
         exact
     } else {
-        all.iter().filter(|l| l.id.starts_with(want)).collect::<Vec<_>>()
+        ids.iter().filter(|i| i.starts_with(want)).collect()
     };
     match picked.len() {
         0 => Err(format!(
@@ -484,6 +498,30 @@ mod tests {
         assert!(!still_alive_in(&dir, &id), "释放后必须判死");
         assert!(!still_alive_in(&dir, "../../etc/passwd"), "穿越 id 必须判死且不碰路径");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// id 解析是 CLI 租约与 GUI 连接共用的唯一策略，而「歧义绝不取第一个」是防误杀的
+    /// 最后防线——杀错连接比杀不掉更糟，所以这条必须锁住。
+    #[test]
+    fn id_resolution_is_exact_then_unique_prefix() {
+        let ids: Vec<String> = ["aabbccdd-1111", "aazz-2222", "ffee-3333"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        // 完整 id 命中
+        assert_eq!(resolve_id_in(&ids, "ffee-3333").unwrap(), "ffee-3333");
+        // 唯一前缀命中（listconn 表里显示的就是短 id）
+        assert_eq!(resolve_id_in(&ids, "ffee").unwrap(), "ffee-3333");
+        // 歧义前缀：报错而不是取第一个
+        let amb = resolve_id_in(&ids, "aa").unwrap_err();
+        assert!(amb.contains("2 条") && amb.contains("更长的 id"), "歧义文案异常: {amb}");
+        // 完整匹配优先于前缀：若某 id 恰是另一个的前缀，必须选完全相等的那个
+        let nested: Vec<String> = ["aa", "aabbcc"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(resolve_id_in(&nested, "aa").unwrap(), "aa");
+        // 缺失与空值都是错误（空值不得退化成「匹配全部」）
+        assert!(resolve_id_in(&ids, "zz").unwrap_err().contains("没有"));
+        assert!(resolve_id_in(&ids, "").unwrap_err().contains("为空"));
     }
 
     #[test]

@@ -48,11 +48,10 @@ export type HfileSpec = {
 /** hssh 控制面命令解析结果：out 为脚本预先 mktemp 的响应文件路径，
  *  后端把结果写进去、脚本 cat 到 stdout——这样在 stdout 是管道的场景（AI 工具捕获）
  *  也能拿到数据；OSC 本身则改写 /dev/tty，不占用管道。 */
-export type HctlSpec = {
-  mode: "listconn";
-  out: string;
-  json: boolean;
-};
+export type HctlSpec =
+  | { mode: "listconn"; out: string; json: boolean }
+  | { mode: "killconn"; out: string; target: string }
+  | { mode: "dump"; out: string; lines: number; all: boolean };
 
 /** base64 → UTF-8 字符串（hssh 各字段单独 base64，避免分隔符冲突）。失败返回空串。 */
 function b64utf8(s: string): string {
@@ -369,8 +368,19 @@ export class Pane {
           const tok = b64utf8(f.tok ?? "");
           const out = b64utf8(f.out ?? "");
           // out 是脚本预先 mktemp 的路径；后端 guard_out_path 再做权威校验（此处只挡空值）
-          if (tok && tok === this.hsshToken && out && f.mode === "listconn") {
-            this.onHctl?.({ mode: "listconn", out, json: f.json === "1" }, this);
+          if (tok && tok === this.hsshToken && out) {
+            if (f.mode === "listconn") {
+              this.onHctl?.({ mode: "listconn", out, json: f.json === "1" }, this);
+            } else if (f.mode === "killconn") {
+              const target = b64utf8(f.target ?? "");
+              if (target) this.onHctl?.({ mode: "killconn", out, target }, this);
+            } else if (f.mode === "dump") {
+              // lines 不信任传入值：OSC 任何本地进程都能写，越界会放大 dump 的内存占用。
+              // 非法则退回默认 200 行（与脚本层缺省一致），不报错——dump 属只读辅助能力。
+              const n = Number(f.lines ?? "");
+              const lines = Number.isInteger(n) && n > 0 && n <= 20000 ? n : 200;
+              this.onHctl?.({ mode: "dump", out, lines, all: f.all === "1" }, this);
+            }
           }
         }
       } catch {

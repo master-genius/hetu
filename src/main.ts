@@ -315,19 +315,58 @@ async function bootstrap() {
   };
 
   /**
-   * hssh 控制面（OSC 1734）。与 handleHssh 的本质区别：**不建连、不 park、不等解锁**。
-   * 结果由后端 conns_report 原子写入脚本预先 mktemp 的响应文件，脚本轮询该文件非空即读
-   * ——所以这里不回发送换行（`hssh -l` 那种解锁方式在 stdin 被重定向的 AI 场景下无效）。
+   * 取本终端屏幕文本。buffer 只存在于前端（Rust 侧不留终端内容镜像），所以 dump 必须由
+   * 这里读、经后端落盘。TUI 占用 alternate buffer 时 `length` 就等于行高、没有历史可取，
+   * 这是 xterm 自身的语义；`--all` 也只是取满当前缓冲，不做二次加工。
+   * 行尾空白按既有取词写法（translateToString(true)）去掉。
+   */
+  const screenText = (pane: Pane, lines: number, all: boolean): string => {
+    const buf = pane.term.buffer.active;
+    const total = buf.length;
+    const start = all ? 0 : Math.max(0, total - lines);
+    const out: string[] = [];
+    for (let i = start; i < total; i++) out.push(buf.getLine(i)?.translateToString(true) ?? "");
+    return out.join("\n") + "\n";
+  };
+
+  /**
+   * hssh 控制面（OSC 1734）。三种模式都**不建连、不 park**，结果由后端写进脚本预先
+   * mktemp 的响应文件，脚本轮询「非空」取回 —— 因此不回发送换行解锁 read（stdin 被
+   * 重定向时 read 立刻拿到 EOF，换行解锁会让脚本提前读到空文件）。
    */
   const handleHctl = async (spec: HctlSpec, pane: Pane) => {
     try {
-      // 归属判据用发起控制面的本地 pane id：后端据此算 killable（只允许杀本 pane 起的）
-      await api.connsReport(spec.out, pane.id, spec.json);
+      if (spec.mode === "listconn") {
+        // 归属判据用发起控制面的本地 pane id：后端据此算 killable（只允许杀本 pane 起的）
+        await api.connsReport(spec.out, pane.id, spec.json);
+        return;
+      }
+      if (spec.mode === "killconn") {
+        const res = await api.connKill(spec.target, pane.id);
+        let note = `已终止 ${res.id.slice(0, 8)}（CLI 进程已收 SIGINT）`;
+        if (res.kind === "gui") {
+          // GUI 连接的收尾只能在这里做：把用到它的 pane 逐个退回本地，再回收连接。
+          // 后端单方面 ssh_disconnect 会让 pane 收到 Closed(exited=false) 永久停在等待重连。
+          for (const { tab, pane: p } of tabs.panesByConn(res.id)) {
+            if (p.parked) {
+              if (tab.activePaneId === p.id) await p.unparkFromSsh();
+            } else {
+              await tabs.switchPaneConnection(tab, p, "local", "本地终端");
+            }
+          }
+          tabs.gcConnections([res.id]);
+          refreshPanels();
+          note = `已终止 ${res.id.slice(0, 8)}（终端连接）`;
+        }
+        await api.hsshReply(spec.out, `${note}\n`);
+        return;
+      }
+      await api.hsshReply(spec.out, screenText(pane, spec.lines, spec.all));
     } catch (err) {
-      // 只提示、不重试：conns_report 在「路径已校验通过」之后失败时会把错误写进响应文件
-      // （脚本能立刻读到并以此退出非零）；但若 guard_out_path 本身就拒绝，后端不能写任何
-      // 文件——那种情况脚本只能等满超时，故超时文案里也列了这一因。重试同一调用只会得到同一错误。
+      // 失败也要让脚本立刻脱困，否则它白等 10s。hsshReply 内有同一份路径白名单，
+      // 若是 out 本身被 guard 拒绝则仍写不进（那种情况退回脚本超时兜底）。
       toast(`hssh：${String(err)}`, true);
+      void api.hsshReply(spec.out, `hssh: ${String(err)}\n`).catch(() => {});
     }
   };
 

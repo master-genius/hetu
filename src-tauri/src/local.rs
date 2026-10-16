@@ -239,6 +239,8 @@ prod 模式选项（仅在 --prod 下生效）:
   --debug                     详细模式：输出连接提示和退出状态码（与 --quiet 相反）
   -l, --list                  列出已保存的连接项（名称/主机/备注）
   listconn [--json]           列出当前活跃连接（GUI 与 hsshx 发起的都算，--json 出机读）
+  killconn <id>               终止指定连接（id 取自 listconn 的 ID 列；只能终止本终端建的非 user 连接）
+  dump [--lines N] [--all]    导出本终端屏幕文本（默认末 200 行，--all 含回滚缓冲）
   -h, --help                  显示此帮助
 
 示例:
@@ -262,11 +264,44 @@ done
 # 单遍参数解析：连接信息（连接项名或 user@host）可在任意位置出现
 host=""; user=""; port=""; pass=""; ident=""; name=""; adhoc=0
 feed=""; feed_file=""; feed_stdin=0; do_exit=0; quiet=0; debug=0; list_mode=0
-listconn_mode=0; json_flag=0
+ctl_cmd=""; ctl_target=""; json_flag=0; dump_lines=200; dump_all=0
 by=""
 _first_pos=1
 
 need() { [ "$1" -ge 2 ] || { echo "hssh: 选项 $2 缺少参数" >&2; exit 1; }; }
+
+# 控制面统一通道（listconn / killconn / dump 共用，避免 OSC+轮询+哨兵三处各写一份而漂移）。
+# 三条与既有建连路径不同的关键设计：
+# ① OSC 写 /dev/tty 而非 stdout —— AI 工具调用时 stdout 是管道，写 stdout 宿主永远收不到
+#    （这正是 hssh 在 agent 里不可用的根因）；/dev/tty 与 stdout 重定向无关。
+# ② 结果经响应文件回传，用「轮询文件非空」等宿主应答，不走既有的「回发送换行解锁 read」——
+#    stdin 被重定向时 read 会立刻拿到 EOF，脚本会在宿主写完前 cat 到空文件。
+# ③ 后端以「临时文件 + rename」原子落盘，故非空即完整；失败时后端把「hssh: …」写进同一
+#    文件，正常输出（表头、空视图提示、JSON 的 [）都不以该前缀开头 → 用作哨兵，
+#    让失败能以退出码判别（AI/脚本不必去解析文案）。
+hctl_call() {
+  [ -n "${HSSH_TOKEN:-}" ] || { echo "hssh: $1 需在 HetuShell 本地终端内运行" >&2; exit 1; }
+  out=$(mktemp "${TMPDIR:-/tmp}/hssh_out.XXXXXX") || { echo "hssh: 创建响应文件失败" >&2; exit 1; }
+  if ! printf '\033]1734;v=1;tok=%s;mode=%s;out=%s%s\007' \
+       "$(b64 "$HSSH_TOKEN")" "$1" "$(b64 "$out")" "$2" > /dev/tty 2>/dev/null; then
+    rm -f "$out"
+    echo "hssh: 无法通知宿主（/dev/tty 不可写？非 HetuShell 本地终端）" >&2; exit 1
+  fi
+  i=0
+  while [ ! -s "$out" ]; do
+    i=$((i + 1))
+    [ "$i" -gt 200 ] && { rm -f "$out"; echo "hssh: 等待宿主应答超时（10s）——前端不含 $1（需重启应用），或 shell 的 TMPDIR 与宿主不一致导致响应文件被拒绝" >&2; exit 1; }
+    sleep 0.05
+  done
+  if [ "$(head -c 6 "$out")" = "hssh: " ]; then
+    cat "$out" >&2
+    rm -f "$out"
+    exit 1
+  fi
+  cat "$out"
+  rm -f "$out"
+  exit 0
+}
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help)     usage; exit 0;;
@@ -285,16 +320,21 @@ while [ $# -gt 0 ]; do
     --quiet)       quiet=1; shift;;
     --debug)       debug=1; shift;;
     --json)        json_flag=1; shift;;
+    --lines)       need $# "$1"; dump_lines="$2"; shift 2;;
+    --all)         dump_all=1; shift;;
     -l|--list)     list_mode=1; shift;;
     -*)            echo "hssh: 未知选项 $1" >&2; exit 1;;
     *)             if [ "$_first_pos" = 1 ]; then
                      case "$1" in
-                       # 子命令而非连接项名：listconn 是查询已存在的连接，不建连
-                       listconn)  listconn_mode=1;;
+                       # 子命令而非连接项名：查询/处置已存在的连接，不建连
+                       listconn|killconn|dump) ctl_cmd="$1";;
                        *@*) user="${1%@*}"; host="${1#*@}"; adhoc=1;;
                        *)   name="$1";;
                      esac
                      _first_pos=0
+                   elif [ "$ctl_cmd" = killconn ] && [ -z "$ctl_target" ]; then
+                     # killconn 的第二个位置参数是目标 id，绝不能走下面「多余参数→临时主机」分支
+                     ctl_target="$1"
                    else
                      host="$1"; adhoc=1
                    fi
@@ -317,39 +357,17 @@ if [ "$list_mode" = 1 ]; then
   exit 0
 fi
 
-# listconn：列出当前活跃连接（GUI 连接 + hsshx 租约）。与 -l（列已保存连接项）不同。
-# 两条与既有模式不同的关键设计：
-# ① OSC 写 /dev/tty 而非 stdout —— AI 工具调用时 stdout 是管道，写 stdout 宿主永远收不到
-#    （这正是 hssh 在 agent 里不可用的根因）；/dev/tty 与 stdout 重定向无关。
-# ② 结果经响应文件回传后 cat 到 stdout，用「轮询文件非空」等宿主应答，不走既有的
-#    「回发送换行解锁 read」——stdin 被重定向时 read 会立刻拿到 EOF，脚本会在宿主写完前
-#    cat 到空文件。轮询对交互终端与管道两种场景都成立。
-if [ "$listconn_mode" = 1 ]; then
-  [ -n "${HSSH_TOKEN:-}" ] || { echo "hssh: listconn 需在 HetuShell 本地终端内运行" >&2; exit 1; }
-  out=$(mktemp "${TMPDIR:-/tmp}/hssh_out.XXXXXX") || { echo "hssh: 创建响应文件失败" >&2; exit 1; }
-  tok=$(b64 "$HSSH_TOKEN")
-  if ! printf '\033]1734;v=1;tok=%s;mode=listconn;out=%s;json=%s\007' \
-       "$tok" "$(b64 "$out")" "$([ "$json_flag" = 1 ] && echo 1 || echo 0)" > /dev/tty 2>/dev/null; then
-    rm -f "$out"
-    echo "hssh: 无法通知宿主（/dev/tty 不可写？非 HetuShell 本地终端）" >&2; exit 1
-  fi
-  # 后端以「临时文件 + rename」落盘，故「非空」即等价于「内容完整」
-  i=0
-  while [ ! -s "$out" ]; do
-    i=$((i + 1))
-    [ "$i" -gt 200 ] && { rm -f "$out"; echo "hssh: 等待宿主应答超时（10s）——前端不含 listconn（需重启应用），或 shell 的 TMPDIR 与宿主不一致导致响应文件被拒绝" >&2; exit 1; }
-    sleep 0.05
-  done
-  # 失败必须能用退出码判别：后端取数失败会把「hssh: 查询失败: …」写进同一文件；
-  # 正常输出（表头「来源」、「（当前没有活跃连接）」、JSON 的 [）都不以 "hssh: " 开头，可作哨兵。
-  if [ "$(head -c 6 "$out")" = "hssh: " ]; then
-    cat "$out" >&2
-    rm -f "$out"
-    exit 1
-  fi
-  cat "$out"
-  rm -f "$out"
-  exit 0
+# 控制面分派：三个子命令都不建连，统一走 hctl_call（它会 exit，故不存在穿透）。
+if [ -n "$ctl_cmd" ]; then
+  case "$ctl_cmd" in
+    listconn) hctl_call listconn ";json=$([ "$json_flag" = 1 ] && echo 1 || echo 0)";;
+    dump)
+      case "$dump_lines" in ''|*[!0-9]*) echo "hssh: --lines 需要正整数" >&2; exit 2;; esac
+      hctl_call dump ";lines=$dump_lines;all=$([ "$dump_all" = 1 ] && echo 1 || echo 0)";;
+    killconn)
+      [ -n "$ctl_target" ] || { echo "hssh: killconn 需要目标 id（先跑 hssh listconn 看 ID 列）" >&2; exit 2; }
+      hctl_call killconn ";target=$(b64 "$ctl_target")";;
+  esac
 fi
 
 # 必须有连接目标

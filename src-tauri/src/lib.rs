@@ -589,6 +589,66 @@ async fn conns_report(
     Ok(n)
 }
 
+/// 控制面**唯一**的写响应文件入口：killconn 的结果、dump 的屏幕文本都走这里。
+/// 刻意不复用 `conns_report` 也不另开一条写路径——路径校验只有一处，才不会被后来者写歪。
+/// 给 webview 开放写文件能力的风险已由 `guard_out_path` 收敛：只能写系统临时目录下
+/// 脚本自己 mktemp 出来的 `hssh_out.*` 普通文件。
+#[tauri::command]
+async fn hssh_reply(out: String, text: String) -> Result<()> {
+    let path = guard_out_path(&out)?;
+    write_out_file(&path, &text)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KillOutcome {
+    /// "gui" = 授权通过、由前端走断开链收尾；"cli" = 后端已对 hsshx 进程发 SIGINT
+    pub kind: &'static str,
+    /// 解析后的完整 id（前端要按它找 pane；用户给的可能是 listconn 表里的 8 位短 id）
+    pub id: String,
+}
+
+/// `hssh killconn` 的授权判定与 CLI 侧执行。
+///
+/// 分工是刻意的：CLI 租约（hsshx 进程）在这里直接 SIGINT；**GUI 连接只判授权、不动手**，
+/// 返回 kind="gui" 让前端去走既有断开链（unpark / 切回本地）。
+/// 原因：GUI 连接的 pane 归属只在前端，后端单方面 `ssh_disconnect` 会让 pane 收到
+/// `Closed(exited=false)` 而永久停在「等待重连」，且 connMeta 残留。
+#[tauri::command]
+async fn conn_kill(
+    state: State<'_>,
+    conn_id: String,
+    req_pane: String,
+) -> Result<KillOutcome> {
+    // 1) CLI 租约：find_kill_target 只认 scan() 的存活条目（防 pid 复用误杀无关进程）
+    if let Ok(l) = lease::find_kill_target(&conn_id) {
+        if !lease::kill_allowed(&l.by, None, Some(&req_pane)) {
+            return Err(Error::msg(format!(
+                "连接 {}（{}）由用户发起且未标记 --by，按授权规则不可终止",
+                lease::short_id(&l.id),
+                l.profile
+            )));
+        }
+        lease::signal_int(l.pid)?;
+        return Ok(KillOutcome { kind: "cli", id: l.id });
+    }
+    // 2) 本实例 GUI 连接：短 id 与租约走同一解析策略（否则表里同样的 8 位 id 一半能用一半不能用）
+    let ids: Vec<String> = state.conns.lock().await.keys().cloned().collect();
+    let id = lease::resolve_id_in(&ids, &conn_id).map_err(Error::msg)?;
+    let conn = state.get_conn(&id).await?;
+    let busy = state.transfers.lock().await.values().any(|t| t.conn_id() == id);
+    if busy {
+        return Err(Error::msg("该连接有进行中的传输，请等待完成或取消后再终止"));
+    }
+    if !lease::kill_allowed(&conn.params.by, conn.params.origin_pane.as_deref(), Some(&req_pane)) {
+        return Err(Error::msg(format!(
+            "连接「{}」由用户在界面发起，且不是本终端建立的连接，不可终止",
+            lease::sanitize(&conn.params.name)
+        )));
+    }
+    Ok(KillOutcome { kind: "gui", id })
+}
+
 #[cfg(test)]
 mod hctl_tests {
     use super::*;
@@ -1707,6 +1767,8 @@ pub fn run() {
             ssh_disconnect,
             conn_has_transfers,
             conns_report,
+            hssh_reply,
+            conn_kill,
             pane_open,
             pane_open_local,
             pane_input,

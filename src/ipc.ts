@@ -35,6 +35,13 @@ export const api = {
    *  返回行数；路径校验与写入全在后端（webview 无 fs 权限，也不该有）。 */
   connsReport: (out: string, reqPane: string, json: boolean) =>
     invoke<number>("conns_report", { out, reqPane, json }),
+  /** killconn 授权判定。kind="cli" 时后端已对 hsshx 进程发 SIGINT；kind="gui" 时后端
+   *  只判授权、不动手，必须由前端走既有断开链收尾（后端单断会让 pane 永久停在等待重连）。
+   *  id 是后端解析后的完整 id（用户可给 listconn 表里的 8 位短 id）。 */
+  connKill: (connId: string, reqPane: string) =>
+    invoke<{ kind: "gui" | "cli"; id: string }>("conn_kill", { connId, reqPane }),
+  /** 控制面唯一的文本写入口（killconn 结果与 dump 文本共用）；路径白名单在后端 */
+  hsshReply: (out: string, text: string) => invoke<void>("hssh_reply", { out, text }),
   /** 查询连接是否有进行中的传输（gcConnections 判断是否可安全断开） */
   connHasTransfers: (connId: string) => invoke<boolean>("conn_has_transfers", { connId }),
 
