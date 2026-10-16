@@ -36,6 +36,9 @@ fn test_params() -> ConnParams {
         passphrase: None,
         keepalive: None,
         timeout: Some(10),
+        // 同 sftp_perms_e2e：列全字段而非 ..Default::default()，让编译器守住每个构造点
+        by: None,
+        origin_pane: None,
     }
 }
 

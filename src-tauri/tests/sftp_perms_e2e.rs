@@ -31,6 +31,10 @@ fn test_params() -> ConnParams {
         passphrase: None,
         keepalive: None,
         timeout: Some(10),
+        // 一律列全字段（不给 ConnParams 加 Default）：将来再加字段时编译器会继续强制更新
+        // 每个构造点——阶段 A 加 by/origin_pane 时就是靠这个漏掉了本文件。
+        by: None,
+        origin_pane: None,
     }
 }
 
