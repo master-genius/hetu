@@ -663,7 +663,88 @@ async fn push_file(
     }
 }
 
+/// 逐级创建用的前缀序列（纯函数，便于离线单测）。
+///
+/// 关键差异：绝对路径逐段补 `/`，相对路径以 SFTP 登录目录（home）为基准、**绝不凭空补
+/// `/`**——补了就会去建 `/a` 而不是 `~/a`，把「在自己的 home 下建目录」变成「试图在根
+/// 级建目录」，权限失败或污染系统目录。`.` 段无意义直接跳过；连续斜杠折叠。
+/// `..` 段原样保留交给服务器解析（探测到已存在即跳过，不做本地路径代数）。
+pub fn dir_prefixes(dir: &str) -> Vec<String> {
+    let abs = dir.starts_with('/');
+    let mut out = Vec::new();
+    let mut acc = String::new();
+    for seg in dir.split('/').filter(|s| !s.is_empty() && *s != ".") {
+        acc = if acc.is_empty() {
+            if abs {
+                format!("/{seg}")
+            } else {
+                seg.to_string()
+            }
+        } else {
+            format!("{acc}/{seg}")
+        };
+        out.push(acc.clone());
+    }
+    out
+}
+
+/// 逐级创建远端目录（`--put -p` 的语义）。刻意不并入 [`put`]：`put` 有 14 处调用点
+/// （含 tests/xfer_e2e.rs 的 13 处），加参数属侵入既有签名；本函数由 hsshx 在 put **之前**
+/// 按需调用，不带 `-p` 时一次都不执行，原有正常路径逐字节不变。
+///
+/// 成本：先探整条路径，已存在即返回（常态只 1 个 RTT）；确认缺失才从最短前缀逐级探+建。
+///
+/// 数据安全：
+/// - 任一层前缀若被**非目录**对象占用立即中止，绝不为了「让上传成功」删改远端既有文件；
+/// - `create_dir` 失败后复查一次，若此时已是目录则认定并发创建成功——多 agent 同时首次
+///   灌同一个新目录是这条命令的实际用法，不复查会随机报错；
+/// - `~/...` 一律拒绝：SFTP 服务器不展开 `~`，逐级建会在 home 下造出一个名为 `~` 的
+///   垃圾目录。报错比自作主张展开更安全（`put` 本身也尚未支持 `~`，不在此顺手扩大范围）。
+pub async fn mkdir_p(conn: &Arc<Connection>, path: &str) -> Result<()> {
+    let dir = path.trim_end_matches('/');
+    if dir.is_empty() {
+        // 原值是 "/" 或空串：根目录必然存在，无需任何创建
+        return Ok(());
+    }
+    if dir == "~" || dir.starts_with("~/") {
+        return Err(Error::msg(format!(
+            "-p 不支持 ~ 开头的路径（SFTP 不展开家目录）: {path}，请写绝对路径"
+        )));
+    }
+    let sftp = sftp::session(conn).await?;
+
+    // 常态短路：整条路径已是目录
+    match remote_kind(&sftp, dir).await {
+        Some(true) => return Ok(()),
+        Some(false) => return Err(Error::msg(format!("远端路径不是目录: {dir}"))),
+        None => {}
+    }
+
+    for acc in dir_prefixes(dir) {
+        match remote_kind(&sftp, &acc).await {
+            Some(true) => continue,
+            Some(false) => {
+                return Err(Error::msg(format!(
+                    "远端路径不是目录，无法在其下建子目录: {acc}"
+                )));
+            }
+            None => {
+                if let Err(e) = ensure_remote_dir(&sftp, &acc, true).await {
+                    if remote_kind(&sftp, &acc).await == Some(true) {
+                        continue; // 并发方已建好
+                    }
+                    return Err(e);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// 上传（文件或整棵目录）到远端目录 `remote_dir` 下，返回远端根路径。
+///
+/// `remote_dir` 必须已存在，缺失时由调用方先用 [`mkdir_p`] 按 `-p` 语义补齐——本函数
+/// 不创建任何父级，以保持签名与全部既有调用点不变。
 pub async fn put(
     conn: &Arc<Connection>,
     local: &str,
@@ -690,7 +771,7 @@ pub async fn put(
             }
             None => {
                 return Err(Error::msg(format!(
-                    "远端目录不存在: {remote_dir}（先创建它，或用 --ls 确认路径）"
+                    "远端目录不存在: {remote_dir}（先创建它、用 --ls 确认路径，或加 -p 自动逐级创建）"
                 )));
             }
         }
@@ -949,8 +1030,47 @@ pub async fn cp(
 mod tests {
     use super::*;
 
-    /// SETSTAT 只带权限位：若某天回归成 `..Default::default()`，size=0 会被写进
-    /// 远端属性，把刚上传完的文件截断为 0 大小。
+    /// 相对路径**绝不凭空补前导斜杠**：`--put f incoming/2026 -p` 的意图是在 SFTP 登录
+    /// 目录（home）下建 `incoming/2026`。一旦补成 `/incoming`，就变成往远端根级建目录——
+    /// 要么权限失败，要么污染系统目录。这是本函数最容易写错的一处，单独锁死。
+    #[test]
+    fn relative_prefixes_never_gain_leading_slash() {
+        assert_eq!(dir_prefixes("incoming/2026"), ["incoming", "incoming/2026"]);
+        assert_eq!(dir_prefixes("a"), ["a"]);
+        for p in dir_prefixes("a/b/c") {
+            assert!(!p.starts_with('/'), "相对路径被补成了绝对路径: {p}");
+        }
+    }
+
+    #[test]
+    fn absolute_prefixes_accumulate_from_root() {
+        assert_eq!(
+            dir_prefixes("/tmp/a/b"),
+            ["/tmp", "/tmp/a", "/tmp/a/b"]
+        );
+        // 尾斜杠/连续斜杠/`.` 段都不得产出空前缀或重复斜杠
+        assert_eq!(dir_prefixes("/tmp/a/"), ["/tmp", "/tmp/a"]);
+        assert_eq!(dir_prefixes("//tmp//a"), ["/tmp", "/tmp/a"]);
+        assert_eq!(dir_prefixes("/tmp/./a"), ["/tmp", "/tmp/a"]);
+        for p in dir_prefixes("/tmp//a") {
+            assert!(!p.is_empty() && !p.contains("//"), "前缀含空段或重复斜杠: {p}");
+        }
+    }
+
+    /// 只有 `/` 时前缀表为空：根目录必然存在，无需也不能尝试 create_dir("/")。
+    #[test]
+    fn root_yields_no_prefixes() {
+        assert!(dir_prefixes("/").is_empty());
+        assert!(dir_prefixes("").is_empty());
+    }
+
+    /// `..` 原样保留交给服务器解析（探测到已存在即跳过），不做本地路径代数——
+    /// 在远端折叠 `..` 会与实际落点不一致，比交给服务器更危险。
+    #[test]
+    fn dotdot_is_passed_through_untouched() {
+        assert_eq!(dir_prefixes("/tmp/a/../b"), ["/tmp", "/tmp/a", "/tmp/a/..", "/tmp/a/../b"]);
+    }
+
     #[test]
     fn attrs_only_carry_permissions() {
         let attrs = FileAttributes {

@@ -74,7 +74,7 @@ async fn main() -> ExitCode {
 
     match spec.mode {
         Mode::Exec { command } => run_exec(profile, spec.by, command).await,
-        Mode::Job(job) => run_job(job, spec.force, spec.by, profile).await,
+        Mode::Job(job) => run_job(job, spec.force, spec.mkdir, spec.by, profile).await,
     }
 }
 
@@ -85,6 +85,8 @@ struct Spec {
     force: bool,
     /// 发起方标记（`--by <tag>`）。None = 人在终端手敲，listconn 按「user」展示。
     by: Option<String>,
+    /// `-p/--mkdir`：`--put` 的远端目录缺失时逐级创建。默认 false = 沿用「必须已存在」。
+    mkdir: bool,
     mode: Mode,
 }
 
@@ -112,7 +114,8 @@ fn is_job_flag(a: &str) -> bool {
 /// hsshx 自有选项。出现在操作数位置时**不能**当路径取走——
 /// 否则 `--get --force /x` 会把 `--force` 静默当成远端路径发给服务器。
 fn is_hsshx_option(a: &str) -> bool {
-    is_job_flag(a) || matches!(a, "--force" | "--by" | "-f" | "--file")
+    is_job_flag(a)
+        || matches!(a, "--force" | "--by" | "-p" | "--mkdir" | "-f" | "--file")
 }
 
 /// `--by <tag>` 取值：复用后端唯一实现点 `ssh::conn::valid_tag`，在此只加 CLI 前缀。
@@ -137,6 +140,7 @@ fn parse_args(args: &[String]) -> Result<Spec, String> {
     let mut job: Option<Job> = None;
     let mut force = false;
     let mut by: Option<String> = None;
+    let mut mkdir = false;
     let mut flags_open = true;
 
     let mut i = 1;
@@ -155,6 +159,12 @@ fn parse_args(args: &[String]) -> Result<Spec, String> {
             };
             by = Some(cli_tag(v)?);
             i += 2;
+            continue;
+        }
+
+        if flags_open && (arg == "-p" || arg == "--mkdir") {
+            mkdir = true;
+            i += 1;
             continue;
         }
 
@@ -192,13 +202,24 @@ fn parse_args(args: &[String]) -> Result<Spec, String> {
     if force && job.is_none() {
         return Err("--force 仅对 --get/--put/--cp 有意义（当前没有传输操作）".to_string());
     }
+    // 同上：-p 只对 --put 有意义。--get 的落点是本地路径（由调用方自己决定），
+    // --ls/--stat 是只读探查，静默收下这个开关会让用户以为目录被建好了。
+    if mkdir && !matches!(job, Some(Job::Put { .. })) {
+        return Err("-p 仅对 --put 有意义（当前不是 --put 操作）".to_string());
+    }
     let mode = match job {
         Some(j) => Mode::Job(j),
         None => Mode::Exec {
             command: resolve_command(file_path, cmd_parts)?,
         },
     };
-    Ok(Spec { name, force, by, mode })
+    Ok(Spec {
+        name,
+        force,
+        by,
+        mkdir,
+        mode,
+    })
 }
 
 /// 从 `i` 处按 `flag` 的元数取走操作数。可选操作数有默认值：
@@ -355,7 +376,13 @@ fn job_lease_kind(job: &Job) -> Option<(&'static str, String)> {
 
 /// 文件搬运路径：组装 `Arc<Connection>`（`ssh::sftp` 的 pub 原语按连接缓存懒创建的
 /// SFTP 会话，故必须走 Connection 而非裸 handle），再分发到具体操作。
-async fn run_job(job: Job, force: bool, by: Option<String>, profile: Profile) -> ExitCode {
+async fn run_job(
+    job: Job,
+    force: bool,
+    mkdir: bool,
+    by: Option<String>,
+    profile: Profile,
+) -> ExitCode {
     let cancel = Cancel::new();
     watch_cancel(&cancel);
 
@@ -403,6 +430,11 @@ async fn run_job(job: Job, force: bool, by: Option<String>, profile: Profile) ->
                 xfer::get(&src_conn, remote, local, force, &cancel).await
             }
             Job::Put { local, remote_dir } => {
+                // -p 在 put 之前逐级建目录：put 自身的探测因此通过，不需要改它的签名
+                // （put 有 14 处调用点，含 tests/xfer_e2e.rs 的 13 处）。
+                if mkdir {
+                    xfer::mkdir_p(&src_conn, remote_dir).await?;
+                }
                 let root = xfer::put(&src_conn, local, remote_dir, force, &cancel).await?;
                 // 结果路径走 stderr：stdout 纯净是 hsshx 面向脚本/AI 的既有契约
                 eprintln!("→ {root}");
@@ -784,6 +816,7 @@ fn usage() {
     eprintln!("  hsshx <连接项> --stat <远端路径>   取远端元数据（JSON）");
     eprintln!("  hsshx <连接项> ... --force         允许覆盖已存在的目标");
     eprintln!("  hsshx <连接项> ... --by <标记>     标注发起方（AI/脚本自命名，供 listconn 区分归属）");
+    eprintln!("  hsshx <连接项> --put <本地> <目录> -p  远端目录缺失时逐级自动创建（--mkdir 同义）");
     eprintln!("  hsshx -l                           列出已保存的连接项");
     eprintln!("  hsshx -h                           显示简要帮助");
     eprintln!("  hsshx --doc                        显示完整文档（含示例，适合人与 AI 参考）");
@@ -831,11 +864,12 @@ fn print_doc() {
     println!("  -f, --file <文件>    从文件读取命令内容");
     println!("  --get <远端> [本地]  下载。本地省略或指向已存在目录时，按远端同名落盘");
     println!("  --put <本地> <目录>  上传到远端目录，落点为 <目录>/<本地basename>");
-    println!("                     远端目录必须已存在（不会自动创建父级），否则直接报错");
+    println!("                     远端目录默认必须已存在；缺失时加 -p 逐级自动创建");
     println!("  --cp <源> <目标>     目标不带前缀=同机复制；写成「连接项:目录」=跨机复制");
     println!("  --ls [目录]          列目录（远端 home 缺省）；输出为「大小 名字」，目录尾随 /");
     println!("  --stat <路径>        输出 JSON：size/isDir/isLink/perms/mtime/uid/gid/owner/group");
     println!("  --force              允许覆盖已存在的目标（仅对 --get/--put/--cp 有效）");
+    println!("  -p, --mkdir          --put 的远端目录逐级自动创建（仅对 --put 有效，不给 --get/--cp 建目标）");
     println!("  -l, --list           列出已保存的连接项");
     println!("  -h, --help           显示简要帮助");
     println!("  --doc                显示完整文档（本内容）");
@@ -1052,6 +1086,81 @@ mod tests {
             let spec = parse(&["hsshx", "web", "--by", ok, "uptime"]).unwrap();
             assert_eq!(spec.by.as_deref(), Some(ok), "{ok} 应被放行");
         }
+    }
+
+    /// `-p` 放在操作数之后仍要生效：`take_job` 取操作数不会关闭 flags_open，
+    /// 所以 `--put ./a /srv -p` 是合法写法（与 --force 的既有用法同形）。
+    #[test]
+    fn mkdir_flag_after_operands_is_still_parsed() {
+        let spec = parse(&["hsshx", "web", "--put", "./a", "/srv/in", "-p"]).unwrap();
+        assert!(spec.mkdir, "--put 后置 -p 必须生效");
+        match spec.mode {
+            Mode::Job(Job::Put { ref local, ref remote_dir }) => {
+                assert_eq!(local, "./a");
+                assert_eq!(remote_dir, "/srv/in");
+            }
+            ref m => panic!("应为 Put 任务，实际 {m:?}"),
+        }
+    }
+
+    /// 长写法等价，且 -p 在 job 之前也能识别。
+    #[test]
+    fn mkdir_long_form_and_leading_position() {
+        let s = parse(&["hsshx", "web", "--mkdir", "--put", "./a", "/srv"]).unwrap();
+        assert!(s.mkdir);
+        assert!(matches!(s.mode, Mode::Job(Job::Put { .. })));
+    }
+
+    /// 回归锁：不带 -p 时 mkdir 必须为 false —— 否则「远端目录必须已存在」的既有保护
+    /// 会在所有人身上失效，静默往远端建目录。
+    #[test]
+    fn mkdir_defaults_off_and_put_untouched() {
+        let s = parse(&["hsshx", "web", "--put", "./a", "/srv"]).unwrap();
+        assert!(!s.mkdir, "缺省不得自动建目录");
+        let e = parse(&["hsshx", "web", "uptime"]).unwrap();
+        assert!(!e.mkdir);
+    }
+
+    /// `-p` 只对 --put 有意义：给 --get/--cp 静默收下会让人以为目标目录被建好了。
+    #[test]
+    fn mkdir_rejected_for_other_jobs() {
+        for argv in [
+            &["hsshx", "web", "--get", "/r/a.log", "-p"][..],
+            &["hsshx", "web", "--cp", "/a", "/b", "-p"][..],
+            &["hsshx", "web", "--ls", "/tmp", "-p"][..],
+            &["hsshx", "web", "uptime", "-p"][..],
+        ] {
+            // 命令位之后的 -p 原样交给远端（uptime -p），那不是「误用的开关」
+            let err = match parse(argv) {
+                Ok(s) if s.mkdir => panic!("-p 不该对 {argv:?} 生效"),
+                Ok(s) => {
+                    // exec 路径：-p 落在命令里，mkdir 保持 false 即可
+                    assert!(!s.mkdir);
+                    continue;
+                }
+                Err(e) => e,
+            };
+            assert!(err.contains("-p"), "报错应指向 -p，实际: {err}");
+        }
+    }
+
+    /// `-p` 必须登记进 is_hsshx_option：否则 `--put -p /srv` 会把 `-p` 当本地路径取走，
+    /// 真正危险的后果在 `--get --force -p x` 这类组合里——选项被静默当路径发给服务器。
+    #[test]
+    fn mkdir_option_is_never_taken_as_operand() {
+        assert!(is_hsshx_option("-p"));
+        assert!(is_hsshx_option("--mkdir"));
+        // --put 要求两个操作数，-p 占位时必须报错而不是把 -p 当路径
+        let err = parse(&["hsshx", "web", "--put", "-p", "/srv"]).err().unwrap();
+        assert!(err.contains("--put"), "实际: {err}");
+    }
+
+    /// `-p` 与 `--by` 可共存：AI 发起的自动建目录上传，两个元信息都要留下。
+    #[test]
+    fn mkdir_coexists_with_by_tag() {
+        let s = parse(&["hsshx", "web", "--by", "qwen", "--put", "./a", "/srv/in", "-p"]).unwrap();
+        assert_eq!(s.by.as_deref(), Some("qwen"));
+        assert!(s.mkdir);
     }
 
     /// 回归锁：`-f` 在连接项名**之后**必须仍被识别。
