@@ -869,7 +869,17 @@ async fn exec_mode(
     // stdin 管道转发：管道数据写入 channel，读完发 EOF。
     // 终端 stdin 不转发（exec 模式非交互），直接发 EOF 防止读 stdin 的命令挂死。
     let (mut read_half, write_half) = channel.split();
-    let (write_tx, mut write_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    let (write_tx, mut write_rx) = mpsc::unbounded_channel::<ExecCmd>();
+
+    // 取消监听：拿到 write_tx 的一份克隆，信号到来时把 Cancel 投递给写任务。
+    // watch 通道让主读循环也能从 `wait()` 上脱身（mpsc recv 无消息时不会自己醒）。
+    //
+    // `cancel_tx` 本体留在本函数作用域：若唯一 sender 被提前退出的任务带着 drop，
+    // `changed()` 会永久返回 Err，select 分支就变成忙轮询烧 CPU。
+    // `term_tx` 是「TERM 已写出」的确认，由写任务置位，主循环只**有界地**等它（见下）。
+    let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
+    let (term_tx, mut term_rx) = tokio::sync::oneshot::channel::<()>();
+    watch_exec_cancel(write_tx.clone(), cancel_tx.clone());
 
     if !std::io::stdin().is_terminal() {
         tokio::task::spawn_blocking(move || {
@@ -879,51 +889,180 @@ async fn exec_mode(
                 match stdin.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        if write_tx.send(buf[..n].to_vec()).is_err() {
+                        if write_tx.send(ExecCmd::Data(buf[..n].to_vec())).is_err() {
                             break;
                         }
                     }
                     Err(_) => break,
                 }
             }
-            // write_tx 在此 drop → write_rx 收到 None → 写 task 发 EOF
+            // 显式 Eof（不再靠 drop）：写任务收到后转发给远端，但继续留着等 Cancel——
+            // stdin 早就读完的常见场景（`< /dev/null`）里，drop 会连带把 write_half 也 drop 掉，
+            // 那时再取消就发不出 TERM 了。
+            let _ = write_tx.send(ExecCmd::Eof);
         });
     } else {
-        drop(write_tx);
+        let _ = write_tx.send(ExecCmd::Eof);
     }
 
-    // 写 task：stdin 数据 → channel，stdin 读完 → EOF
+    // 写 task：stdin 数据 → channel；Eof → 半关闭；Cancel → 先 TERM 远端再 EOF。
+    //
+    // 取消监听任务克隆的那份 sender 会活到进程退出（它在等第二次信号），所以这个任务
+    // 在正常情况下并不会随 exec_mode 返回而结束——这是刻意的：`write_half` 必须整个命令
+    // 期间都活着，任何时刻的取消才都送得出去。exec_mode 返回后运行时随之 drop，任务被中止。
+    //
+    // 这里只回 `term_tx`（TERM 已交出去的确认），**不**碰取消标志：标志归监听任务无条件
+    // 置位。若标志只由写任务置位，网络停滞时 `signal()` 卡在发送队列里，主循环收不到任何
+    // 通知 → 按一次 Ctrl-C 毫无反应，比改动前（默认处置立刻终止进程）更差。
     tokio::spawn(async move {
-        while let Some(data) = write_rx.recv().await {
-            if write_half.data_bytes(data).await.is_err() {
-                break;
+        while let Some(cmd) = write_rx.recv().await {
+            match cmd {
+                ExecCmd::Data(data) => {
+                    if write_half.data_bytes(data).await.is_err() {
+                        break;
+                    }
+                }
+                ExecCmd::Eof => {
+                    let _ = write_half.eof().await;
+                }
+                ExecCmd::Cancel => {
+                    let _ = write_half.signal(russh::Sig::TERM).await;
+                    let _ = write_half.eof().await;
+                    let _ = term_tx.send(());
+                    break;
+                }
             }
         }
-        let _ = write_half.eof().await;
     });
 
     let mut stdout = std::io::stdout().lock();
     let mut stderr = std::io::stderr().lock();
     let mut code: u8 = 0;
 
-    while let Some(msg) = read_half.wait().await {
-        match msg {
-            ChannelMsg::Data { ref data } => {
-                let _ = stdout.write_all(data);
-                let _ = stdout.flush();
+    loop {
+        tokio::select! {
+            msg = read_half.wait() => {
+                let Some(msg) = msg else { break };
+                match msg {
+                    ChannelMsg::Data { ref data } => {
+                        let _ = stdout.write_all(data);
+                        let _ = stdout.flush();
+                    }
+                    ChannelMsg::ExtendedData { ref data, .. } => {
+                        let _ = stderr.write_all(data);
+                        let _ = stderr.flush();
+                    }
+                    ChannelMsg::ExitStatus { exit_status } => {
+                        code = (exit_status & 0xFF) as u8;
+                    }
+                    _ => {}
+                }
             }
-            ChannelMsg::ExtendedData { ref data, .. } => {
-                let _ = stderr.write_all(data);
-                let _ = stderr.flush();
+            // 本地已请求取消：先给 TERM 一个**有界**的落地窗口，再退出。
+            // 窗口必须存在两处理由：不等到就退出，Cancel 可能还没写进 socket（远端孤儿照旧）；
+            // 无界地等，网络停滞时 `signal()` 会一直挂着，Ctrl-C 反而不如改动前能立刻终止进程。
+            // 实测健康链路上 TERM 毫秒级落地，这里只是给停滞网络兜底的 200ms。
+            Ok(()) = cancel_rx.changed() => {
+                if *cancel_rx.borrow() {
+                    let _ = tokio::time::timeout(
+                        std::time::Duration::from_millis(200),
+                        &mut term_rx,
+                    )
+                    .await;
+                    // 130 = 128+SIGINT，Unix 惯例：让上层脚本把「被信号终止」与远端退出码分开
+                    return 130;
+                }
             }
-            ChannelMsg::ExitStatus { exit_status } => {
-                code = (exit_status & 0xFF) as u8;
-            }
-            _ => {}
         }
     }
 
     code
+}
+
+/// exec 通道上写任务能接受的命令。`Eof`/`Cancel` 与数据同走一条 mpsc，
+/// 是因为 `write_half` 被这个任务独占（`channel.split()` 的归属），别处拿不到它。
+///
+/// 刻意不叫 `WriteCmd`：`interactive_mode` 函数体内已有一个同名局部枚举（Data/Resize），
+/// 两者语义不同，同名会让读代码的人猜归属。
+enum ExecCmd {
+    Data(Vec<u8>),
+    Eof,
+    Cancel,
+}
+
+/// 监听终止信号并驱动取消：第一次信号 → 投 `Cancel`（转成远端 TERM）+ 唤醒主读循环；
+/// 第二次信号 → 立即 `exit(130)`，因为清理可能卡在已停滞的网络上，不该剥夺用户
+/// 不再等待的权利（与传输路径 `watch_cancel` 的两次语义同构）。
+///
+/// 为什么必须显式做：exec 通道没有 PTY（russh 的 `exec(want_reply, command)`，
+/// russh-0.62.2 `channels/mod.rs:235`），sshd 在连接断开时**不会**给远端进程发 SIGHUP。
+/// 实测本地 SIGTERM 之后远端 `sleep 18` 仍在跑，命令成了孤儿继续占 GPU/磁盘。
+///
+/// 覆盖范围（实测，非推测）：单命令与复合命令都能杀掉。
+/// - 单命令：`hsshx cy2 'sleep 6'` TERM 后远端进程消失（`bash --login -c` 已 exec 掉自己，
+///   实测 sleep 的父进程直接是 `sshd: …@notty`）。
+/// - 复合命令：`hsshx cy2 'sleep 20; echo > marker'`，TERM 后 3s 查得 `NO_SLEEP_ALIVE` +
+///   无 marker（距该 sleep 自然结束还有 15s，不可能是「跑完了才看不见」）。
+///   原因是 sshd 把 channel signal 投给整个**会话进程组**，不是只给直接子进程——
+///   我最初写成「只杀得掉 bash，孙进程仍可能存活」是错的，实测把它推翻了。
+///
+/// 送不到的情形只有一种：远端命令自己脱离会话（`setsid`/`nohup ... &`/双 fork 守护化），
+/// 那就不是 SSH 能管的东西了。
+#[cfg(unix)]
+fn watch_exec_cancel(
+    write_tx: mpsc::UnboundedSender<ExecCmd>,
+    cancel_tx: tokio::sync::watch::Sender<bool>,
+) {
+    tokio::spawn(async move {
+        let (mut sigint, mut sigterm) = match (
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt()),
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()),
+        ) {
+            (Ok(a), Ok(b)) => (a, b),
+            // 装不上处理器（非常规环境）就退回默认行为：信号照旧直接终止进程，
+            // 只是没有「先 TERM 远端」这一步——不谎称能力。
+            _ => return,
+        };
+        first_signal(&mut sigint, &mut sigterm).await;
+        // 投递 Cancel（由写任务转成远端 TERM），并**无条件**置位唤醒主循环。
+        // 顺序不能反、也不能把置位权交给写任务：网络停滞时写任务可能永远卡在发送队列里，
+        // 那样一次 Ctrl-C 毫无反应，比改动前（默认处置立刻终止）更差。TERM 的落地与否
+        // 由 `term_tx` 单独确认，主循环只等它 200ms。
+        let _ = write_tx.send(ExecCmd::Cancel);
+        let _ = cancel_tx.send_replace(true);
+        first_signal(&mut sigint, &mut sigterm).await;
+        std::process::exit(130);
+    });
+}
+
+#[cfg(unix)]
+async fn first_signal(
+    sigint: &mut tokio::signal::unix::Signal,
+    sigterm: &mut tokio::signal::unix::Signal,
+) {
+    tokio::select! {
+        _ = sigint.recv() => {}
+        _ = sigterm.recv() => {}
+    }
+}
+
+/// 非 Unix：只有 Ctrl-C 可用（无 SIGTERM 语义），其余逻辑与 Unix 一致。
+#[cfg(not(unix))]
+fn watch_exec_cancel(
+    write_tx: mpsc::UnboundedSender<ExecCmd>,
+    cancel_tx: tokio::sync::watch::Sender<bool>,
+) {
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_err() {
+            return;
+        }
+        // 与 Unix 分支同一顺序：先投 Cancel，再无条件置位唤醒主循环。
+        let _ = write_tx.send(ExecCmd::Cancel);
+        let _ = cancel_tx.send_replace(true);
+        if tokio::signal::ctrl_c().await.is_ok() {
+            std::process::exit(130);
+        }
+    });
 }
 
 /// 交互模式：请求 PTY + shell，双向 relay I/O，支持终端 resize。
