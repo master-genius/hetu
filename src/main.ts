@@ -27,7 +27,7 @@ import {
   toast,
 } from "./ui";
 import {
-  beginTransfer, completeTransfer, failTransfer, initTransfers, updateTransfer,
+  armRetry, beginTransfer, completeTransfer, failTransfer, initTransfers, updateTransfer,
 } from "./transfers";
 import type { LayoutNode } from "./layout";
 import type { ConnParams, Profile, SessionLayout } from "./types";
@@ -680,14 +680,19 @@ async function bootstrap() {
           const local = `${dir}/${name}`;
           const tid = crypto.randomUUID();
           beginTransfer(tid, name, "download", local);
-          try {
-            await api.sftpDownload(p.connId, path, local, tid);
-            completeTransfer(tid);
-            await api.openPath(local);
-            toast(`已打开 ${name}`);
-          } catch (err) {
-            failTransfer(tid, String(err));
-          }
+          // 下载→打开是一个动作，重试也重做整个动作（只重下不重开会把用户留在「点了没反应」里）
+          const attempt = async () => {
+            try {
+              await api.sftpDownload(p.connId, path, local, tid);
+              completeTransfer(tid);
+              await api.openPath(local);
+              toast(`已打开 ${name}`);
+            } catch (err) {
+              failTransfer(tid, String(err));
+            }
+          };
+          armRetry(tid, attempt);
+          await attempt();
         }
       } catch {
         /* 词不是文件路径，静默 */
@@ -924,12 +929,18 @@ async function bootstrap() {
       }
       // 传输的成败/进度均由右下角传输面板呈现，不再用 toast，避免刷屏；
       // dir 作为行名悬停提示，让用户知道传到了哪里
-      try {
-        await api.sftpUpload(target.connId, p, dir, tid);
-        completeTransfer(tid);
-      } catch (err) {
-        failTransfer(tid, String(err));
-      }
+      const attempt = async () => {
+        try {
+          await api.sftpUpload(target.connId, p, dir, tid);
+          completeTransfer(tid);
+        } catch (err) {
+          failTransfer(tid, String(err));
+        }
+      };
+      // 重试只挂给真正发出过上传请求的行：上面「用户取消 / 尚未取到目录 / 跳过同名」
+      // 都在此处之前就 return 或 continue 了，那些行从没上线，给按钮就是给个必败的假按钮
+      armRetry(tid, attempt);
+      await attempt();
     }
   };
 
@@ -1139,14 +1150,18 @@ async function bootstrap() {
       const name = srcPath.replace(/\/+$/, "").split("/").pop() ?? srcPath;
       const tid = crypto.randomUUID();
       beginTransfer(tid, name, "upload", dir);
-      try {
-        const dest = await api.sftpCopyRemote(src.connId, srcPath, target.connId, dir, tid);
-        completeTransfer(tid);
-        ok++;
-        if (!quiet) toast(`已复制到 ${dest}`);
-      } catch (err) {
-        failTransfer(tid, String(err));
-      }
+      const attempt = async () => {
+        try {
+          const dest = await api.sftpCopyRemote(src.connId, srcPath, target.connId, dir, tid);
+          completeTransfer(tid);
+          ok++;
+          if (!quiet) toast(`已复制到 ${dest}`);
+        } catch (err) {
+          failTransfer(tid, String(err));
+        }
+      };
+      armRetry(tid, attempt);
+      await attempt();
     }
     if (quiet) {
       const fail = srcPaths.length - ok;
@@ -1249,15 +1264,21 @@ async function bootstrap() {
       const dest = meta.isDir ? `${local.replace(/\/+$/, "")}/${name}` : local;
       const tid = crypto.randomUUID();
       beginTransfer(tid, name, "download", dest);
-      try {
-        await api.sftpDownload(pane.connId, remotePath, local, tid);
-        completeTransfer(tid);
-        if (!quiet) toast(`已下载到 ${dest}`);
-        return true;
-      } catch (err) {
-        failTransfer(tid, String(err));
-        return false;
-      }
+      // 提成闭包：首次传输与面板上的「重试」共用同一份逻辑（含落地路径与提示），
+      // 重试复用同一 tid——后端在命令 return 前就 unregister，同 id 重注册不会被陈旧摘除误删。
+      const attempt = async (): Promise<boolean> => {
+        try {
+          await api.sftpDownload(pane.connId, remotePath, local, tid);
+          completeTransfer(tid);
+          if (!quiet) toast(`已下载到 ${dest}`);
+          return true;
+        } catch (err) {
+          failTransfer(tid, String(err));
+          return false;
+        }
+      };
+      armRetry(tid, attempt);
+      return attempt();
     } catch (err) {
       // 路径解析 / stat 等传输前的错误仍用 toast 提示
       if (!quiet) toast(`下载失败: ${err}`, true);

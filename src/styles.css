@@ -2289,6 +2289,18 @@ input[type="checkbox"] {
   display: flex;
 }
 
+/* 重试：默认不出现。只有「真正上过线(armRetry 过 → data-retryable) 且 失败/取消」才亮。
+   成功行永远不给重试（重放一次已完成的传输只会覆盖掉正确结果，没有意义）；
+   取目录失败、确认框取消、跳过同名这些「还没发出传输请求」的行不会被 armRetry，
+   也就没有这个图标——否则它是个必败的假按钮。 */
+.t-retry {
+  display: none;
+}
+.transfer-row[data-retryable="1"][data-state="failed"] .t-retry,
+.transfer-row[data-retryable="1"][data-state="cancelled"] .t-retry {
+  display: flex;
+}
+
 .t-bar {
   height: 5px;
   background: color-mix(in srgb, var(--term-fg) 12%, transparent);

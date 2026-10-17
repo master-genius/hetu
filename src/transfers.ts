@@ -4,6 +4,7 @@
  * 每行展示 名称 / 进度条 / 已传·总大小·百分比 / 实时速度，右侧按状态给出动作：
  *   - 进行中(active) / 已暂停(paused)：[暂停·继续] [取消]
  *   - 终态(done · failed · cancelled)：[删除]（点击即删，无提示）
+ *   - 失败/取消 且调用方挂过重试(armRetry)：多出一个 [重试]，原地复用同一 tid 重发
  * 行名悬停显示完整目标路径（下载落地位置 / 上传目标目录）。
  *
  * 面板标题栏的 × 仅**隐藏**面板，不影响任何传输；只要列表非空，标题栏（设置右侧）
@@ -41,12 +42,16 @@ interface Row {
   /** 用户已请求取消：用于渲染「取消中…」并作为取消意图记录 */
   cancelling: boolean;
   detail?: string;
+  /** 重发本行的请求，由调用方经 armRetry 挂上。没挂上=这行还没真正上过线，
+   *  重试对它就是必败的假按钮（取目录失败/用户取消/跳过同名都属此类），故不显示图标。 */
+  retry?: () => void | Promise<unknown>;
 }
 
 const ICON = {
   pause: `<svg viewBox="0 0 16 16" width="13" height="13"><path fill="currentColor" d="M4.5 3h2.2v10H4.5V3zm4.8 0h2.2v10H9.3V3z"/></svg>`,
   play: `<svg viewBox="0 0 16 16" width="13" height="13"><path fill="currentColor" d="M5 3.2l7 4.8-7 4.8V3.2z"/></svg>`,
   cancel: `<svg viewBox="0 0 16 16" width="13" height="13"><path stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="M4 4l8 8M12 4l-8 8"/></svg>`,
+  retry: `<svg viewBox="0 0 16 16" width="13" height="13"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="M12.9 6.3A5 5 0 1 0 13 9.7"/><path fill="currentColor" d="M13.7 2.1l.7 4.7-4.5-1.5z"/></svg>`,
   trash: `<svg viewBox="0 0 16 16" width="13" height="13"><path fill="currentColor" d="M6 2h4l.6 1H14v1.4H2V3h3.4L6 2zm-2.4 3.4h8.8l-.7 8A1.3 1.3 0 0110.4 14.6H5.6a1.3 1.3 0 01-1.3-1.2l-.7-8zM6.4 7v5.2h1.1V7H6.4zm2.1 0v5.2h1.1V7H8.5z"/></svg>`,
   close: `<svg viewBox="0 0 12 12" width="12" height="12"><path stroke="currentColor" stroke-width="1.3" stroke-linecap="round" d="M2.5 2.5l7 7M9.5 2.5l-7 7"/></svg>`,
 };
@@ -144,6 +149,7 @@ export function beginTransfer(
       <span class="t-actions">
         <button class="t-act t-pause" title="暂停">${ICON.pause}</button>
         <button class="t-act t-cancel" title="取消">${ICON.cancel}</button>
+        <button class="t-act t-retry" title="重试">${ICON.retry}</button>
         <button class="t-act t-del" title="删除">${ICON.trash}</button>
       </span>
     </div>
@@ -162,11 +168,46 @@ export function beginTransfer(
   };
   row.pauseBtn.addEventListener("click", () => togglePause(row));
   el.querySelector(".t-cancel")!.addEventListener("click", () => requestCancel(row));
+  el.querySelector(".t-retry")!.addEventListener("click", () => retryRow(row));
   el.querySelector(".t-del")!.addEventListener("click", () => removeRow(row));
   rows.set(id, row);
   list.prepend(el); // 最新的传输在最前面
   render(row);
   refreshVisibility();
+}
+
+/**
+ * 挂上「原地重发」能力：只有真正发过传输请求的行才该被调用。
+ * 图标是否可见由 CSS 按 `data-retryable` × `[data-state=failed|cancelled]` 双条件门控，
+ * 所以成功、进行中、已取消（未上线那批）都不会出现重试图标——不常驻，也不假亮。
+ */
+export function armRetry(id: string, run: () => void | Promise<unknown>): void {
+  const row = rows.get(id);
+  if (!row) return; // 行已被删除：与 updateTransfer 同样的保守策略，绝不复活僵尸行
+  row.retry = run;
+  row.el.dataset.retryable = "1";
+}
+
+/**
+ * 重试：把同一行复位成进行中再重发，复用同一个 tid。
+ *
+ * 为什么能复用 tid：后端在命令 return 前就 unregister（lib.rs sftp_download/upload），
+ * 前端拿到 reject 时旧句柄必已摘除，同 id 重新注册不会被陈旧摘除误删。
+ * 复用 tid 也让进度事件天然落回这一行，不留两条重复记录。
+ * 只允许终态触发：复位后 state=active，重入的第二次点击直接被这里挡住。
+ */
+function retryRow(row: Row): void {
+  const run = row.retry;
+  if (!run || !isTerminal(row.state) || row.state === "done") return;
+  row.done = 0;
+  row.total = 0;
+  row.lastDone = 0;
+  row.lastTs = Date.now();
+  row.speedBps = 0;
+  row.cancelling = false;
+  row.detail = undefined;
+  setState(row, "active");
+  void run();
 }
 
 /**
