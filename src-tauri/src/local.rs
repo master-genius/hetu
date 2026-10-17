@@ -274,11 +274,10 @@ need() { [ "$1" -ge 2 ] || { echo "hssh: 选项 $2 缺少参数" >&2; exit 1; };
 # 三条与既有建连路径不同的关键设计：
 # ① OSC 写 /dev/tty 而非 stdout —— AI 工具调用时 stdout 是管道，写 stdout 宿主永远收不到
 #    （这正是 hssh 在 agent 里不可用的根因）；/dev/tty 与 stdout 重定向无关。
-# ② 结果经响应文件回传，用「轮询文件非空」等宿主应答，不走既有的「回发送换行解锁 read」——
+# ② 结果经响应文件回传，用「轮询文件非空」判完成，不走既有的「回发送换行解锁 read」——
 #    stdin 被重定向时 read 会立刻拿到 EOF，脚本会在宿主写完前 cat 到空文件。
-# ③ 后端以「临时文件 + rename」原子落盘，故非空即完整；失败时后端把「hssh: …」写进同一
-#    文件，正常输出（表头、空视图提示、JSON 的 [）都不以该前缀开头 → 用作哨兵，
-#    让失败能以退出码判别（AI/脚本不必去解析文案）。
+# ③ 成败由响应文件的**首行**（退出码）决定：首行按位置解释、脚本无条件剥掉，所以屏幕正文
+#    无论长什么都冒充不了它；单文件也让「非空即完整」成立（后端一次 rename 连首行一起落）。
 hctl_call() {
   [ -n "${HSSH_TOKEN:-}" ] || { echo "hssh: $1 需在 HetuShell 本地终端内运行" >&2; exit 1; }
   out=$(mktemp "${TMPDIR:-/tmp}/hssh_out.XXXXXX") || { echo "hssh: 创建响应文件失败" >&2; exit 1; }
@@ -287,20 +286,19 @@ hctl_call() {
     rm -f "$out"
     echo "hssh: 无法通知宿主（/dev/tty 不可写？非 HetuShell 本地终端）" >&2; exit 1
   fi
+  # 首行是状态位（退出码），正文从第 2 行起：判成败看位置不看内容，dump 的屏幕文本
+  # 无论首行像什么都不会被误判成错误。后端以「临时文件 + rename」原子落盘，非空即完整。
   i=0
   while [ ! -s "$out" ]; do
     i=$((i + 1))
     [ "$i" -gt 200 ] && { rm -f "$out"; echo "hssh: 等待宿主应答超时（10s）——前端不含 $1（需重启应用），或 shell 的 TMPDIR 与宿主不一致导致响应文件被拒绝" >&2; exit 1; }
     sleep 0.05
   done
-  if [ "$(head -c 6 "$out")" = "hssh: " ]; then
-    cat "$out" >&2
-    rm -f "$out"
-    exit 1
-  fi
-  cat "$out"
+  code=$(head -n 1 "$out")
+  case "$code" in ''|*[!0-9]*) code=1;; esac
+  if [ "$code" = 0 ]; then tail -n +2 "$out"; else tail -n +2 "$out" >&2; fi
   rm -f "$out"
-  exit 0
+  exit "$code"
 }
 while [ $# -gt 0 ]; do
   case "$1" in

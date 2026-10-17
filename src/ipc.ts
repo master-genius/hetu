@@ -40,8 +40,13 @@ export const api = {
    *  id 是后端解析后的完整 id（用户可给 listconn 表里的 8 位短 id）。 */
   connKill: (connId: string, reqPane: string) =>
     invoke<{ kind: "gui" | "cli"; id: string }>("conn_kill", { connId, reqPane }),
-  /** 控制面唯一的文本写入口（killconn 结果与 dump 文本共用）；路径白名单在后端 */
-  hsshReply: (out: string, text: string) => invoke<void>("hssh_reply", { out, text }),
+  /** 控制面唯一的文本写入口（killconn 结果与 dump 文本共用）；路径白名单在后端。
+   *  code 作为响应文件的**首行**传给脚本当退出码——状态按位置走、不看正文内容，
+   *  否则 dump 导出的屏幕文本若首行像错误标记就会被误判成失败。 */
+  hsshReply: (out: string, text: string, code: number) =>
+    invoke<void>("hssh_reply", { out, text, code }),
+  /** 连接是否仍存活（killconn 收尾确认用）：GUI 查本进程连接表、CLI 查租约锁，两宇宙同一判据 */
+  connAlive: (connId: string) => invoke<boolean>("conn_alive", { connId }),
   /** 查询连接是否有进行中的传输（gcConnections 判断是否可安全断开） */
   connHasTransfers: (connId: string) => invoke<boolean>("conn_has_transfers", { connId }),
 

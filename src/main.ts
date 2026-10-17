@@ -329,44 +329,70 @@ async function bootstrap() {
     return out.join("\n") + "\n";
   };
 
+  /** 有界确认连接已消失。上限必须短于脚本侧 10s 轮询，否则脚本先超时、拿不到结论。
+   *  查询出错一律保守当作「仍存活」——宁可少报一次成功，也不能把没确认的说成「已终止」。 */
+  const waitGone = async (id: string): Promise<boolean> => {
+    for (let i = 0; i < 50; i++) {
+      if (!(await api.connAlive(id).catch(() => true))) return true;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return !(await api.connAlive(id).catch(() => true));
+  };
+
   /**
-   * hssh 控制面（OSC 1734）。三种模式都**不建连、不 park**，结果由后端写进脚本预先
-   * mktemp 的响应文件，脚本轮询「非空」取回 —— 因此不回发送换行解锁 read（stdin 被
-   * 重定向时 read 立刻拿到 EOF，换行解锁会让脚本提前读到空文件）。
+   * hssh 控制面（OSC 1734）。三种模式都**不建连、不 park**。
+   * 结果写进脚本预先 mktemp 的响应文件：**首行是退出码、第 2 行起是正文**（状态按位置传，
+   * 不看正文内容），所以既不回发送换行解锁 read（stdin 被重定向时 read 立刻 EOF，会让
+   * 脚本提前读到空文件），也不会把「首行恰好像错误标记」的正常 dump 正文误判成失败。
    */
   const handleHctl = async (spec: HctlSpec, pane: Pane) => {
     try {
       if (spec.mode === "listconn") {
         // 归属判据用发起控制面的本地 pane id：后端据此算 killable（只允许杀本 pane 起的）
+        // 成功与失败都由后端写正文+状态，这里不再补写，避免覆盖后端的可读错误
         await api.connsReport(spec.out, pane.id, spec.json);
         return;
       }
       if (spec.mode === "killconn") {
         const res = await api.connKill(spec.target, pane.id);
-        let note = `已终止 ${res.id.slice(0, 8)}（CLI 进程已收 SIGINT）`;
+        let what = "CLI 进程";
         if (res.kind === "gui") {
-          // GUI 连接的收尾只能在这里做：把用到它的 pane 逐个退回本地，再回收连接。
-          // 后端单方面 ssh_disconnect 会让 pane 收到 Closed(exited=false) 永久停在等待重连。
+          what = "终端连接";
+          // GUI 连接的收尾只能在前端做：后端单方面 ssh_disconnect 会让 pane 收到
+          // Closed(exited=false) 而永久停在「等待重连」。以下动作与 pane.onClose 的
+          // park 分支同构——unpark 不加活动 pane 限定（它是 pane 自身状态），
+          // 只有 tab 级标题才按活动 pane 判定（那是 tab 的状态，不该由别的分屏去改）。
           for (const { tab, pane: p } of tabs.panesByConn(res.id)) {
             if (p.parked) {
-              if (tab.activePaneId === p.id) await p.unparkFromSsh();
+              await p.unparkFromSsh();
+              if (tab.activePaneId === p.id) {
+                tab.title = "本地终端";
+                tabs.setLabel(tab, "本地终端");
+              }
+              if (tab.layout.panes().length === 1) tab.connId = "local";
+              tab.pendingHssh = null;
             } else {
               await tabs.switchPaneConnection(tab, p, "local", "本地终端");
             }
           }
           tabs.gcConnections([res.id]);
           refreshPanels();
-          note = `已终止 ${res.id.slice(0, 8)}（终端连接）`;
         }
-        await api.hsshReply(spec.out, `${note}\n`);
+        // 发信号 / 发起回收都不等于终止完成（gcConnections 内部是 void tryDisconnect），
+        // 所以确认过才写「已终止」；确认不到就如实写「仍在收尾」并以非零码退出。
+        const gone = await waitGone(res.id);
+        await api.hsshReply(
+          spec.out,
+          `${gone ? "已终止" : "已请求终止，对端仍在收尾"} ${res.id.slice(0, 8)}（${what}）\n`,
+          gone ? 0 : 1,
+        );
         return;
       }
-      await api.hsshReply(spec.out, screenText(pane, spec.lines, spec.all));
+      await api.hsshReply(spec.out, screenText(pane, spec.lines, spec.all), 0);
     } catch (err) {
-      // 失败也要让脚本立刻脱困，否则它白等 10s。hsshReply 内有同一份路径白名单，
-      // 若是 out 本身被 guard 拒绝则仍写不进（那种情况退回脚本超时兜底）。
+      // 失败必须让脚本立刻脱困并拿到非零退出码：状态走旁路文件，与正文内容无关
       toast(`hssh：${String(err)}`, true);
-      void api.hsshReply(spec.out, `hssh: ${String(err)}\n`).catch(() => {});
+      void api.hsshReply(spec.out, `hssh: ${String(err)}\n`, 1).catch(() => {});
     }
   };
 

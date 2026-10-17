@@ -581,22 +581,35 @@ async fn conns_report(
     let (text, n) = match built {
         Ok(v) => v,
         Err(e) => {
-            let _ = write_out_file(&path, &format!("hssh: 查询失败: {e}\n"));
+            // 失败也走同一旁路状态文件（code=1）：脚本据此分流 stderr 并退出非零。
+            // 正文写什么都不影响判成败，所以这里可以放心保留可读文案。
+            let _ = write_reply(&path, &format!("hssh: 查询失败: {e}\n"), 1);
             return Err(e);
         }
     };
-    write_out_file(&path, &text)?;
+    write_reply(&path, &text, 0)?;
     Ok(n)
 }
 
-/// 控制面**唯一**的写响应文件入口：killconn 的结果、dump 的屏幕文本都走这里。
+/// 落一次控制面应答：**单文件、首行状态位**，一次原子 rename 完成。
+///
+/// 为什么状态是首行而不是正文前缀：前缀要靠"内容像不像错误"来判断，而 `dump` 的正文是
+/// 逐字屏幕文本，首行完全可能就是上一轮 hssh 的报错行——用内容判成败必然误判。
+/// 首行状态位是按**位置**解释的：脚本无条件剥掉第 1 行，屏幕内容不可能冒充它。
+/// 也不用第二个状态文件：那样两次落盘之间有"正文已写、状态未写"的窗口，对端会空等超时。
+/// 单文件还有一个附带好处——文件只要非空就必定包含状态行，故「非空即完整」重新成立。
+pub fn write_reply(out: &std::path::Path, text: &str, code: u16) -> Result<()> {
+    write_out_file(out, &format!("{code}\n{text}"))
+}
+
+/// 控制面**唯一**的文本写入口：killconn 的结果、dump 的屏幕文本都走这里。
 /// 刻意不复用 `conns_report` 也不另开一条写路径——路径校验只有一处，才不会被后来者写歪。
 /// 给 webview 开放写文件能力的风险已由 `guard_out_path` 收敛：只能写系统临时目录下
 /// 脚本自己 mktemp 出来的 `hssh_out.*` 普通文件。
 #[tauri::command]
-async fn hssh_reply(out: String, text: String) -> Result<()> {
+async fn hssh_reply(out: String, text: String, code: u16) -> Result<()> {
     let path = guard_out_path(&out)?;
-    write_out_file(&path, &text)
+    write_reply(&path, &text, code)
 }
 
 #[derive(serde::Serialize)]
@@ -647,6 +660,19 @@ async fn conn_kill(
         )));
     }
     Ok(KillOutcome { kind: "gui", id })
+}
+
+/// 连接是否仍存活——killconn 的收尾确认用，两个宇宙同一个入口：GUI 查本进程连接表，
+/// CLI 查租约锁是否仍被持有（`still_alive`，与判活/回收同一口径，不带回收副作用）。
+///
+/// 为什么要这个命令：`gcConnections` 内部是 `void tryDisconnect`、后端 SIGINT 也只是发信号，
+/// 两者都不等于「已终止」。没有确认就把文案写成「已终止」是谎报（审查发现的第 3 条）。
+#[tauri::command]
+async fn conn_alive(state: State<'_>, conn_id: String) -> Result<bool> {
+    if state.conns.lock().await.contains_key(&conn_id) {
+        return Ok(true);
+    }
+    Ok(lease::still_alive(&conn_id))
 }
 
 #[cfg(test)]
@@ -804,8 +830,31 @@ mod hctl_tests {
         let _ = std::fs::remove_file(&victim);
     }
 
-    /// 写入必须是「临时文件 + rename」原子替换：脚本用『文件非空』判应答，
-    /// 半截内容被读到就会输出残缺表格。
+    /// 协议锁：状态是响应文件的**首行**（按位置解释），正文从第 2 行起，全程只有一份文件。
+    /// 这是「dump 首行恰好像错误标记却被误判成失败」那条审查结论的回归锁——
+    /// 一旦有人把判成败改成看正文内容（前缀、关键字），本测试必须失败。
+    #[test]
+    fn reply_status_is_first_line_not_content() {
+        let p = std::env::temp_dir().join(format!("hssh_out.status-{}", std::process::id()));
+        std::fs::write(&p, "").unwrap();
+        // 正文首行故意长得像错误：状态按**位置**取，它必须被当普通内容原样交付
+        write_reply(&p, "hssh: 这不是错误，是屏幕文本\n", 0).expect("应答失败");
+        let raw = std::fs::read_to_string(&p).unwrap();
+        assert_eq!(raw, "0\nhssh: 这不是错误，是屏幕文本\n");
+        // 复算脚本侧读法：首行取码、其余为正文。正文**连自身尾换行一起**交付
+        //（脚本是 `tail -n +2`，不做二次加工），所以这里必须带 \n
+        let (first, body) = raw.split_once('\n').unwrap();
+        assert_eq!(first, "0");
+        assert_eq!(body, "hssh: 这不是错误，是屏幕文本\n");
+
+        // 失败路径：码非 0、正文照旧落盘；单文件一次 rename，不存在「半对」状态
+        write_reply(&p, "查询失败: x\n", 1).expect("失败应答也得落盘");
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "1\n查询失败: x\n");
+        // 只有一份文件：不应产生任何旁路状态文件
+        assert!(!std::path::Path::new(&format!("{}.done", p.display())).exists());
+        let _ = std::fs::remove_file(&p);
+    }
+
     #[test]
     fn out_file_write_is_atomic_and_private() {
         use std::os::unix::fs::PermissionsExt;
@@ -1769,6 +1818,7 @@ pub fn run() {
             conns_report,
             hssh_reply,
             conn_kill,
+            conn_alive,
             pane_open,
             pane_open_local,
             pane_input,
