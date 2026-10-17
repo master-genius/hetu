@@ -102,7 +102,7 @@ async fn real_main() -> ExitCode {
     };
 
     match spec.mode {
-        Mode::Exec { command } => run_exec(profile, spec.by, command).await,
+        Mode::Exec { command } => run_exec(profile, spec.by, spec.track, command).await,
         Mode::Job(job) => run_job(job, spec.force, spec.mkdir, spec.by, profile).await,
     }
 }
@@ -119,6 +119,9 @@ struct Spec {
     /// `--machine`：把 hsshx 自身的诊断改投调用方打开的 fd 3，于是 stdout/stderr 只装
     /// 远端命令的两条流。默认 false = 诊断照旧走 stderr（人的手动用法逐字节不变）。
     machine: bool,
+    /// `--track`：给这条 exec 登记租约，让它出现在 `listconn` 里、可被 `killconn` 终止。
+    /// 默认 false = exec 不留租约（一次性命令秒级完成，登记只是高频创删锁文件）。
+    track: bool,
     mode: Mode,
 }
 
@@ -158,6 +161,7 @@ fn is_hsshx_option(a: &str) -> bool {
                 | "-n"
                 | "--name"
                 | "--machine"
+                | "--track"
         )
 }
 
@@ -185,6 +189,7 @@ fn parse_args(args: &[String]) -> Result<Spec, String> {
     let mut by: Option<String> = None;
     let mut mkdir = false;
     let mut machine = false;
+    let mut track = false;
     let mut flags_open = true;
 
     let mut i = 1;
@@ -201,6 +206,13 @@ fn parse_args(args: &[String]) -> Result<Spec, String> {
         // 纯开关、不取值，故也刻意不关 flags_open：`hsshx web --machine --ls /tmp` 仍要认得 --ls。
         if flags_open && arg == "--machine" {
             machine = true;
+            i += 1;
+            continue;
+        }
+
+        // --track：给这条 exec 登记租约（listconn 可见、killconn 可终止）。同样不关 flags_open。
+        if flags_open && arg == "--track" {
+            track = true;
             i += 1;
             continue;
         }
@@ -274,18 +286,28 @@ fn parse_args(args: &[String]) -> Result<Spec, String> {
     if mkdir && !matches!(job, Some(Job::Put { .. })) {
         return Err("-p 仅对 --put 有意义（当前不是 --put 操作）".to_string());
     }
+    // --track 是给「长时 exec」用的，传输类本来就有自己的租约（get/put/cp），
+    // 同时给两个开关属矛盾指令 → 当场报错，不做「顺手也登记」。
+    if track && job.is_some() {
+        return Err("--track 仅对执行远程命令有意义（传输操作本来就登记租约）".to_string());
+    }
     let mode = match job {
         Some(j) => Mode::Job(j),
         None => Mode::Exec {
             command: resolve_command(file_path, cmd_parts)?,
         },
     };
+    // 交互模式（无命令且 stdin 是终端）本来就登记租约，--track 在那儿是空转 → 同样报错。
+    if track && matches!(mode, Mode::Exec { command: None }) {
+        return Err("--track 仅对执行远程命令有意义（交互模式本来就登记租约）".to_string());
+    }
     Ok(Spec {
         name,
         force,
         by,
         mkdir,
         machine,
+        track,
         mode,
     })
 }
@@ -366,7 +388,12 @@ fn conn_params(profile: &Profile, by: Option<String>) -> ConnParams {
 }
 
 /// 原有执行路径：exec 模式或交互模式，退出码跟随远程命令。
-async fn run_exec(profile: Profile, by: Option<String>, command: Option<String>) -> ExitCode {
+async fn run_exec(
+    profile: Profile,
+    by: Option<String>,
+    track: bool,
+    command: Option<String>,
+) -> ExitCode {
     if let Some(cmd) = &command {
         if cmd.trim().is_empty() {
             return ExitCode::SUCCESS;
@@ -382,12 +409,17 @@ async fn run_exec(profile: Profile, by: Option<String>, command: Option<String>)
         }
     };
 
-    // 只给交互模式登记租约：exec 是一次性命令、秒级完成，登记只会带来锁文件高频创删
-    // 与残留竞态，却没有「去看/去杀」的对象。
-    let _lease = command
-        .is_none()
-        .then(|| register_lease(&profile, by, "interactive", String::new()))
-        .flatten();
+    // 交互模式一直登记租约；exec 只在 `--track` 时登记。
+    //
+    // exec 默认不登记的原因没变：一次性命令秒级完成，登记只是锁文件高频创删与残留竞态，
+    // 却没有「去看/去杀」的对象。`--track` 是显式例外——调用方自报这条会跑很久，
+    // 于是它进 listconn 可见、可被 killconn 终止（阶段 2 的信号传播负责真正杀到远端）。
+    // detail 就是命令原文：`acquire_in` 统一限长 200 并剔除控制字符，此处不再各自截断。
+    let _lease = match &command {
+        None => register_lease(&profile, by, "interactive", String::new()),
+        Some(cmd) if track => register_lease(&profile, by, "exec", cmd.clone()),
+        Some(_) => None,
+    };
 
     let code = match command {
         Some(cmd) => exec_mode(&handle, cmd).await,
@@ -1277,6 +1309,7 @@ fn usage() {
     dprintln!("  hsshx <连接项> ... --by <标记>     标注发起方（AI/脚本自命名，供 listconn 区分归属）");
     dprintln!("  hsshx <连接项> ... --machine        自身诊断改投 fd 3：stdout/stderr 只剩远端两条流");
     dprintln!("                                     （需调用方开 fd 3，如 3>/tmp/hsshx.diag；未开则报错）");
+    dprintln!("  hsshx <连接项> ... --track          登记租约：长 exec 可被 listconn 看见、killconn 终止");
     dprintln!("  hsshx <连接项> --put <本地> <目录> -p  远端目录缺失时逐级自动创建（--mkdir 同义）");
     dprintln!("  hsshx listconn [--json]            列出活跃的 hsshx 连接（免连接，只读租约）");
     dprintln!("  hsshx killconn <id>                终止一条带 --by 标记的 hsshx 连接");
@@ -1303,6 +1336,7 @@ fn print_doc() {
     println!("A. 命令类（连接项后不带传输选项）");
     println!("  1. exec 模式（默认）: hsshx <连接项> <命令...>");
     println!("     非交互执行命令，stdout/stderr 分离输出，退出码跟随远程命令（0-255）。");
+    println!("     长任务加 --track 就能被 listconn 看见、被 killconn 终止（含远端一起收拾）。");
     println!("  2. file 模式: hsshx <连接项> -f <脚本文件>");
     println!("     从本地文件读取命令内容后按 exec 模式执行（适合多行脚本）。");
     println!("  3. 交互模式: hsshx <连接项>");
@@ -1318,12 +1352,14 @@ fn print_doc() {
     println!();
     println!("C. 免连接的本地子命令（不读 profiles、不开 SSH，只操作租约目录）");
     println!("  9.  看连接: hsshx listconn [--json]");
-    println!("      只列 hsshx 自己发起的活跃连接（交互会话与进行中的传输）。");
-    println!("      GUI 面板/终端 hssh 建的连接不在此列——它们在另一个进程的记忆体里，");
-    println!("      要用 `hssh listconn` 看（那份是合并视图，需 HetuShell 正在运行）。");
+    println!("      只列 hsshx 自己发起的活跃连接：交互会话、进行中的传输，以及带 --track");
+    println!("      的长时 exec。GUI 面板/终端 hssh 建的连接不在此列——它们在另一个进程的");
+    println!("      记忆体里，要用 `hssh listconn` 看（那份是合并视图，需 HetuShell 正在运行）。");
     println!("  10. 终止连接: hsshx killconn <id>");
-    println!("      id 取 listconn 的短 ID（唯一前缀即可）。只对带 --by 标记的连接放行——");
-    println!("      用户手敲的会话不会被脚本随手杀。发 SIGINT，对方按既有路径取消回滚并自删租约。");
+    println!("      id 取 listconn 的短 ID（唯一前缀即可）。授权规则：本终端自己发起的连接直接");
+    println!("      终止；其余须 --force，且此时 --by 要与目标的发起标记一致——所以用户手敲的");
+    println!("      会话不会被脚本随手杀。给目标进程发 SIGINT，对方按既有路径收尾（exec 会把");
+    println!("      TERM 传到远端、传输会回滚清理）并自删租约。");
     println!();
     println!("命令来源优先级");
     println!("--------------");
@@ -1332,6 +1368,7 @@ fn print_doc() {
     println!("参数说明");
     println!("--------");
     println!("  <连接项>             profiles.json 中的连接项名称（hsshx -l 查看）");
+    println!("  -n, --name <连接项>  显式指定连接项：不受「裸名+命令」的位置语义影响，自动化首选");
     println!("  <命令...>            要执行的命令（多参数自动空格连接）");
     println!("  -f, --file <文件>    从文件读取命令内容");
     println!("  --get <远端> [本地]  下载。本地省略或指向已存在目录时，按远端同名落盘");
@@ -1342,6 +1379,12 @@ fn print_doc() {
     println!("  --stat <路径>        输出 JSON：size/isDir/isLink/perms/mtime/uid/gid/owner/group");
     println!("  --force              允许覆盖已存在的目标（仅对 --get/--put/--cp 有效）");
     println!("  -p, --mkdir          --put 的远端目录逐级自动创建（仅对 --put 有效，不给 --get/--cp 建目标）");
+    println!("  --by <标记>          标注发起方（AI/脚本自命名，如 qwen/ci）：listconn 按它分组，");
+    println!("                     killconn 跨终端终止时也要靠它核对归属");
+    println!("  --machine            自身诊断（错误/进度/落点路径）改投 fd 3，需调用方开 3>；");
+    println!("                     于是 stdout/stderr 只剩远端命令的两条流。fd 3 没开则报错");
+    println!("  --track              给这条 exec 登记租约：进 listconn 可见、可被 killconn 终止");
+    println!("                     （仅对执行命令有效，传输与交互模式本来就登记）");
     println!("  -l, --list           列出已保存的连接项");
     println!("  -h, --help           显示简要帮助");
     println!("  --doc                显示完整文档（本内容）");
@@ -1423,9 +1466,13 @@ fn print_doc() {
     println!("  0     成功（命令类：远程退出码为 0）");
     println!("  1-255 跟随远程命令退出码（命令类）");
     println!("  1     文件传输失败（含目标已存在未加 --force、远端路径不存在、权限不足）");
-    println!("  130   文件传输被 Ctrl-C 取消（本次写入的临时名已清理，既有内容未受影响）");
+    println!("  130   被 Ctrl-C/信号取消（exec 模式已把 TERM 传给远端；文件传输则清理了本次");
+    println!("        写入的临时名，既有内容未受影响）");
     println!("  2     参数错误 / 连接项未找到");
     println!("  255   SSH 连接或 channel 建立失败");
+    println!("  注意 1-255 与上面这些自有含义天然重叠（远程命令自己就能返回 1/2/130/255），");
+    println!("  单看退出码无法区分「远端返回 255」和「压根没连上」。要判别就用 --machine：");
+    println!("  fd 3 有内容即 hsshx 自身说过话，fd 3 空而 rc!=0 才是远端命令自己的退出码。");
     println!();
     println!("示例");
     println!("----");
@@ -1472,6 +1519,12 @@ fn print_doc() {
     println!("  这是「既有文件不会被传输出错损坏」的代价，空间紧张时可能 ENOSPC。");
     println!("- 目录的权限位不保留（下载目录用本地 umask，上传目录用远端默认），");
     println!("  只有文件保留 0o777 位——与 GUI 行为一致。");
+    println!("- 取消能传到远端的范围：exec 通道无 PTY，sshd 不会因断连发 SIGHUP，故 hsshx");
+    println!("  收到 SIGINT/SIGTERM 时改用 SSH 协议层的 signal(TERM)，它作用于远端的整个会话");
+    println!("  进程组（单命令与 `a; b` 复合命令实测都能杀掉）。但远端命令若自己脱离会话");
+    println!("  （setsid / nohup ... & / 双 fork 守护化），那部分进程不受 SSH 管辖，杀不到。");
+    println!("- exec 默认不进 listconn（一次性命令秒级完成，登记只是高频创删锁文件）；");
+    println!("  长跑的任务要显式加 --track 才可见、才可被 killconn 终止。");
     println!();
     println!("安全提示");
     println!("--------");
@@ -1582,6 +1635,32 @@ mod tests {
             }
             other => panic!("--machine 不得被 take_job 吞成操作数，实际: {other:?}"),
         }
+    }
+
+    /// `--track` 与 `--machine` 是两个正交开关，互不影响；命令收集后的 `--track` 属远端。
+    #[test]
+    fn track_flag_defaults_off_and_coexists_with_machine() {
+        let spec = parse(&["hsshx", "web", "--track", "make"]).unwrap();
+        assert!(spec.track, "--track 必须被识别");
+        assert!(!spec.machine, "--track 不得顺手打开 machine");
+        assert_eq!(exec_command(&spec), Some("make"));
+
+        let both = parse(&["hsshx", "web", "--machine", "--track", "make"]).unwrap();
+        assert!(both.machine && both.track, "两个开关应可同时生效");
+
+        let off = parse(&["hsshx", "web", "grep", "--track", "x"]).unwrap();
+        assert!(!off.track, "命令里的 --track 属远端参数，不得被吃掉");
+        assert_eq!(exec_command(&off), Some("grep --track x"));
+    }
+
+    /// `--track` 撞上传输操作必须当场报错：它们本来就有自己的租约，静默收下等于多写一份。
+    /// 该校验刻意放在 `resolve_command` **之前**，否则误用时先卡在读 stdin 上。
+    #[test]
+    fn track_rejected_for_transfer_jobs() {
+        let err = parse(&["hsshx", "web", "--track", "--get", "/r/a.log"])
+            .err()
+            .expect("--track 配传输操作必须报错");
+        assert!(err.contains("--track"), "报错应指向 --track，实际: {err}");
     }
 
     /// tag 会被 `hssh listconn` 原样 cat 到宿主终端，含 ESC/CR 即转义序列注入入口，

@@ -24,7 +24,7 @@ pub struct Lease {
     pub id: String,
     /// 持有进程 pid。终止 CLI 连接即对该 pid 发信号
     pub pid: u32,
-    /// "gui" | "interactive" | "get" | "put" | "cp"
+    /// "gui" | "interactive" | "exec"（仅 `hsshx --track`）| "get" | "put" | "cp"
     pub kind: String,
     pub profile: String,
     pub host: String,
