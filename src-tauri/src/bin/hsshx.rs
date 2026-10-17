@@ -124,7 +124,7 @@ fn is_job_flag(a: &str) -> bool {
 /// 否则 `--get --force /x` 会把 `--force` 静默当成远端路径发给服务器。
 fn is_hsshx_option(a: &str) -> bool {
     is_job_flag(a)
-        || matches!(a, "--force" | "--by" | "-p" | "--mkdir" | "-f" | "--file")
+        || matches!(a, "--force" | "--by" | "-p" | "--mkdir" | "-f" | "--file" | "-n" | "--name")
 }
 
 /// `--by <tag>` 取值：复用后端唯一实现点 `ssh::conn::valid_tag`，在此只加 CLI 前缀。
@@ -174,6 +174,21 @@ fn parse_args(args: &[String]) -> Result<Spec, String> {
         if flags_open && (arg == "-p" || arg == "--mkdir") {
             mkdir = true;
             i += 1;
+            continue;
+        }
+
+        // -n/--name：显式指定连接项，与 hssh 的 -n 同一取向——给自动化一条不受位置参数语义
+        // 影响的精确入口。刻意不关 flags_open：`hsshx -n cy2 --put a b` 仍要认得传输选项；
+        // 而之后的裸参数因 name 已是 Some 会自然落进远程命令，正合 `hsshx -n cy2 ls -la`。
+        if flags_open && (arg == "-n" || arg == "--name") {
+            let Some(v) = args.get(i + 1) else {
+                return Err(format!("选项 {arg} 缺少参数"));
+            };
+            if let Some(cur) = &name {
+                return Err(format!("连接项已由位置参数给出「{cur}」，与 -n {v} 冲突（二选一）"));
+            }
+            name = Some(v.to_string());
+            i += 2;
             continue;
         }
 

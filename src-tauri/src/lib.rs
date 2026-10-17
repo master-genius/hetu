@@ -114,31 +114,44 @@ async fn profiles_list(state: State<'_>) -> Result<Vec<Profile>> {
 /// 用户只会看到"连不上"而不知原因，故在写盘前拒绝。
 /// 刻意保留裸词写法（不改 hssh 解析），也不做大小写折叠：hssh 的子命令匹配本就是大小写敏感的，
 /// `Listconn` 不会被抢占，拒绝它属于误伤。
-const RESERVED_PROFILE_NAMES: &[&str] = &["listconn", "killconn", "dump"];
+const RESERVED_PROFILE_NAMES: &[&str] = &["listconn", "killconn", "dump", "list"];
 
+/// 另拒一切以 `-` 开头的名字：hssh 的解析是「选项优先」，`-p`/`--port` 这类名字作位置参数
+/// 必然被当选项吃掉（开发者点的正是 -c/-p/-u/-w/-i；长选项同理，逐个列举必漏）。
+/// 显式 `-n '-p'` 仍能取到值，但没必要留一个「裸名永远用不了」的连接项。
 fn reserved_profile_name(name: &str) -> bool {
-    RESERVED_PROFILE_NAMES.contains(&name)
+    name.starts_with('-') || RESERVED_PROFILE_NAMES.contains(&name)
 }
 
 #[cfg(test)]
 mod profile_name_tests {
     use super::reserved_profile_name;
 
-    /// 保留字校验锁：三个子命令名不得能存成连接项。
+    /// 保留字校验锁：四个裸词子命令名不得能存成连接项。
     #[test]
     fn hssh_subcommand_names_are_reserved() {
         assert!(reserved_profile_name("listconn"), "listconn 必须被拒");
         assert!(reserved_profile_name("killconn"), "killconn 必须被拒");
         assert!(reserved_profile_name("dump"), "dump 必须被拒");
+        assert!(reserved_profile_name("list"), "list 必须被拒");
+    }
+
+    /// 选项名一律被拒（开发者点的 -c/-p/-u/-w/-i 只是其中一部分，长选项同理）。
+    #[test]
+    fn option_like_names_are_reserved() {
+        for bad in ["-c", "-p", "-u", "-w", "-i", "-n", "--port", "--new"] {
+            assert!(reserved_profile_name(bad), "{bad:?} 会被选项解析吞掉，必须拒");
+        }
     }
 
     /// 反向锁（防误伤扩权）：只有真会抢占位置参数的裸词才拒。
-    /// `Listconn` 大小写不同、hssh 的子命令匹配本就大小写敏感 → 不会被抢占，不该拒绝；
-    /// `list` 对应的是 `-l/--list` 选项而非裸词子命令，同样不该拒绝。
+    /// `Listconn`/`Lists` 大小写不同、hssh 的子命令匹配本就大小写敏感 → 不会被抢占，不该拒绝；
+    /// `kill` 不是子命令（子命令是 `killconn`），同样不该拒绝。
     #[test]
     fn legitimate_names_are_not_blocked() {
         for ok in [
-            "Listconn", "listconnx", "xlistconn", "Dump", "dumpx", "xdump", "list", "kill", "web", "",
+            "Listconn", "listconnx", "xlistconn", "Dump", "dumpx", "xdump", "Lists", "listx", "kill",
+            "web", "",
         ] {
             assert!(!reserved_profile_name(ok), "{ok:?} 不该被误判为保留字");
         }

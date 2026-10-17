@@ -235,6 +235,8 @@ usage() {
   -u, --user <用户名>         用户名（也可写成 用户@主机）
   -w, --password <密码>       密码（明文，注意会进 shell 历史）
   -i, --identity <私钥文件>   私钥文件路径
+  -n, --name <连接项名>       显式指定连接项：不经「裸名+连接选项→临时主机」那条隐式推断
+  -c, --conn <用户@主机>      显式临时连接：取值方式让它连 -p 这类字面量都能当主机名收下
   --by <标记>                 发起方标记（AI/脚本自命名，如 qwen/ci），供 listconn 区分归属
   --new                       在**新标签页**建连，不占用当前终端（AI/脚本用；仅接受连接项名）
 
@@ -246,6 +248,7 @@ prod 模式选项（仅在 --prod 下生效）:
   --quiet                     静默模式：不输出连接提示和退出状态码
   --debug                     详细模式：输出连接提示和退出状态码（与 --quiet 相反）
   -l, --list                  列出已保存的连接项（名称/主机/备注）
+  list                        同 -l（裸词形式，与子命令同一分派）
   listconn [--json]           列出当前活跃连接（GUI 与 hsshx 发起的都算，--json 出机读）
   killconn <id> [--force]     终止指定连接（id 取自 listconn 的 ID 列）
                               本终端发起的直接终止；其余须 --force，且此时 --by 要与目标的发起标记一致
@@ -274,6 +277,7 @@ done
 host=""; user=""; port=""; pass=""; ident=""; name=""; adhoc=0
 feed=""; feed_file=""; feed_stdin=0; do_exit=0; quiet=0; debug=0; list_mode=0
 ctl_cmd=""; ctl_target=""; json_flag=0; dump_lines=200; dump_all=0; force_flag=0; new_mode=0
+name_set=0; host_set=0
 by=""
 _first_pos=1
 
@@ -333,19 +337,39 @@ while [ $# -gt 0 ]; do
     --force)       force_flag=1; shift;;
     --new)         new_mode=1; shift;;
     -l|--list)     list_mode=1; shift;;
+    # -n/--name：显式指定连接项名。存在的意义就是给自动化一条不受「裸名+连接选项→临时主机」
+    # 那条隐式推断影响的精确入口（人仍可照旧直接给裸名）。
+    -n|--name)     need $# "$1"; name="$2"; name_set=1; shift 2;;
+    # -c/--conn：显式临时连接（`用户@主机` 或裸主机）。取值方式让它天然接受形如 `-p`
+    # 的字面量（need 直接吃下一个位置参数，不再进 case），这是唯一的转义通道。
+    -c|--conn)     need $# "$1"; case "$2" in
+                     *@*) user="${2%@*}"; host="${2#*@}";;
+                     *)   host="$2";;
+                   esac; adhoc=1; host_set=1; shift 2;;
     -*)            echo "hssh: 未知选项 $1" >&2; exit 1;;
     *)             if [ "$_first_pos" = 1 ]; then
                      case "$1" in
                        # 子命令而非连接项名：查询/处置已存在的连接，不建连
                        listconn|killconn|dump) ctl_cmd="$1";;
-                       *@*) user="${1%@*}"; host="${1#*@}"; adhoc=1;;
-                       *)   name="$1";;
+                       # list 与 -l 同路（不设 ctl_cmd）：行为与 --list 字面一致
+                       list)          list_mode=1;;
+                       *@*)             if [ "$host_set" = 1 ]; then
+                                          echo "hssh: 已用 -c 指定临时连接，不能再给位置参数 $1" >&2; exit 2
+                                        fi
+                                        user="${1%@*}"; host="${1#*@}"; adhoc=1;;
+                       *)               if [ "$name_set" = 1 ]; then
+                                          echo "hssh: 已用 -n 指定连接项「$name」，不能再给位置参数 $1" >&2; exit 2
+                                        fi
+                                        name="$1";;
                      esac
                      _first_pos=0
                    elif [ "$ctl_cmd" = killconn ] && [ -z "$ctl_target" ]; then
                      # killconn 的第二个位置参数是目标 id，绝不能走下面「多余参数→临时主机」分支
                      ctl_target="$1"
                    else
+                     if [ "$host_set" = 1 ]; then
+                       echo "hssh: 已用 -c 指定临时连接，不能再给多余参数 $1" >&2; exit 2
+                     fi
                      host="$1"; adhoc=1
                    fi
                    shift;;
@@ -353,8 +377,17 @@ while [ $# -gt 0 ]; do
 done
 
 # 裸名 + 任一连接选项 → 视为临时连接到该主机（而非连接项名），兑现 `hssh 主机 -p/-w …`。
-if [ "$adhoc" = 1 ] && [ -n "$name" ] && [ -z "$host" ]; then
+# 但显式 -n 时绝不生效：否则 `hssh -n cy2 -p 6005` 会把 cy2 降级成临时主机，
+# 「精确指定」就成了假承诺。人的隐式用法不受影响，只是多了个凌驾于其上的显式入口。
+if [ "$adhoc" = 1 ] && [ -n "$name" ] && [ -z "$host" ] && [ "$name_set" = 0 ]; then
   host="$name"; name=""
+fi
+
+# 显式 -n 与 -p/-u/-w/-i 同用是矛盾指令：profile 路径不携带这些字段（端口来自连接项自身），
+# 静默丢掉等于假装「参数生效了」而其实没有 —— 宁可报错指路。
+if [ "$name_set" = 1 ] && [ "$adhoc" = 1 ]; then
+  echo "hssh: -n 指定连接项时不能同时给 -p/-u/-w/-i（它们只作用于临时连接）；要自定义端口请用 -c" >&2
+  exit 2
 fi
 
 # -l/--list：列出已保存的连接项（名称/主机/备注），由前端读取 profiles 后格式化输出。
