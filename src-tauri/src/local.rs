@@ -211,6 +211,13 @@ const HSSH_SCRIPT: &str = r#"#!/bin/sh
 # HetuShell 内建命令：在应用内打开一个自实现 SSH 连接（带远程文件面板）。
 # 通过 OSC 1729 通知宿主前端，等价于在连接面板点击。仅在 HetuShell 本地终端内有效。
 OSC=1729
+# 宿主终端设备：后端建 pane 时注入 HSSH_TTY（本 pane 的 pts 字符设备路径）。
+# 为什么不能一律写 stdout：AI agent 常给每条命令再套一层自己的 pty，此时 stdout 与 /dev/tty
+# 都指向那层内 pty，OSC 被 agent 自己吞掉、宿主永远收不到（实测必然等满轮询超时）。
+# 未注入时回退 /dev/tty：人工终端里它与 stdout 是同一设备、同一字节流，现状零影响。
+OSC_TTY="${HSSH_TTY:-/dev/tty}"
+# 建连路径刻意仍走 stdout：它随后会 park 当前 pane，AI 用它等于顶掉自己的终端，
+# 所以这条不随控制面一起改道。
 emit() { printf '\033]%s;%s\007' "$OSC" "$1"; }
 b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
 
@@ -272,8 +279,9 @@ need() { [ "$1" -ge 2 ] || { echo "hssh: 选项 $2 缺少参数" >&2; exit 1; };
 
 # 控制面统一通道（listconn / killconn / dump 共用，避免 OSC+轮询+哨兵三处各写一份而漂移）。
 # 三条与既有建连路径不同的关键设计：
-# ① OSC 写 /dev/tty 而非 stdout —— AI 工具调用时 stdout 是管道，写 stdout 宿主永远收不到
-#    （这正是 hssh 在 agent 里不可用的根因）；/dev/tty 与 stdout 重定向无关。
+# ① OSC 写宿主设备（$OSC_TTY）而非 stdout —— AI 工具调用时 stdout 是管道，写 stdout 宿主永远
+#    收不到（这正是 hssh 在 agent 里不可用的根因）。光靠 /dev/tty 还不够：agent 常给每条命令
+#    再套一层自己的 pty，那时 /dev/tty 指的是那层内 pty，序列照样被 agent 吞掉（实测必超时）。
 # ② 结果经响应文件回传，用「轮询文件非空」判完成，不走既有的「回发送换行解锁 read」——
 #    stdin 被重定向时 read 会立刻拿到 EOF，脚本会在宿主写完前 cat 到空文件。
 # ③ 成败由响应文件的**首行**（退出码）决定：首行按位置解释、脚本无条件剥掉，所以屏幕正文
@@ -282,9 +290,9 @@ hctl_call() {
   [ -n "${HSSH_TOKEN:-}" ] || { echo "hssh: $1 需在 HetuShell 本地终端内运行" >&2; exit 1; }
   out=$(mktemp "${TMPDIR:-/tmp}/hssh_out.XXXXXX") || { echo "hssh: 创建响应文件失败" >&2; exit 1; }
   if ! printf '\033]1734;v=1;tok=%s;mode=%s;out=%s%s\007' \
-       "$(b64 "$HSSH_TOKEN")" "$1" "$(b64 "$out")" "$2" > /dev/tty 2>/dev/null; then
+       "$(b64 "$HSSH_TOKEN")" "$1" "$(b64 "$out")" "$2" > "$OSC_TTY" 2>/dev/null; then
     rm -f "$out"
-    echo "hssh: 无法通知宿主（/dev/tty 不可写？非 HetuShell 本地终端）" >&2; exit 1
+    echo "hssh: 无法通知宿主（$OSC_TTY 不可写？非 HetuShell 本地终端）" >&2; exit 1
   fi
   # 首行是状态位（退出码），正文从第 2 行起：判成败看位置不看内容，dump 的屏幕文本
   # 无论首行像什么都不会被误判成错误。后端以「临时文件 + rename」原子落盘，非空即完整。
@@ -428,7 +436,8 @@ const HEXIT_SCRIPT: &str = r#"#!/bin/sh
 # HetuShell 内建命令：直接退出当前 HetuShell 窗口（无确认弹窗）。
 # 通过 OSC 1730 通知宿主前端，仅本地终端有效。
 OSC=1730
-emit() { printf '\033]%s;%s\007' "$OSC" "$1"; }
+OSC_TTY="${HSSH_TTY:-/dev/tty}"
+emit() { printf '\033]%s;%s\007' "$OSC" "$1" > "$OSC_TTY" 2>/dev/null; }
 b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
 emit "tok=$(b64 "${HSSH_TOKEN:-}")"
 "#;
@@ -444,7 +453,8 @@ const HIMAGE_SCRIPT: &str = r#"#!/bin/sh
 # -w/--with-shell: 弹窗跟随当前终端分屏大小定位
 # 目录参数自动展开为目录下的图片文件（按名排序），上限 300 张。
 OSC=1731
-emit() { printf '\033]%s;%s\007' "$OSC" "$1"; }
+OSC_TTY="${HSSH_TTY:-/dev/tty}"
+emit() { printf '\033]%s;%s\007' "$OSC" "$1" > "$OSC_TTY" 2>/dev/null; }
 b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
 
 usage() {
@@ -523,7 +533,8 @@ const HFILE_SCRIPT: &str = r#"#!/bin/sh
 # -d/--dir <路径>: 指定打开目录（默认：本地→终端cwd，远程→主目录）
 # -r/--remote <连接名>: 打开远程文件面板（连接须已在 HetuShell 中激活）
 OSC=1732
-emit() { printf '\033]%s;%s\007' "$OSC" "$1"; }
+OSC_TTY="${HSSH_TTY:-/dev/tty}"
+emit() { printf '\033]%s;%s\007' "$OSC" "$1" > "$OSC_TTY" 2>/dev/null; }
 b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
 
 usage() {
@@ -612,6 +623,13 @@ pub fn open(
     // 能力令牌注入本地 shell：hssh 读取 $HSSH_TOKEN 并回填到 OSC，前端据此校验来源，
     // 防止终端里被渲染的不可信内容（cat 恶意文件、ls 恶意文件名等）伪造序列诱导建连。
     cmd.env("HSSH_TOKEN", &hssh_token);
+    // 宿主终端设备路径：脚本的 OSC 回程要用它替代 stdout / /dev/tty。
+    // 为什么必需：AI agent 常给每条命令再套一层自己的 pty，那时 stdout 是管道、/dev/tty 是
+    // 那层内 pty，转义序列两头都到不了宿主（实测必等满轮询超时）。
+    // 取不到就不注入，脚本回退 /dev/tty —— 人工终端里两者同设备同字节流，正常路径零影响。
+    if let Some(tty) = pair.master.tty_name() {
+        cmd.env("HSSH_TTY", tty);
+    }
     // 注入内建 hssh 命令：把脚本所在 bin 目录「追加」到本地 shell PATH 末尾（仅 POSIX；
     // 远程连接不注入）。追加而非前置：系统同名可执行优先，杜绝 bin 被写入后劫持 sudo/ssh 等。
     // 安装失败则跳过——用户至多得到 command not found，绝不影响终端启动。
