@@ -236,6 +236,7 @@ usage() {
   -w, --password <密码>       密码（明文，注意会进 shell 历史）
   -i, --identity <私钥文件>   私钥文件路径
   --by <标记>                 发起方标记（AI/脚本自命名，如 qwen/ci），供 listconn 区分归属
+  --new                       在**新标签页**建连，不占用当前终端（AI/脚本用；仅接受连接项名）
 
 prod 模式选项（仅在 --prod 下生效）:
   -e, --exec <命令>           连接后自动执行命令（多条用分号分隔）
@@ -272,7 +273,7 @@ done
 # 单遍参数解析：连接信息（连接项名或 user@host）可在任意位置出现
 host=""; user=""; port=""; pass=""; ident=""; name=""; adhoc=0
 feed=""; feed_file=""; feed_stdin=0; do_exit=0; quiet=0; debug=0; list_mode=0
-ctl_cmd=""; ctl_target=""; json_flag=0; dump_lines=200; dump_all=0; force_flag=0
+ctl_cmd=""; ctl_target=""; json_flag=0; dump_lines=200; dump_all=0; force_flag=0; new_mode=0
 by=""
 _first_pos=1
 
@@ -330,6 +331,7 @@ while [ $# -gt 0 ]; do
     --lines)       need $# "$1"; dump_lines="$2"; shift 2;;
     --all)         dump_all=1; shift;;
     --force)       force_flag=1; shift;;
+    --new)         new_mode=1; shift;;
     -l|--list)     list_mode=1; shift;;
     -*)            echo "hssh: 未知选项 $1" >&2; exit 1;;
     *)             if [ "$_first_pos" = 1 ]; then
@@ -379,6 +381,17 @@ if [ -n "$ctl_cmd" ]; then
       _fo=""; [ "$force_flag" = 1 ] && _fo=";force=1"
       hctl_call killconn ";target=$(b64 "$ctl_target")$_cl$_fo";;
   esac
+fi
+
+# --new：非抢占建连。走 1734 控制面而不是 1729 —— 后者的 payload 与 park+read 时序一字节
+# 都不改（日常手动建连因此完全不受影响），而新标签页本来就不占用请求方终端，无需 read 解锁。
+# 只接受已保存连接项名：临时连接的密码/私钥不经控制面通道外传（最小攻击面）。
+if [ "$new_mode" = 1 ]; then
+  [ "$prod_mode" = 1 ] && { echo "hssh: --new 不能与 --prod 同用（prod 依赖 park 当前 pane 来喂入命令）" >&2; exit 2; }
+  [ -z "$host" ] || { echo "hssh: --new 只接受已保存的连接项名" >&2; exit 2; }
+  [ -n "$name" ] || { echo "hssh: --new 需要连接项名" >&2; exit 2; }
+  _nb=""; [ -n "$by" ] && _nb=";by=$(b64 "$by")"
+  hctl_call open ";name=$(b64 "$name")$_nb"
 fi
 
 # 必须有连接目标

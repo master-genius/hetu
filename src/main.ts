@@ -389,6 +389,27 @@ async function bootstrap() {
         );
         return;
       }
+      if (spec.mode === "open") {
+        // --new 非抢占建连：复用面板点击走的同一条 connectAndOpenTab，绝不 park 请求方 pane
+        // （AI 用它就不会顶掉自己的终端）。归属记成**请求方** pane.id，所以发起方后续
+        // killconn 这条连接免 --force —— 与手动建连的「本 pane 发起即本 pane 可收」同一语义。
+        const profiles = await api.profilesList().catch(() => [] as Profile[]);
+        const p = profiles.find((x) => x.name === spec.name);
+        if (!p) {
+          await api.hsshReply(spec.out, "hssh: 未找到该连接项\n", 1);
+          return;
+        }
+        // 只挡「需要交互输入凭据」这一个子情形：新标签页里没人能应答弹窗，脚本会白等满 10s。
+        // 免密项照常可用 —— 不是把 --new 整类禁用。
+        if (p.auth === "password" ? !p.password : !(p.keyData || p.keyPath)) {
+          await api.hsshReply(spec.out, "hssh: 该连接项需要交互输入凭据，请去掉 --new 在当前终端建连\n", 1);
+          return;
+        }
+        const tab = await connectAndOpenTab({ ...profileToParams(p), by: spec.by, originPane: pane.id }, p.id);
+        // 回文只带机器生成的 id，不回显任何用户可控字符串（名称可能含 ESC）
+        await api.hsshReply(spec.out, `已在新标签页打开（id ${tab.connId.slice(0, 8)}）\n`, 0);
+        return;
+      }
       await api.hsshReply(spec.out, screenText(pane, spec.lines, spec.all), 0);
     } catch (err) {
       // 失败必须让脚本立刻脱困并拿到非零退出码：状态走旁路文件，与正文内容无关

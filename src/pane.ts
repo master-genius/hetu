@@ -52,7 +52,8 @@ export type HfileSpec = {
 export type HctlSpec =
   | { mode: "listconn"; out: string; json: boolean }
   | { mode: "killconn"; out: string; target: string; claim: string; force: boolean }
-  | { mode: "dump"; out: string; lines: number; all: boolean };
+  | { mode: "dump"; out: string; lines: number; all: boolean }
+  | { mode: "open"; out: string; name: string; by?: string };
 
 /** base64 → UTF-8 字符串（hssh 各字段单独 base64，避免分隔符冲突）。失败返回空串。 */
 function b64utf8(s: string): string {
@@ -384,6 +385,10 @@ export class Pane {
               const n = Number(f.lines ?? "");
               const lines = Number.isInteger(n) && n > 0 && n <= 20000 ? n : 200;
               this.onHctl?.({ mode: "dump", out, lines, all: f.all === "1" }, this);
+            } else if (f.mode === "open") {
+              // --new 非抢占建连：只接受连接项名（脚本层已拦住 adhoc，密码/私钥不经这条通道）
+              const name = b64utf8(f.name ?? "");
+              if (name) this.onHctl?.({ mode: "open", out, name, by: f.by ? b64utf8(f.by) : undefined }, this);
             }
           }
         }
