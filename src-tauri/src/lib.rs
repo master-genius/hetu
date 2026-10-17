@@ -1,5 +1,6 @@
 //! HetuShell Tauri 后端：应用状态、command 注册、窗口毛玻璃效果。
 
+pub mod diag;
 pub mod error;
 pub mod settings;
 pub mod ssh;

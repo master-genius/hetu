@@ -14,7 +14,6 @@
 //!   已经没了；目录回滚更用 remove_dir_all 连用户既有文件一起删。本模块修正了这一点，
 //!   **GUI 侧的同源风险仍在**（按约定 sftp.rs 不改动）。
 
-use std::io::IsTerminal;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
@@ -27,6 +26,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::conn::Connection;
 use super::sftp;
+use crate::diag;
 use crate::error::{Error, Result};
 
 /// 单次读写的块大小：与 GUI 路径一致，256KB 比 64KB 少约 4 倍 SFTP 往返。
@@ -79,12 +79,16 @@ fn transfer_tag() -> String {
 
 // ---------- 进度输出 ----------
 
-/// 进度输出器：**只写 stderr**。stdout 纯净是 hsshx 面向脚本/AI 的既有契约
+/// 进度输出器：**只写诊断通道**（默认 stderr；hsshx `--machine` 时为调用方打开的 fd 3）。
+/// stdout 纯净是 hsshx 面向脚本/AI 的既有契约
 /// （exec 模式下 stdout 是远程命令的输出，混入进度会让调用方无法解析）。
 ///
 /// TTY 下整个任务只占一行：`desc` 与字节数/百分比/速率一起原地重绘，任务结束才换行——
 /// 目录含上千文件时不会刷出上千行。非 TTY（重定向到日志/管道）完全静默，
 /// 只在每个对象开始时打一行名字，便于事后核对传了哪些。
+///
+/// TTY 与否按**诊断通道**判定而非固定 stderr：`--machine` 把进度搬去 fd 3 后，
+/// fd 3 通常是个文件，此时必须走非 TTY 分支，否则控制字符会写进日志。
 ///
 /// `total`/`done` 都是**整个任务**的聚合量（目录 = 整棵树），速率基准取自任务起点，
 /// 因此不会在每个文件边界处跳回 0。
@@ -103,7 +107,7 @@ impl Progress {
     fn new(total: u64) -> Self {
         let now = Instant::now();
         Self {
-            tty: std::io::stderr().is_terminal(),
+            tty: diag::is_tty(),
             desc: String::new(),
             total,
             start: now,
@@ -117,7 +121,7 @@ impl Progress {
     fn label(&mut self, desc: &str) {
         self.desc = desc.to_string();
         if !self.tty {
-            eprintln!("{desc}");
+            diag::emit(true, format_args!("{desc}"));
         }
     }
 
@@ -134,12 +138,15 @@ impl Progress {
         } else {
             0.0
         };
-        eprint!(
-            "\r\x1b[2K{}  {}/{}  {pct:.1}%  {}/s    ",
-            self.desc,
-            human(done),
-            human(self.total),
-            human((done as f64 / secs) as u64),
+        diag::emit(
+            false,
+            format_args!(
+                "\r\x1b[2K{}  {}/{}  {pct:.1}%  {}/s    ",
+                self.desc,
+                human(done),
+                human(self.total),
+                human((done as f64 / secs) as u64),
+            ),
         );
     }
 
@@ -147,7 +154,7 @@ impl Progress {
     /// 幂等——收尾后置位，保证 Drop 不会重复换行。
     fn finish(&mut self) {
         if self.tty && self.painted {
-            eprintln!();
+            diag::newline();
             self.painted = false;
         }
     }

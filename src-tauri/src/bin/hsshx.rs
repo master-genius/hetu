@@ -30,9 +30,19 @@ use hetushell_lib::ssh::conn::{establish, valid_tag, ConnParams, Connection};
 use hetushell_lib::ssh::lease::{self, Holder};
 use hetushell_lib::ssh::sftp;
 use hetushell_lib::ssh::xfer::{self, Cancel};
+use hetushell_lib::{diag, dprintln};
+
+/// 同步入口：唯一的作用是在**任何异步运行时建立之前**固化 fd 3 的可用状态。
+/// `#[tokio::main]` 展开后会先建运行时再跑函数体，而运行时会占用低位 fd——
+/// 实测后果是调用方用 `3>&-` 关掉 fd 3 时，`fcntl(3)` 仍探到「已打开」（那是运行时自己的），
+/// `--machine` 于是把诊断静默写进运行时内部，等于给了个假承诺。
+fn main() -> ExitCode {
+    diag::capture_machine_fd();
+    real_main()
+}
 
 #[tokio::main]
-async fn main() -> ExitCode {
+async fn real_main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() == 2 && (args[1] == "-l" || args[1] == "--list") {
@@ -67,16 +77,26 @@ async fn main() -> ExitCode {
     let spec = match parse_args(&args) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("hsshx: {e}");
+            dprintln!("hsshx: {e}");
             usage();
             return ExitCode::from(2);
         }
     };
 
+    // `--machine` 的接入点必须排在任何诊断输出之前——之后所有 `dprintln!` 才谈得上改道。
+    // 这里刻意用 eprintln!：登记失败（fd 3 没打开／非 Unix）意味着第三条流并不存在，
+    // 只能报在 stderr；此时若也写进 fd 3 就是往没打开的 fd 上写，等于把错误弄丢。
+    if spec.machine {
+        if let Err(e) = diag::adopt() {
+            eprintln!("hsshx: {e}");
+            return ExitCode::from(2);
+        }
+    }
+
     let profile = match find_profile(&spec.name) {
         Some(p) => p,
         None => {
-            eprintln!("hsshx: 未找到连接项「{}」", spec.name);
+            dprintln!("hsshx: 未找到连接项「{}」", spec.name);
             return ExitCode::from(2);
         }
     };
@@ -96,6 +116,9 @@ struct Spec {
     by: Option<String>,
     /// `-p/--mkdir`：`--put` 的远端目录缺失时逐级创建。默认 false = 沿用「必须已存在」。
     mkdir: bool,
+    /// `--machine`：把 hsshx 自身的诊断改投调用方打开的 fd 3，于是 stdout/stderr 只装
+    /// 远端命令的两条流。默认 false = 诊断照旧走 stderr（人的手动用法逐字节不变）。
+    machine: bool,
     mode: Mode,
 }
 
@@ -124,7 +147,18 @@ fn is_job_flag(a: &str) -> bool {
 /// 否则 `--get --force /x` 会把 `--force` 静默当成远端路径发给服务器。
 fn is_hsshx_option(a: &str) -> bool {
     is_job_flag(a)
-        || matches!(a, "--force" | "--by" | "-p" | "--mkdir" | "-f" | "--file" | "-n" | "--name")
+        || matches!(
+            a,
+            "--force"
+                | "--by"
+                | "-p"
+                | "--mkdir"
+                | "-f"
+                | "--file"
+                | "-n"
+                | "--name"
+                | "--machine"
+        )
 }
 
 /// `--by <tag>` 取值：复用后端唯一实现点 `ssh::conn::valid_tag`，在此只加 CLI 前缀。
@@ -150,6 +184,7 @@ fn parse_args(args: &[String]) -> Result<Spec, String> {
     let mut force = false;
     let mut by: Option<String> = None;
     let mut mkdir = false;
+    let mut machine = false;
     let mut flags_open = true;
 
     let mut i = 1;
@@ -158,6 +193,14 @@ fn parse_args(args: &[String]) -> Result<Spec, String> {
 
         if flags_open && arg == "--force" {
             force = true;
+            i += 1;
+            continue;
+        }
+
+        // --machine：hsshx 自身的话改投调用方打开的 fd 3，于是 stdout/stderr 只剩远端两条流。
+        // 纯开关、不取值，故也刻意不关 flags_open：`hsshx web --machine --ls /tmp` 仍要认得 --ls。
+        if flags_open && arg == "--machine" {
+            machine = true;
             i += 1;
             continue;
         }
@@ -242,6 +285,7 @@ fn parse_args(args: &[String]) -> Result<Spec, String> {
         force,
         by,
         mkdir,
+        machine,
         mode,
     })
 }
@@ -333,7 +377,7 @@ async fn run_exec(profile: Profile, by: Option<String>, command: Option<String>)
     let handle = match establish(&params).await {
         Ok(h) => h,
         Err(e) => {
-            eprintln!("hsshx: {e}");
+            dprintln!("hsshx: {e}");
             return ExitCode::from(255);
         }
     };
@@ -366,7 +410,7 @@ fn list_connections(rest: &[String]) -> ExitCode {
     let leases = match lease::scan() {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("hsshx: {e}");
+            dprintln!("hsshx: {e}");
             return ExitCode::from(1);
         }
     };
@@ -401,7 +445,7 @@ fn list_connections(rest: &[String]) -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(e) => {
-                eprintln!("hsshx: 序列化失败: {e}");
+                dprintln!("hsshx: 序列化失败: {e}");
                 ExitCode::from(1)
             }
         }
@@ -481,24 +525,24 @@ fn kill_connection(rest: &[String]) -> ExitCode {
                     match cli_tag(v) {
                         Ok(t) => claim = Some(t),
                         Err(e) => {
-                            eprintln!("hsshx: {e}");
+                            dprintln!("hsshx: {e}");
                             return ExitCode::from(2);
                         }
                     }
                     idx += 1; // --by 的值不再当 id 看
                 }
                 None => {
-                    eprintln!("hsshx: 选项 --by 缺少参数");
+                    dprintln!("hsshx: 选项 --by 缺少参数");
                     return ExitCode::from(2);
                 }
             },
             _ if a.starts_with('-') => {
-                eprintln!("hsshx: killconn 收到未知选项 {a}");
+                dprintln!("hsshx: killconn 收到未知选项 {a}");
                 return ExitCode::from(2);
             }
             _ => {
                 if target.is_some() {
-                    eprintln!("hsshx: killconn 只接受一个目标 id，多余参数 {a}");
+                    dprintln!("hsshx: killconn 只接受一个目标 id，多余参数 {a}");
                     return ExitCode::from(2);
                 }
                 target = Some(a);
@@ -507,13 +551,13 @@ fn kill_connection(rest: &[String]) -> ExitCode {
         idx += 1;
     }
     let Some(target) = target else {
-        eprintln!("hsshx: killconn 需要目标 id（hsshx listconn 查看）");
+        dprintln!("hsshx: killconn 需要目标 id（hsshx listconn 查看）");
         return ExitCode::from(2);
     };
     let l = match lease::find_kill_target(target) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("hsshx: {e}");
+            dprintln!("hsshx: {e}");
             return ExitCode::from(1);
         }
     };
@@ -527,7 +571,7 @@ fn kill_connection(rest: &[String]) -> ExitCode {
         claim: claim.as_deref(),
         force,
     }) {
-        eprintln!(
+        dprintln!(
             "hsshx: 拒绝终止 {}（{}）：它不是本终端发起的连接。确认要强杀请补 {}",
             lease::short_id(&l.id),
             l.profile,
@@ -536,10 +580,10 @@ fn kill_connection(rest: &[String]) -> ExitCode {
         return ExitCode::from(1);
     }
     if let Err(e) = lease::signal_int(l.pid) {
-        eprintln!("hsshx: {e}");
+        dprintln!("hsshx: {e}");
         return ExitCode::from(1);
     }
-    eprintln!(
+    dprintln!(
         "hsshx: 已向 {}（{} pid {}）发 SIGINT",
         lease::short_id(&l.id),
         l.kind,
@@ -556,7 +600,7 @@ fn kill_connection(rest: &[String]) -> ExitCode {
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    eprintln!(
+    dprintln!(
         "hsshx: 租约仍在（{}）——对方可能在等网络超时做回滚清理，可用 listconn 再确认",
         lease::short_id(&l.id)
     );
@@ -607,7 +651,7 @@ fn register_lease(
     match lease::acquire(&mut lease) {
         Ok(h) => Some(h),
         Err(e) => {
-            eprintln!("hsshx: 租约登记失败（不影响本次操作）: {e}");
+            dprintln!("hsshx: 租约登记失败（不影响本次操作）: {e}");
             None
         }
     }
@@ -638,7 +682,7 @@ async fn run_job(
     let src_conn = match attach(conn_params(&profile, by.clone())).await {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("hsshx: {e}");
+            dprintln!("hsshx: {e}");
             return ExitCode::from(255);
         }
     };
@@ -656,14 +700,14 @@ async fn run_job(
             None => None,
             Some(n) => match find_profile(&n) {
                 None => {
-                    eprintln!("hsshx: 未找到连接项「{n}」");
+                    dprintln!("hsshx: 未找到连接项「{n}」");
                     close(&src_conn).await;
                     return ExitCode::from(2);
                 }
                 Some(p) => match attach(conn_params(&p, by.clone())).await {
                     Ok(c) => Some(c),
                     Err(e) => {
-                        eprintln!("hsshx: {e}");
+                        dprintln!("hsshx: {e}");
                         close(&src_conn).await;
                         return ExitCode::from(255);
                     }
@@ -686,14 +730,14 @@ async fn run_job(
                 }
                 let root = xfer::put(&src_conn, local, remote_dir, force, &cancel).await?;
                 // 结果路径走 stderr：stdout 纯净是 hsshx 面向脚本/AI 的既有契约
-                eprintln!("→ {root}");
+                dprintln!("→ {root}");
                 Ok(())
             }
             Job::Cp { src, dst } => {
                 let (_, dst_path) = split_dst(dst, &profiles);
                 let dst_conn = dst_conn.as_ref().unwrap_or(&src_conn);
                 let root = xfer::cp(&src_conn, dst_conn, src, dst_path, force, &cancel).await?;
-                eprintln!("→ {root}");
+                dprintln!("→ {root}");
                 Ok(())
             }
             Job::Ls { path } => {
@@ -720,7 +764,7 @@ async fn run_job(
     match outcome {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("hsshx: {e}");
+            dprintln!("hsshx: {e}");
             // 130 = 128+SIGINT，Unix 惯例：让脚本能把「人为中断」和「传输失败」分开处理
             match e {
                 Error::Cancelled => ExitCode::from(130),
@@ -807,7 +851,7 @@ async fn exec_mode(
     let channel = match handle.channel_open_session().await {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("hsshx: {e}");
+            dprintln!("hsshx: {e}");
             return 255;
         }
     };
@@ -818,7 +862,7 @@ async fn exec_mode(
     let full_command = format!("bash --login -c {quoted}");
 
     if let Err(e) = channel.exec(true, full_command.as_str()).await {
-        eprintln!("hsshx: {e}");
+        dprintln!("hsshx: {e}");
         return 255;
     }
 
@@ -896,7 +940,7 @@ async fn interactive_mode(
     let orig_termios = match enable_raw_mode(stdin_fd) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("hsshx: 无法设置终端 raw 模式: {e}");
+            dprintln!("hsshx: 无法设置终端 raw 模式: {e}");
             return 255;
         }
     };
@@ -904,7 +948,7 @@ async fn interactive_mode(
     let channel = match handle.channel_open_session().await {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("hsshx: {e}");
+            dprintln!("hsshx: {e}");
             restore_termios(stdin_fd, &orig_termios);
             return 255;
         }
@@ -914,13 +958,13 @@ async fn interactive_mode(
         .request_pty(false, "xterm-256color", cols, rows, 0, 0, &[])
         .await
     {
-        eprintln!("hsshx: 请求 PTY 失败: {e}");
+        dprintln!("hsshx: 请求 PTY 失败: {e}");
         restore_termios(stdin_fd, &orig_termios);
         return 255;
     }
 
     if let Err(e) = channel.request_shell(false).await {
-        eprintln!("hsshx: 请求 shell 失败: {e}");
+        dprintln!("hsshx: 请求 shell 失败: {e}");
         restore_termios(stdin_fd, &orig_termios);
         return 255;
     }
@@ -1042,7 +1086,7 @@ async fn interactive_mode(
 async fn interactive_mode(
     _handle: &russh::client::Handle<hetushell_lib::ssh::conn::ClientHandler>,
 ) -> u8 {
-    eprintln!("hsshx: 交互模式仅支持 Unix 系统");
+    dprintln!("hsshx: 交互模式仅支持 Unix 系统");
     255
 }
 
@@ -1080,24 +1124,26 @@ fn restore_termios(fd: i32, orig: &libc::termios) {
 }
 
 fn usage() {
-    eprintln!("用法:");
-    eprintln!("  hsshx <连接项>                     交互模式（进入远程 shell，退出即回本地）");
-    eprintln!("  hsshx <连接项> <命令...>           执行命令并退出");
-    eprintln!("  hsshx <连接项> -f <脚本文件>       从文件读取命令执行");
-    eprintln!("  hsshx <连接项> | command           从 stdin 管道读取命令执行");
-    eprintln!("  hsshx <连接项> --get <远端> [本地]  下载文件或目录（本地默认当前目录）");
-    eprintln!("  hsshx <连接项> --put <本地> <远端目录>  上传文件或目录");
-    eprintln!("  hsshx <连接项> --cp <远端源> <目标>  远端复制（目标写「连接项:目录」则跨机）");
-    eprintln!("  hsshx <连接项> --ls [远端目录]     列远端目录（默认 home）");
-    eprintln!("  hsshx <连接项> --stat <远端路径>   取远端元数据（JSON）");
-    eprintln!("  hsshx <连接项> ... --force         允许覆盖已存在的目标");
-    eprintln!("  hsshx <连接项> ... --by <标记>     标注发起方（AI/脚本自命名，供 listconn 区分归属）");
-    eprintln!("  hsshx <连接项> --put <本地> <目录> -p  远端目录缺失时逐级自动创建（--mkdir 同义）");
-    eprintln!("  hsshx listconn [--json]            列出活跃的 hsshx 连接（免连接，只读租约）");
-    eprintln!("  hsshx killconn <id>                终止一条带 --by 标记的 hsshx 连接");
-    eprintln!("  hsshx -l                           列出已保存的连接项");
-    eprintln!("  hsshx -h                           显示简要帮助");
-    eprintln!("  hsshx --doc                        显示完整文档（含示例，适合人与 AI 参考）");
+    dprintln!("用法:");
+    dprintln!("  hsshx <连接项>                     交互模式（进入远程 shell，退出即回本地）");
+    dprintln!("  hsshx <连接项> <命令...>           执行命令并退出");
+    dprintln!("  hsshx <连接项> -f <脚本文件>       从文件读取命令执行");
+    dprintln!("  hsshx <连接项> | command           从 stdin 管道读取命令执行");
+    dprintln!("  hsshx <连接项> --get <远端> [本地]  下载文件或目录（本地默认当前目录）");
+    dprintln!("  hsshx <连接项> --put <本地> <远端目录>  上传文件或目录");
+    dprintln!("  hsshx <连接项> --cp <远端源> <目标>  远端复制（目标写「连接项:目录」则跨机）");
+    dprintln!("  hsshx <连接项> --ls [远端目录]     列远端目录（默认 home）");
+    dprintln!("  hsshx <连接项> --stat <远端路径>   取远端元数据（JSON）");
+    dprintln!("  hsshx <连接项> ... --force         允许覆盖已存在的目标");
+    dprintln!("  hsshx <连接项> ... --by <标记>     标注发起方（AI/脚本自命名，供 listconn 区分归属）");
+    dprintln!("  hsshx <连接项> ... --machine        自身诊断改投 fd 3：stdout/stderr 只剩远端两条流");
+    dprintln!("                                     （需调用方开 fd 3，如 3>/tmp/hsshx.diag；未开则报错）");
+    dprintln!("  hsshx <连接项> --put <本地> <目录> -p  远端目录缺失时逐级自动创建（--mkdir 同义）");
+    dprintln!("  hsshx listconn [--json]            列出活跃的 hsshx 连接（免连接，只读租约）");
+    dprintln!("  hsshx killconn <id>                终止一条带 --by 标记的 hsshx 连接");
+    dprintln!("  hsshx -l                           列出已保存的连接项");
+    dprintln!("  hsshx -h                           显示简要帮助");
+    dprintln!("  hsshx --doc                        显示完整文档（含示例，适合人与 AI 参考）");
 }
 
 /// 完整文档：结构化说明 + 基本/进阶示例。输出到 stdout，可直接管道给
@@ -1200,6 +1246,25 @@ fn print_doc() {
     println!("  stderr = 进度条、错误信息、以及 --put/--cp 成功后打印的远端落点路径");
     println!("进度仅在 stderr 是终端时绘制（整任务占一行原地刷新）；重定向到文件/管道时");
     println!("完全静默，只保留每个对象一行的名字。脚本要静音用 2>/dev/null。");
+    println!();
+    println!("三条流分离（--machine，给 AI/脚本）");
+    println!("--------------------------------");
+    println!("默认约定里 stderr 同时装了两件事：远端程序的 stderr，以及 hsshx 自己的话");
+    println!("（连不上、认证失败、进度、落点路径）。调用方拿到一行 stderr 时无从判断是谁说的，");
+    println!("而 rc=255 既可能是远端命令返回 255、也可能是压根没连上——只能猜。");
+    println!();
+    println!("加 --machine 并把 fd 3 打开，hsshx 自己的话就整体改投 fd 3，三条流互不污染：");
+    println!("  stdout = 远端程序的 stdout（结果数据）");
+    println!("  stderr = 远端程序的 stderr（不掺任何 hsshx 自身信息）");
+    println!("  fd 3   = hsshx 自己的诊断（错误/进度/落点路径）");
+    println!();
+    println!("  hsshx web --machine \"make\" 3>/tmp/hsshx.diag 2>/tmp/remote.err");
+    println!("  hsshx web --machine --put ./build srv:/opt 3>/tmp/hsshx.diag");
+    println!();
+    println!("判读规则：fd 3 有内容 = hsshx 自身说过话（失败或进度）；fd 3 空而 rc!=0 = 远端");
+    println!("命令自己的退出码。不加 --machine 时一切照旧（诊断仍在 stderr），人的手动用法不变。");
+    println!("fd 3 未打开时 --machine 直接报错退出 2，不会静默回落到 stderr——那会让调用方");
+    println!("误以为已经拿到三条纯净流。仅支持 Unix。");
     println!();
     println!("stdin 管道输入");
     println!("--------------");
@@ -1332,6 +1397,52 @@ mod tests {
         let spec = parse(&["hsshx", "web", "uptime", "-f", "all"]).unwrap();
         assert_eq!(spec.by, None, "缺省即 user 发起，不能凭空补 tag");
         assert_eq!(exec_command(&spec), Some("uptime -f all"));
+    }
+
+    /// `--machine` 的三条解析锁：默认关、显式开、开了不影响命令收集。
+    /// 默认关这条最关键——它锁住「人的手动用法逐字节不变」的前提。
+    #[test]
+    fn machine_flag_defaults_off_and_captures_on() {
+        assert!(
+            !parse(&["hsshx", "web", "uptime"]).unwrap().machine,
+            "不带 --machine 必须走 stderr（既有行为）"
+        );
+        let spec = parse(&["hsshx", "web", "--machine", "uptime"]).unwrap();
+        assert!(spec.machine, "--machine 必须被识别");
+        assert_eq!(spec.name, "web");
+        assert_eq!(exec_command(&spec), Some("uptime"), "开关不得吞掉远端命令");
+    }
+
+    /// `--machine` 是纯开关，刻意不关 flags_open：`hsshx web --machine --ls /tmp` 里
+    /// `--ls` 仍要认得。反过来，命令开始收集后的 `--machine` 属于远端，不得被吃掉。
+    #[test]
+    fn machine_keeps_flags_open_and_stays_unparsed_after_command() {
+        match parse(&["hsshx", "web", "--machine", "--ls", "/tmp"]).unwrap().mode {
+            Mode::Job(Job::Ls { path }) => assert_eq!(path.as_deref(), Some("/tmp")),
+            other => panic!("--machine 之后的 --ls 仍应是传输模式，实际: {other:?}"),
+        }
+        let spec = parse(&["hsshx", "web", "grep", "--machine", "x"]).unwrap();
+        assert!(
+            !spec.machine,
+            "命令里的 --machine 属远端参数，不得被 CLI 吃掉"
+        );
+        assert_eq!(exec_command(&spec), Some("grep --machine x"));
+    }
+
+    /// `--machine` 已登记进 is_hsshx_option，否则 `--get --machine /x` 会把开关
+    /// 静默当成远端路径发给服务器（与 --force/--by 同一失效模式）。
+    #[test]
+    fn machine_is_never_taken_as_a_transfer_operand() {
+        match parse(&["hsshx", "web", "--machine", "--get", "/r/a.log"])
+            .unwrap()
+            .mode
+        {
+            Mode::Job(Job::Get { remote, local }) => {
+                assert_eq!(remote, "/r/a.log");
+                let _ = local;
+            }
+            other => panic!("--machine 不得被 take_job 吞成操作数，实际: {other:?}"),
+        }
     }
 
     /// tag 会被 `hssh listconn` 原样 cat 到宿主终端，含 ESC/CR 即转义序列注入入口，
