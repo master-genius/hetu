@@ -88,7 +88,16 @@ async function bootstrap() {
   ): Promise<Tab> => {
     const connId = await api.sshConnect(params);
     recordConn(connId, params, profileId);
-    return tabs.createTab(connId, params, order);
+    try {
+      return tabs.createTab(connId, params, order);
+    } catch (err) {
+      // 建 tab 失败必须把刚建立的连接断掉：否则后端留一条没人引用的连接，用户既看不见
+      // 也关不掉（连接面板按 connMeta 列，故元信息一起清）。与 hssh 1729 路径的
+      // catch → sshDisconnect 同构。
+      connMeta.delete(connId);
+      void api.sshDisconnect(connId).catch(() => {});
+      throw err;
+    }
   };
 
   /** 本地终端：无 SSH 连接，connId 固定为 "local" */

@@ -60,32 +60,43 @@ pub fn by_label(by: &Option<String>) -> &str {
     label_of(by.as_deref())
 }
 
+/// 授权判定的输入。`by/origin_pane/claim` 都是 `Option<&str>` 且语义相近，用位置参数
+/// 一旦错位编译器不报错（review 时就发生过同类错），故收敛成具名结构。
+pub struct KillCtx<'a> {
+    /// 目标记录的发起方标记（GUI：`ConnParams.by`；CLI：`Lease.by`）
+    pub by: &'a Option<String>,
+    /// 目标记录的发起 pane（GUI：`origin_pane`；CLI：`Lease.pane`）
+    pub origin_pane: Option<&'a str>,
+    /// 当前挂着该连接的 pane 列表。GUI 才有（`ConnInfo.panes`）；CLI 传空切片。
+    /// 面板点击建的连接没有「发起 pane」（它在新建的 tab 里），只能靠这条判据认领。
+    pub panes: &'a [String],
+    /// 发起本次请求的 pane
+    pub req_pane: Option<&'a str>,
+    /// 调用方声明的发起标记（`--by`）；None 即按 user 归一
+    pub claim: Option<&'a str>,
+    /// 调用方是否显式按下 `--force`
+    pub force: bool,
+}
+
 /// 终止授权判定（唯一实现点：listconn 的「可否终止」与 killconn 的执行共用同一规则）。
 ///
 /// 规则（开发者拍板）两条，顺序即优先级：
-/// ① 本 pane 发起的 → 直接可终止，不需要任何确认（自己建的自己收）；
+/// ① **本 pane 的** → 直接可终止，不需要任何确认。「本 pane」取两种归属之一：
+///    - 目标记录的发起 pane 就是请求方（hssh 在该 pane 发起，park 后仍成立）；
+///    - 该连接当前正挂在这个 pane 里（面板点击建的连接没有发起 pane，靠这条认领）。
 /// ② 其余一律 `--force` **且** `--by` 与目标记录的标记一致——`--by` 省略即按「user」比对，
 ///    所以单给 `--force` 就能收到用户发起的连接，收 AI/脚本的则要连标记一起给。
 ///
-/// 刻意不做 tab 作用域，也不再给「打了非 user 标记就免确认」这条捷径：前者要把 pane/tab
-/// 归属搬进判定链路（跨进程传递，本身是不稳定源），后者等于用可猜测的 tag 换掉显式确认。
-/// 破坏性动作的门槛只留「是不是你这条终端建的」和「有没有按下 --force」这两个事实。
-///
-/// 参数取分散值而非 `&Lease`：GUI 行的 pane 归属在 `ConnInfo` 里、不在租约里
-/// （GUI 不写租约，避免为可观测性去动 ssh_connect/ssh_disconnect 核心路径）。
-pub fn kill_allowed(
-    by: &Option<String>,
-    origin_pane: Option<&str>,
-    req_pane: Option<&str>,
-    claim: Option<&str>,
-    force: bool,
-) -> bool {
-    if let (Some(o), Some(r)) = (origin_pane, req_pane) {
-        if o == r {
+/// 刻意不做 tab 作用域，也不再给「打了非 user 标记就免确认」这条捷径：前者要把 tab 拓扑
+/// 搬进判定链路（跨进程传递，本身是不稳定源），后者等于用可猜测的 tag 换掉显式确认。
+/// 破坏性动作的门槛只留「这条终端是不是持有它」和「有没有按下 --force」这两个事实。
+pub fn kill_allowed(c: &KillCtx<'_>) -> bool {
+    if let Some(r) = c.req_pane {
+        if c.origin_pane == Some(r) || c.panes.iter().any(|p| p == r) {
             return true;
         }
     }
-    force && label_of(claim) == label_of(by.as_deref())
+    c.force && label_of(c.claim) == label_of(c.by.as_deref())
 }
 
 /// 不可终止时该补什么参数——由 `kill_allowed` 的同一条规则推出，别让调用方自己猜文案。

@@ -367,13 +367,14 @@ fn list_connections(rest: &[String]) -> ExitCode {
                 if let Some(o) = v.as_object_mut() {
                     o.insert(
                         "killable".into(),
-                        serde_json::json!(lease::kill_allowed(
-                            &l.by,
-                            l.pane.as_deref(),
-                            own.as_deref(),
-                            None,
-                            false
-                        )),
+                        serde_json::json!(lease::kill_allowed(&lease::KillCtx {
+                            by: &l.by,
+                            origin_pane: l.pane.as_deref(),
+                            panes: &[],
+                            req_pane: own.as_deref(),
+                            claim: None,
+                            force: false,
+                        })),
                     );
                 }
                 v
@@ -409,7 +410,14 @@ fn list_connections(rest: &[String]) -> ExitCode {
         );
         for l in &leases {
             // 全部字段过 sanitize：它们源自 profiles.json 与命令行，含 ESC 会注入宿主终端
-            let can = lease::kill_allowed(&l.by, l.pane.as_deref(), own.as_deref(), None, false);
+            let can = lease::kill_allowed(&lease::KillCtx {
+                by: &l.by,
+                origin_pane: l.pane.as_deref(),
+                panes: &[],
+                req_pane: own.as_deref(),
+                claim: None,
+                force: false,
+            });
             let mut tail = format!("{} {}m", l.kind, now.saturating_sub(l.started_unix) / 60);
             if !l.detail.is_empty() {
                 tail.push_str(&format!("  {}", lease::sanitize(&l.detail)));
@@ -494,8 +502,16 @@ fn kill_connection(rest: &[String]) -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    // 同一条规则（lease::kill_allowed）：本 pane 发起免确认，其余要 --force 且 --by 与目标标记一致
-    if !lease::kill_allowed(&l.by, l.pane.as_deref(), self_pane().as_deref(), claim.as_deref(), force) {
+    // 同一条规则（lease::kill_allowed）：本 pane 持有免确认，其余要 --force 且 --by 与目标标记一致
+    let own = self_pane();
+    if !lease::kill_allowed(&lease::KillCtx {
+        by: &l.by,
+        origin_pane: l.pane.as_deref(),
+        panes: &[],
+        req_pane: own.as_deref(),
+        claim: claim.as_deref(),
+        force,
+    }) {
         eprintln!(
             "hsshx: 拒绝终止 {}（{}）：它不是本终端发起的连接。确认要强杀请补 {}",
             lease::short_id(&l.id),

@@ -110,11 +110,11 @@ async fn profiles_list(state: State<'_>) -> Result<Vec<Profile>> {
     Ok(list)
 }
 
-/// hssh 把这两个裸词当子命令，它们占用「首个位置参数」的名空间——同名连接项会被静默抢占，
+/// hssh 把这三个裸词当子命令，它们占用「首个位置参数」的名空间——同名连接项会被静默抢占，
 /// 用户只会看到"连不上"而不知原因，故在写盘前拒绝。
 /// 刻意保留裸词写法（不改 hssh 解析），也不做大小写折叠：hssh 的子命令匹配本就是大小写敏感的，
 /// `Listconn` 不会被抢占，拒绝它属于误伤。
-const RESERVED_PROFILE_NAMES: &[&str] = &["listconn", "killconn"];
+const RESERVED_PROFILE_NAMES: &[&str] = &["listconn", "killconn", "dump"];
 
 fn reserved_profile_name(name: &str) -> bool {
     RESERVED_PROFILE_NAMES.contains(&name)
@@ -124,11 +124,12 @@ fn reserved_profile_name(name: &str) -> bool {
 mod profile_name_tests {
     use super::reserved_profile_name;
 
-    /// 保留字校验锁：两个子命令名不得能存成连接项。
+    /// 保留字校验锁：三个子命令名不得能存成连接项。
     #[test]
     fn hssh_subcommand_names_are_reserved() {
         assert!(reserved_profile_name("listconn"), "listconn 必须被拒");
         assert!(reserved_profile_name("killconn"), "killconn 必须被拒");
+        assert!(reserved_profile_name("dump"), "dump 必须被拒");
     }
 
     /// 反向锁（防误伤扩权）：只有真会抢占位置参数的裸词才拒。
@@ -136,7 +137,9 @@ mod profile_name_tests {
     /// `list` 对应的是 `-l/--list` 选项而非裸词子命令，同样不该拒绝。
     #[test]
     fn legitimate_names_are_not_blocked() {
-        for ok in ["Listconn", "listconnx", "xlistconn", "list", "kill", "web", ""] {
+        for ok in [
+            "Listconn", "listconnx", "xlistconn", "Dump", "dumpx", "xdump", "list", "kill", "web", "",
+        ] {
             assert!(!reserved_profile_name(ok), "{ok:?} 不该被误判为保留字");
         }
     }
@@ -367,7 +370,14 @@ fn rows_from(gui: Vec<ConnInfo>, cli: Vec<Lease>, req_pane: &str) -> Vec<ConnRow
             source: "gui",
             // 展示口径：这一列回答的是「不加 --force 能不能直接杀」，所以 claim/force 恒给
             // None/false——与 conn_kill 用的仍是同一个函数，不存在两套判据。
-            killable: lease::kill_allowed(&g.by, g.origin_pane.as_deref(), Some(req_pane), None, false),
+            killable: lease::kill_allowed(&lease::KillCtx {
+                by: &g.by,
+                origin_pane: g.origin_pane.as_deref(),
+                panes: &g.panes,
+                req_pane: Some(req_pane),
+                claim: None,
+                force: false,
+            }),
             id: g.id,
             name: g.name,
             host: g.host,
@@ -394,8 +404,16 @@ fn rows_from(gui: Vec<ConnInfo>, cli: Vec<Lease>, req_pane: &str) -> Vec<ConnRow
         out.push(ConnRow {
             source: "cli",
             // 租约带 pane 归属（来自注入的 $HSSH_PANE）：同一条终端起的 CLI 进程可直杀；
-            // 旧租约没这字段 → None，只能走 --by + --force，绝不放宽成「谁都杀得掉」
-            killable: lease::kill_allowed(&c.by, c.pane.as_deref(), Some(req_pane), None, false),
+            // 旧租约没这字段 → None，只能走 --by + --force，绝不放宽成「谁都杀得掉」。
+            // CLI 租约没有「当前挂着它的 pane 列表」（它不是 pane 的显示对象），传空切片。
+            killable: lease::kill_allowed(&lease::KillCtx {
+                by: &c.by,
+                origin_pane: c.pane.as_deref(),
+                panes: &[],
+                req_pane: Some(req_pane),
+                claim: None,
+                force: false,
+            }),
             id: c.id,
             name: c.profile,
             host: c.host,
@@ -641,7 +659,14 @@ async fn conn_kill(
 ) -> Result<KillOutcome> {
     // 1) CLI 租约：find_kill_target 只认 scan() 的存活条目（防 pid 复用误杀无关进程）
     if let Ok(l) = lease::find_kill_target(&conn_id) {
-        if !lease::kill_allowed(&l.by, l.pane.as_deref(), Some(&req_pane), claim.as_deref(), force) {
+        if !lease::kill_allowed(&lease::KillCtx {
+            by: &l.by,
+            origin_pane: l.pane.as_deref(),
+            panes: &[],
+            req_pane: Some(&req_pane),
+            claim: claim.as_deref(),
+            force,
+        }) {
             return Err(Error::msg(format!(
                 "拒绝终止 {}（{}）：它不是本终端发起的连接。确认要强杀请补 {}",
                 lease::short_id(&l.id),
@@ -660,13 +685,23 @@ async fn conn_kill(
     if busy {
         return Err(Error::msg("该连接有进行中的传输，请等待完成或取消后再终止"));
     }
-    if !lease::kill_allowed(
-        &conn.params.by,
-        conn.params.origin_pane.as_deref(),
-        Some(&req_pane),
-        claim.as_deref(),
+    // 面板点击建的连接没有 origin_pane（它开在新建的 tab 里），只能靠「当前挂着它的 pane」
+    // 认领；park 的连接由 origin_pane 覆盖。两条合起来才是完整的「本 pane 持有」。
+    let panes: Vec<String> = {
+        let m = state.panes.lock().await;
+        m.iter()
+            .filter(|(_, c)| c.conn_id == id)
+            .map(|(pid, _)| pid.clone())
+            .collect()
+    };
+    if !lease::kill_allowed(&lease::KillCtx {
+        by: &conn.params.by,
+        origin_pane: conn.params.origin_pane.as_deref(),
+        panes: &panes,
+        req_pane: Some(&req_pane),
+        claim: claim.as_deref(),
         force,
-    ) {
+    }) {
         return Err(Error::msg(format!(
             "拒绝终止「{}」：它不是本终端发起的连接。确认要强杀请补 {}",
             lease::sanitize(&conn.params.name),
@@ -727,26 +762,47 @@ mod hctl_tests {
         }
     }
 
-    /// 授权规则（开发者拍板）：本 pane 发起的直接可杀；其余一律 `--force` 且 `--by` 与目标标记一致。
-    /// 这条锁死的是权限边界本身——写反就是「AI 能随手杀用户的连接」或「用户杀不掉自己的会话」。
+    /// 构造授权判定的输入。六个参数里三个是 `Option<&str>`，测试里直接写易错位，
+    /// 与生产调用一样走 `KillCtx`。
+    fn kc<'a>(
+        by: &'a Option<String>,
+        origin: Option<&'a str>,
+        panes: &'a [String],
+        req: Option<&'a str>,
+        claim: Option<&'a str>,
+        force: bool,
+    ) -> lease::KillCtx<'a> {
+        lease::KillCtx { by, origin_pane: origin, panes, req_pane: req, claim, force }
+    }
+
+    /// 授权规则（开发者拍板）：本 pane **持有**的连接直接可杀；其余一律 `--force` 且 `--by`
+    /// 与目标标记一致。「持有」= 发起 pane 是请求方，或该连接当前挂在这个 pane 里
+    /// （面板点击建的连接没有发起 pane，只能靠后者认领）。
+    /// 这条锁死权限边界本身——写反就是「AI 能随手杀用户的连接」或「用户杀不掉自己的会话」。
     #[test]
-    fn kill_authorization_follows_owning_pane_or_force_with_matching_tag() {
-        // ① 本 pane 发起：免确认直杀，且与标记无关（自己建的自己收）
-        assert!(lease::kill_allowed(&None, Some("pane-A"), Some("pane-A"), None, false));
-        assert!(lease::kill_allowed(&Some("qwen".into()), Some("pane-A"), Some("pane-A"), None, false));
-        // ② 跨 pane 且没按 --force：一律拒绝，打了 tag 也一样（tag 不再是免确认捷径）
-        assert!(!lease::kill_allowed(&None, Some("pane-B"), Some("pane-A"), None, false));
-        assert!(!lease::kill_allowed(&Some("qwen".into()), Some("pane-B"), Some("pane-A"), Some("qwen"), false));
-        // ③ 跨 pane + --force，--by 省略即按 user 比对：收得掉用户发起的
-        assert!(lease::kill_allowed(&None, Some("pane-B"), Some("pane-A"), None, true));
-        assert!(lease::kill_allowed(&Some("user".into()), Some("pane-B"), Some("pane-A"), Some("user"), true));
-        // ④ 跨 pane + --force 但标记不匹配：拒绝——收 AI 的就得连它的 tag 一起给
-        assert!(!lease::kill_allowed(&Some("qwen".into()), Some("pane-B"), Some("pane-A"), None, true));
-        assert!(!lease::kill_allowed(&Some("qwen".into()), Some("pane-B"), Some("pane-A"), Some("ci"), true));
-        assert!(lease::kill_allowed(&Some("qwen".into()), Some("pane-B"), Some("pane-A"), Some("qwen"), true));
-        // ⑤ 归属未知（在 HetuShell 之外跑的 hsshx）：读不到 pane 就等于跨终端，只能走 ③/④
-        assert!(!lease::kill_allowed(&None, None, Some("pane-A"), None, false));
-        assert!(lease::kill_allowed(&None, None, Some("pane-A"), None, true));
+    fn kill_authorization_follows_pane_ownership_or_force_with_matching_tag() {
+        let none: Option<String> = None;
+        let qwen = Some("qwen".to_string());
+        let empty: [String; 0] = [];
+        let mounted = vec!["pane-A".to_string()];
+        // ① 发起 pane 就是请求方：免确认直杀，且与标记无关
+        assert!(lease::kill_allowed(&kc(&none, Some("pane-A"), &empty, Some("pane-A"), None, false)));
+        assert!(lease::kill_allowed(&kc(&qwen, Some("pane-A"), &empty, Some("pane-A"), None, false)));
+        // ② 连接当前挂在这个 pane 里（面板点击建的那种）：同样免确认；换别家 pane 就不行
+        assert!(lease::kill_allowed(&kc(&none, None, &mounted, Some("pane-A"), None, false)));
+        assert!(!lease::kill_allowed(&kc(&none, None, &mounted, Some("pane-B"), None, false)));
+        // ③ 跨 pane 且没按 --force：一律拒绝，打了 tag 也一样（tag 不再是免确认捷径）
+        assert!(!lease::kill_allowed(&kc(&none, Some("pane-B"), &empty, Some("pane-A"), None, false)));
+        assert!(!lease::kill_allowed(&kc(&qwen, Some("pane-B"), &empty, Some("pane-A"), Some("qwen"), false)));
+        // ④ 跨 pane + --force，--by 省略即按 user 比对：收得掉用户发起的
+        assert!(lease::kill_allowed(&kc(&none, Some("pane-B"), &empty, Some("pane-A"), None, true)));
+        // ⑤ 跨 pane + --force 但标记不匹配：拒绝——收 AI 的就得连它的 tag 一起给
+        assert!(!lease::kill_allowed(&kc(&qwen, Some("pane-B"), &empty, Some("pane-A"), None, true)));
+        assert!(!lease::kill_allowed(&kc(&qwen, Some("pane-B"), &empty, Some("pane-A"), Some("ci"), true)));
+        assert!(lease::kill_allowed(&kc(&qwen, Some("pane-B"), &empty, Some("pane-A"), Some("qwen"), true)));
+        // ⑥ 归属未知（在 HetuShell 之外跑的 hsshx）：读不到 pane 就等于跨终端，只能走 ④/⑤
+        assert!(!lease::kill_allowed(&kc(&none, None, &empty, Some("pane-A"), None, false)));
+        assert!(lease::kill_allowed(&kc(&none, None, &empty, Some("pane-A"), None, true)));
     }
 
     /// 提示文案必须与规则同步：tag 为 user 时 `--force` 就够，带标记的要把标记一起写出来。

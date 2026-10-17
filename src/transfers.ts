@@ -304,8 +304,11 @@ function setState(row: Row, state: TState): void {
 }
 
 function render(row: Row): void {
-  // total=0（空文件/空目录）按 100% 处理：字节维度即已完成
-  const pct = row.total > 0 ? Math.min(100, Math.round((row.done / row.total) * 100)) : 100;
+  // total=0 有两种来源：空文件/空目录（字节维度即已完成），以及重试复位后还没收到首个
+  // 进度事件。后者若按 100% 渲染，刚点重试就会闪出一条满格进度条，故进行中/暂停按 0% 起步。
+  const pct = row.total > 0
+    ? Math.min(100, Math.round((row.done / row.total) * 100))
+    : row.state === "active" || row.state === "paused" ? 0 : 100;
   row.fill.style.width = `${pct}%`;
 
   // 失败时用较宽的进度行展示错误原因（截断 + 悬停全文），比小字提示更醒目
