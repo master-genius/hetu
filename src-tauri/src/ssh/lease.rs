@@ -34,34 +34,69 @@ pub struct Lease {
     /// 发起方标记（`--by`）。None = 人在终端手敲
     #[serde(default)]
     pub by: Option<String>,
+    /// 持有这条租约的进程所在 pane（来自注入的 `$HSSH_PANE`）。
+    /// 「本 pane 发起 → 免确认直杀」这条判据要用它；`serde(default)` 让 3.3.3 写下的
+    /// 旧租约（无此字段）照样能读出来，只是退化成「必须 --by + --force」。
+    #[serde(default)]
+    pub pane: Option<String>,
     /// 操作摘要，如 `--put ./a → /srv/in`。已经过 sanitize 净化
     #[serde(default)]
     pub detail: String,
     pub started_unix: u64,
 }
 
-/// 发起方标记的规范化显示：None/空串都按「user」呈现（用户在 GUI 或终端直接发起）。
-pub fn by_label(by: &Option<String>) -> &str {
-    match by.as_deref() {
+/// 标记归一的唯一实现点：None/空串都按「user」。
+/// 展示、授权判定、命令行 `--by` 的比对全部走这里——否则「省略 --by」和「目标是用户发起」
+/// 会被当成两件事，规则就写歪了。
+pub fn label_of(tag: Option<&str>) -> &str {
+    match tag {
         Some(t) if !t.is_empty() => t,
         _ => "user",
     }
 }
 
+/// 发起方标记的规范化显示：None/空串都按「user」呈现（用户在 GUI 或终端直接发起）。
+pub fn by_label(by: &Option<String>) -> &str {
+    label_of(by.as_deref())
+}
+
 /// 终止授权判定（唯一实现点：listconn 的「可否终止」与 killconn 的执行共用同一规则）。
 ///
-/// 规则（开发者拍板）：只允许终止「明确非 user 发起」或「本 pane 发起」的连接。
-/// token 只证明请求来自哪个终端，不证明对任意连接的处置权，所以必须叠加这一层。
+/// 规则（开发者拍板）两条，顺序即优先级：
+/// ① 本 pane 发起的 → 直接可终止，不需要任何确认（自己建的自己收）；
+/// ② 其余一律 `--force` **且** `--by` 与目标记录的标记一致——`--by` 省略即按「user」比对，
+///    所以单给 `--force` 就能收到用户发起的连接，收 AI/脚本的则要连标记一起给。
 ///
-/// 参数取三元组而非 `&Lease`：GUI 行的 pane 归属在 `ConnInfo` 里、不在租约里
+/// 刻意不做 tab 作用域，也不再给「打了非 user 标记就免确认」这条捷径：前者要把 pane/tab
+/// 归属搬进判定链路（跨进程传递，本身是不稳定源），后者等于用可猜测的 tag 换掉显式确认。
+/// 破坏性动作的门槛只留「是不是你这条终端建的」和「有没有按下 --force」这两个事实。
+///
+/// 参数取分散值而非 `&Lease`：GUI 行的 pane 归属在 `ConnInfo` 里、不在租约里
 /// （GUI 不写租约，避免为可观测性去动 ssh_connect/ssh_disconnect 核心路径）。
-pub fn kill_allowed(by: &Option<String>, origin_pane: Option<&str>, req_pane: Option<&str>) -> bool {
-    if by_label(by) != "user" {
-        return true;
+pub fn kill_allowed(
+    by: &Option<String>,
+    origin_pane: Option<&str>,
+    req_pane: Option<&str>,
+    claim: Option<&str>,
+    force: bool,
+) -> bool {
+    if let (Some(o), Some(r)) = (origin_pane, req_pane) {
+        if o == r {
+            return true;
+        }
     }
-    match (origin_pane, req_pane) {
-        (Some(o), Some(r)) => o == r,
-        _ => false,
+    force && label_of(claim) == label_of(by.as_deref())
+}
+
+/// 不可终止时该补什么参数——由 `kill_allowed` 的同一条规则推出，别让调用方自己猜文案。
+/// 只在 ① 不成立时使用（同 pane 的行本来就可直杀，不带这个提示）。
+/// tag 来自命令行，进终端/错误文案前必须净化（与全仓「用户可控字段过 sanitize」同一口径）。
+pub fn kill_hint(by: &Option<String>) -> String {
+    let tag = by_label(by);
+    if tag == "user" {
+        "--force".to_string()
+    } else {
+        format!("--by {} --force", sanitize(tag))
     }
 }
 
@@ -360,6 +395,7 @@ mod tests {
             port: 22,
             user: "root".into(),
             by: Some("qwen".into()),
+            pane: Some("pane-A".into()),
             detail: "--put ./a → /srv/in".into(),
             started_unix: 0,
         }

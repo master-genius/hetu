@@ -47,10 +47,11 @@ export type HfileSpec = {
 
 /** hssh 控制面命令解析结果：out 为脚本预先 mktemp 的响应文件路径，
  *  后端把结果写进去、脚本 cat 到 stdout——这样在 stdout 是管道的场景（AI 工具捕获）
- *  也能拿到数据；OSC 本身则改写 /dev/tty，不占用管道。 */
+ *  也能拿到数据；OSC 本身走 $OSC_TTY（注入的宿主 pts 设备，缺省 /dev/tty），不占用管道。
+ *  killconn 的 claim/force 只是转传给后端 lease::kill_allowed，前端不做任何授权判断。 */
 export type HctlSpec =
   | { mode: "listconn"; out: string; json: boolean }
-  | { mode: "killconn"; out: string; target: string }
+  | { mode: "killconn"; out: string; target: string; claim: string; force: boolean }
   | { mode: "dump"; out: string; lines: number; all: boolean };
 
 /** base64 → UTF-8 字符串（hssh 各字段单独 base64，避免分隔符冲突）。失败返回空串。 */
@@ -373,7 +374,10 @@ export class Pane {
               this.onHctl?.({ mode: "listconn", out, json: f.json === "1" }, this);
             } else if (f.mode === "killconn") {
               const target = b64utf8(f.target ?? "");
-              if (target) this.onHctl?.({ mode: "killconn", out, target }, this);
+              // claim/force 由 killconn 命令行给出；授权判定全在后端 lease::kill_allowed，
+              // 这里只如实转传，不在前端再判一遍（两处规则必然漂移）
+              const claim = b64utf8(f.claim ?? "");
+              if (target) this.onHctl?.({ mode: "killconn", out, target, claim, force: f.force === "1" }, this);
             } else if (f.mode === "dump") {
               // lines 不信任传入值：OSC 任何本地进程都能写，越界会放大 dump 的内存占用。
               // 非法则退回默认 200 行（与脚本层缺省一致），不报错——dump 属只读辅助能力。

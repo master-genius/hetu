@@ -246,7 +246,8 @@ prod 模式选项（仅在 --prod 下生效）:
   --debug                     详细模式：输出连接提示和退出状态码（与 --quiet 相反）
   -l, --list                  列出已保存的连接项（名称/主机/备注）
   listconn [--json]           列出当前活跃连接（GUI 与 hsshx 发起的都算，--json 出机读）
-  killconn <id>               终止指定连接（id 取自 listconn 的 ID 列；只能终止本终端建的非 user 连接）
+  killconn <id> [--force]     终止指定连接（id 取自 listconn 的 ID 列）
+                              本终端发起的直接终止；其余须 --force，且此时 --by 要与目标的发起标记一致
   dump [--lines N] [--all]    导出本终端屏幕文本（默认末 200 行，--all 含回滚缓冲）
   -h, --help                  显示此帮助
 
@@ -271,7 +272,7 @@ done
 # 单遍参数解析：连接信息（连接项名或 user@host）可在任意位置出现
 host=""; user=""; port=""; pass=""; ident=""; name=""; adhoc=0
 feed=""; feed_file=""; feed_stdin=0; do_exit=0; quiet=0; debug=0; list_mode=0
-ctl_cmd=""; ctl_target=""; json_flag=0; dump_lines=200; dump_all=0
+ctl_cmd=""; ctl_target=""; json_flag=0; dump_lines=200; dump_all=0; force_flag=0
 by=""
 _first_pos=1
 
@@ -328,6 +329,7 @@ while [ $# -gt 0 ]; do
     --json)        json_flag=1; shift;;
     --lines)       need $# "$1"; dump_lines="$2"; shift 2;;
     --all)         dump_all=1; shift;;
+    --force)       force_flag=1; shift;;
     -l|--list)     list_mode=1; shift;;
     -*)            echo "hssh: 未知选项 $1" >&2; exit 1;;
     *)             if [ "$_first_pos" = 1 ]; then
@@ -372,7 +374,10 @@ if [ -n "$ctl_cmd" ]; then
       hctl_call dump ";lines=$dump_lines;all=$([ "$dump_all" = 1 ] && echo 1 || echo 0)";;
     killconn)
       [ -n "$ctl_target" ] || { echo "hssh: killconn 需要目标 id（先跑 hssh listconn 看 ID 列）" >&2; exit 2; }
-      hctl_call killconn ";target=$(b64 "$ctl_target")";;
+      # claim/force 缺省时整个键省略（同 --by 的处理取向）：不加强制时的 payload 与改动前逐字节一致
+      _cl=""; [ -n "$by" ] && _cl=";claim=$(b64 "$by")"
+      _fo=""; [ "$force_flag" = 1 ] && _fo=";force=1"
+      hctl_call killconn ";target=$(b64 "$ctl_target")$_cl$_fo";;
   esac
 fi
 
@@ -607,6 +612,7 @@ pub fn open(
     rows: u32,
     initial_cwd: Option<String>,
     hssh_token: String,
+    pane_id: String,
     shell_setting: String,
     mut rx: mpsc::UnboundedReceiver<PaneCmd>,
     on_event: Channel<PaneEvent>,
@@ -623,6 +629,13 @@ pub fn open(
     // 能力令牌注入本地 shell：hssh 读取 $HSSH_TOKEN 并回填到 OSC，前端据此校验来源，
     // 防止终端里被渲染的不可信内容（cat 恶意文件、ls 恶意文件名等）伪造序列诱导建连。
     cmd.env("HSSH_TOKEN", &hssh_token);
+    // 本 pane 的 id：写进 hsshx 租约，让「本 pane 发起 → 免 --force 直杀」这条判据在
+    // CLI 侧也成立（GUI 侧用它建连时就带的 origin_pane，同一条规则两个宇宙都吃得饱）。
+    // 刻意只记 id、不记 tab 归属——tab 拓扑只在前端，搬进判定链路就要跨进程传结构，
+    // 那是新的不稳定源（开发者拍板）。取不到就不注入，退化成一律要 --by + --force。
+    if !pane_id.is_empty() {
+        cmd.env("HSSH_PANE", &pane_id);
+    }
     // 宿主终端设备路径：脚本的 OSC 回程要用它替代 stdout / /dev/tty。
     // 为什么必需：AI agent 常给每条命令再套一层自己的 pty，那时 stdout 是管道、/dev/tty 是
     // 那层内 pty，转义序列两头都到不了宿主（实测必等满轮询超时）。

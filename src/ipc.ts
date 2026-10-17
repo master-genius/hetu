@@ -37,9 +37,10 @@ export const api = {
     invoke<number>("conns_report", { out, reqPane, json }),
   /** killconn 授权判定。kind="cli" 时后端已对 hsshx 进程发 SIGINT；kind="gui" 时后端
    *  只判授权、不动手，必须由前端走既有断开链收尾（后端单断会让 pane 永久停在等待重连）。
-   *  id 是后端解析后的完整 id（用户可给 listconn 表里的 8 位短 id）。 */
-  connKill: (connId: string, reqPane: string) =>
-    invoke<{ kind: "gui" | "cli"; id: string }>("conn_kill", { connId, reqPane }),
+   *  id 是后端解析后的完整 id（用户可给 listconn 表里的 8 位短 id）。
+   *  claim/force 是命令行给的确认位（claim 空串按 user 归一），判定全在 lease::kill_allowed。 */
+  connKill: (connId: string, reqPane: string, claim: string, force: boolean) =>
+    invoke<{ kind: "gui" | "cli"; id: string }>("conn_kill", { connId, reqPane, claim, force }),
   /** 控制面唯一的文本写入口（killconn 结果与 dump 文本共用）；路径白名单在后端。
    *  code 作为响应文件的**首行**传给脚本当退出码——状态按位置走、不看正文内容，
    *  否则 dump 导出的屏幕文本若首行像错误标记就会被误判成失败。 */

@@ -354,7 +354,8 @@ async function bootstrap() {
         return;
       }
       if (spec.mode === "killconn") {
-        const res = await api.connKill(spec.target, pane.id);
+        // claim/force 原样转传，授权判定只在后端 lease::kill_allowed 一处
+        const res = await api.connKill(spec.target, pane.id, spec.claim, spec.force);
         let what = "CLI 进程";
         if (res.kind === "gui") {
           what = "终端连接";

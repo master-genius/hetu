@@ -355,6 +355,9 @@ fn list_connections(rest: &[String]) -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    // 本进程的 pane 归属：与 GUI 侧共用 lease::kill_allowed 的同一条「本 pane 直杀」判据，
+    // 不在这里复制规则；读不到 $HSSH_PANE 时为 None，判据①自然不成立。
+    let own = self_pane();
     if rest.iter().any(|a| a == "--json") {
         // 每行附带 killable：授权规则只在 lease::kill_allowed 一处，不让调用方自己复制
         let rows: Vec<serde_json::Value> = leases
@@ -364,7 +367,13 @@ fn list_connections(rest: &[String]) -> ExitCode {
                 if let Some(o) = v.as_object_mut() {
                     o.insert(
                         "killable".into(),
-                        serde_json::json!(lease::kill_allowed(&l.by, None, None)),
+                        serde_json::json!(lease::kill_allowed(
+                            &l.by,
+                            l.pane.as_deref(),
+                            own.as_deref(),
+                            None,
+                            false
+                        )),
                     );
                 }
                 v
@@ -400,12 +409,14 @@ fn list_connections(rest: &[String]) -> ExitCode {
         );
         for l in &leases {
             // 全部字段过 sanitize：它们源自 profiles.json 与命令行，含 ESC 会注入宿主终端
-            let can = lease::kill_allowed(&l.by, None, None);
+            let can = lease::kill_allowed(&l.by, l.pane.as_deref(), own.as_deref(), None, false);
             let mut tail = format!("{} {}m", l.kind, now.saturating_sub(l.started_unix) / 60);
             if !l.detail.is_empty() {
                 tail.push_str(&format!("  {}", lease::sanitize(&l.detail)));
             }
-            tail.push_str(if can { "" } else { "  [不可终止]" });
+            if !can {
+                tail.push_str(&format!("  [需 {}]", lease::kill_hint(&l.by)));
+            }
             println!(
                 "{}  {}  {}  {}  {}  {}",
                 pad(lease::by_label(&l.by), 10),
@@ -432,14 +443,50 @@ fn list_connections(rest: &[String]) -> ExitCode {
 ///
 /// 本进程是一次性 CLI（无并发任务），故用同步 thread::sleep 做有界等待，不引入 async。
 fn kill_connection(rest: &[String]) -> ExitCode {
-    let Some(target) = rest.first() else {
+    // 与 GUI 侧同一条规则，所以这里也要收集 --by（声明目标的发起标记）与 --force；
+    // 选项可出现在 id 前后，第一个非选项参数才是 id。
+    let mut target: Option<&str> = None;
+    let mut claim: Option<String> = None;
+    let mut force = false;
+    let mut idx = 0;
+    while idx < rest.len() {
+        let a = rest[idx].as_str();
+        match a {
+            "--force" => force = true,
+            "--by" => match rest.get(idx + 1) {
+                Some(v) => {
+                    match cli_tag(v) {
+                        Ok(t) => claim = Some(t),
+                        Err(e) => {
+                            eprintln!("hsshx: {e}");
+                            return ExitCode::from(2);
+                        }
+                    }
+                    idx += 1; // --by 的值不再当 id 看
+                }
+                None => {
+                    eprintln!("hsshx: 选项 --by 缺少参数");
+                    return ExitCode::from(2);
+                }
+            },
+            _ if a.starts_with('-') => {
+                eprintln!("hsshx: killconn 收到未知选项 {a}");
+                return ExitCode::from(2);
+            }
+            _ => {
+                if target.is_some() {
+                    eprintln!("hsshx: killconn 只接受一个目标 id，多余参数 {a}");
+                    return ExitCode::from(2);
+                }
+                target = Some(a);
+            }
+        }
+        idx += 1;
+    }
+    let Some(target) = target else {
         eprintln!("hsshx: killconn 需要目标 id（hsshx listconn 查看）");
         return ExitCode::from(2);
     };
-    if target.starts_with('-') {
-        eprintln!("hsshx: killconn 需要目标 id，收到选项 {target}");
-        return ExitCode::from(2);
-    }
     let l = match lease::find_kill_target(target) {
         Ok(v) => v,
         Err(e) => {
@@ -447,11 +494,13 @@ fn kill_connection(rest: &[String]) -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    if !lease::kill_allowed(&l.by, None, None) {
+    // 同一条规则（lease::kill_allowed）：本 pane 发起免确认，其余要 --force 且 --by 与目标标记一致
+    if !lease::kill_allowed(&l.by, l.pane.as_deref(), self_pane().as_deref(), claim.as_deref(), force) {
         eprintln!(
-            "hsshx: 拒绝终止 {}（{}）：未标记 --by，按授权规则只能终止明确由脚本/AI 发起的连接",
+            "hsshx: 拒绝终止 {}（{}）：它不是本终端发起的连接。确认要强杀请补 {}",
             lease::short_id(&l.id),
-            l.profile
+            l.profile,
+            lease::kill_hint(&l.by)
         );
         return ExitCode::from(1);
     }
@@ -493,6 +542,13 @@ fn pad(v: &str, n: usize) -> String {
     }
 }
 
+/// 本 hsshx 进程所在的 HetuShell pane（后端注入的 `$HSSH_PANE`）。
+/// 不在 HetuShell 本地终端里时为 None —— 此时「本 pane 直杀」这条判据自动不成立，
+/// 只剩 `--by` + `--force` 一条路，不存在「读不到就当放行」的放宽。
+fn self_pane() -> Option<String> {
+    std::env::var("HSSH_PANE").ok().filter(|v| !v.is_empty())
+}
+
 /// 登记跨进程租约，让 GUI 侧的 `hssh listconn` 能看见并终止这条 CLI 连接。
 ///
 /// **登记失败绝不阻断本次操作**：只 warn 到 stderr 并返回 None。租约是可观测性附加层，
@@ -513,6 +569,7 @@ fn register_lease(
         port: profile.port,
         user: profile.user.clone(),
         by,
+        pane: self_pane(),
         detail,
         started_unix: 0,
     };
