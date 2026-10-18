@@ -956,6 +956,9 @@ mod hctl_tests {
         let _ = std::fs::remove_file(&p);
     }
 
+    /// 权限断言（0600）是 Unix 语义，Windows 上没有 `PermissionsExt`，故整条门控；
+    /// Linux/macOS 照常跑，覆盖面不减。
+    #[cfg(unix)]
     #[test]
     fn out_file_write_is_atomic_and_private() {
         use std::os::unix::fs::PermissionsExt;

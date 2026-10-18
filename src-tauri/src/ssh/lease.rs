@@ -116,6 +116,7 @@ pub fn kill_hint(by: &Option<String>) -> String {
 /// 为什么用 SIGINT 而非 SIGTERM：hsshx 的传输只在 SIGINT 上走 `watch_cancel` → 块边界退出
 /// → 删远端半成品 → 回滚未存在的目录树（退出码 130）。SIGTERM 没装处理器，会直接终止进程、
 /// 把半成品留在远端。**绝不能用 SIGKILL**：那会跳过租约文件的自我清理（只能等下次 scan 回收）。
+#[cfg(unix)]
 pub fn signal_int(pid: u32) -> Result<()> {
     let rc = unsafe { libc::kill(pid as libc::pid_t, libc::SIGINT) };
     if rc == 0 {
@@ -129,6 +130,19 @@ pub fn signal_int(pid: u32) -> Result<()> {
             format!("向进程 {pid} 发信号失败: {e}")
         }))
     }
+}
+
+/// 非 Unix 兜底：POSIX signal 在 Windows 侧没有对应物——实测 libc 的 `kill` 只声明在
+/// unix/fuchsia/vxworks/new-qurt，`pid_t` 在 windows 模块里根本没有，所以真实现必须整体
+/// 门控；留着不门控会让 `windows-latest` 编译直接失败（Linux/macOS 不受影响，走上面那份）。
+///
+/// 这里**刻意返回 Err 而不是假装成功**：killconn 报「本平台做不到」比报「已终止」诚实，
+/// 与「未确认不称已终止」是同一口径。
+#[cfg(not(unix))]
+pub fn signal_int(pid: u32) -> Result<()> {
+    Err(Error::msg(format!(
+        "本平台无法向 hsshx 进程 {pid} 发信号（killconn 终止 CLI 连接依赖 POSIX 信号，仅 Unix 可用）"
+    )))
 }
 
 /// detail 的净化：控制字符一律替换为 U+25A1 并限长 200 字符。

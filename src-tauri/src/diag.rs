@@ -23,7 +23,11 @@ pub fn target() -> Option<i32> {
 }
 
 /// 登记诊断 fd。重复登记保留第一次的值：fd 归调用方的 shell 所有，本进程绝不关闭它。
-#[cfg(unix)]
+///
+/// 刻意不加 `#[cfg(unix)]`：函数体是纯原子操作，没有任何 Unix 专属代码，而 `adopt()` 的
+/// `3 =>` 分支在所有平台都要能通过编译。之前给它挂了 unix 门控，Windows 侧直接
+/// `error[E0425] cannot find function set`——非 Unix 上这个分支走不到（capture_machine_fd
+/// 恒记 -1），但编译期就必须解析得到它。
 pub fn set(fd: i32) {
     let _ = DIAG_FD.compare_exchange(-1, fd, Ordering::Relaxed, Ordering::Relaxed);
 }
@@ -53,6 +57,14 @@ pub fn capture_machine_fd() {
     FD3_AT_EXEC.store(if ok { 3 } else { -1 }, Ordering::Relaxed);
 }
 
+/// `--machine` 用不了的两种原因分开表述。非 Unix 根本没有 fd 3 这套语义，
+/// 在 Windows 上提示「去打开 fd 3」会把人引到死路上——CI 是会构建 Windows 包的。
+#[cfg(unix)]
+const NEED_FD3: &str =
+    "--machine 需要调用方以可写方式打开 fd 3（用法示例：hsshx web \"ls\" 3>/tmp/hsshx.diag）";
+#[cfg(not(unix))]
+const NEED_FD3: &str = "--machine 仅支持 Unix（依赖 fd 3 语义）";
+
 /// `--machine` 的落地：把诊断通道接到调用方用 `3>...` 打开的 fd 3 上。
 ///
 /// 失败一律返回 Err 让调用方硬报错，**不回落 stderr**：调用方指定 `--machine` 就是在声明
@@ -67,7 +79,7 @@ pub fn adopt() -> Result<(), &'static str> {
         // 未采集说明入口没先固化状态（新代码路径漏调 capture_machine_fd），
         // 与其写进一个来路不明的 fd，不如直接报错。
         -9 => Err("--machine 内部错误：fd 3 状态未采集"),
-        _ => Err("--machine 需要调用方以可写方式打开 fd 3（用法示例：hsshx web \"ls\" 3>/tmp/hsshx.diag）"),
+        _ => Err(NEED_FD3),
     }
 }
 
@@ -119,6 +131,10 @@ macro_rules! dprintln {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // `std::os::fd` 只在 Unix/WASI 存在，Windows 上这些类型在 `std::os::windows::io`。
+    // 用到它的两个用例本来就 cfg(unix)，导入跟着门控，别留一个只有 Windows `cargo test`
+    // 才会撞到的编译面（CI 跑 tauri build 不编译测试，撞不到它）。
+    #[cfg(unix)]
     use std::os::fd::AsRawFd;
 
     /// 每个用例独占目录：cargo test 并行时共用同一路径会让写入互相截断。

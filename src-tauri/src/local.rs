@@ -686,6 +686,12 @@ pub fn open(
     // 为什么必需：AI agent 常给每条命令再套一层自己的 pty，那时 stdout 是管道、/dev/tty 是
     // 那层内 pty，转义序列两头都到不了宿主（实测必等满轮询超时）。
     // 取不到就不注入，脚本回退 /dev/tty —— 人工终端里两者同设备同字节流，正常路径零影响。
+    //
+    // 门控理由：`tty_name` 在 portable-pty 里是 `#[cfg(unix)]` 的 trait 方法
+    // （portable-pty-0.9.0/src/lib.rs:116-117），Windows 上该方法不存在，无条件调用会让
+    // windows-latest 编译失败。Linux/macOS 同属 unix，走的仍是下面这份原代码，行为不变。
+    // 与同文件 install_hssh 的 `#[cfg(not(windows))]` 同构：Windows 本就没有 hssh 脚本可读它。
+    #[cfg(unix)]
     if let Some(tty) = pair.master.tty_name() {
         cmd.env("HSSH_TTY", tty);
     }
