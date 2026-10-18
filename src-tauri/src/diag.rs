@@ -116,12 +116,6 @@ macro_rules! dprintln {
     ($($arg:tt)*) => { $crate::diag::emit(true, format_args!($($arg)*)) };
 }
 
-/// 同上但不换行：进度帧原地刷新专用。
-#[macro_export]
-macro_rules! dprint {
-    ($($arg:tt)*) => { $crate::diag::emit(false, format_args!($($arg)*)) };
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

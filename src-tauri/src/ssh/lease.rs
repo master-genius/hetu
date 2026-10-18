@@ -211,6 +211,9 @@ pub fn acquire_in(dir: &Path, lease: &mut Lease) -> Result<Holder> {
         .write(true)
         .truncate(false)
         .open(lock_path(&dir, &lease.id))?;
+    // 锁文件同样是 0600：它虽然是空文件，但文件名带着活跃连接的 uuid。
+    // 与 sidecar 统一权限，也避免「目录 0700 但文件随 umask」的不一致。
+    settings::set_owner_only(&lock_path(&dir, &lease.id));
     fs2::FileExt::try_lock_exclusive(&lock)
         .map_err(|_| Error::msg(format!("租约 id 撞车（{id} 的锁已被占用）", id = lease.id)))?;
 
@@ -305,6 +308,33 @@ pub fn scan_in(dir: &Path) -> Result<Vec<Lease>> {
                 Err(_) => { let _ = std::fs::remove_file(&path); }
             },
             Err(_) => {}
+        }
+    }
+    // 第二遍：回收「没有同名 json」的孤立锁文件。
+    //
+    // 主循环只遍历 *.json，所以孤立 .lock 永远轮不到它——例如 Holder::drop 删完 json
+    // 就被 SIGKILL，那个 .lock 会永久留在目录里。只有拿得到排他锁（= 确实没人在持）才删；
+    // 拿不到说明持有者仍在（尽管 json 已不在），保留不动，宁可留一个也不误删活租约。
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("lock") {
+                continue;
+            }
+            let Some(id) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+            if json_path(dir, id).exists() {
+                continue; // 有 json 的由主循环判活，这里不重复处理
+            }
+            if guard_id(id).is_err() {
+                let _ = std::fs::remove_file(&path);
+                continue;
+            }
+            let Ok(f) = std::fs::OpenOptions::new().write(true).open(&path) else {
+                continue;
+            };
+            if fs2::FileExt::try_lock_exclusive(&f).is_ok() {
+                let _ = std::fs::remove_file(&path);
+            }
         }
     }
     out.sort_by(|a, b| a.started_unix.cmp(&b.started_unix));
@@ -469,6 +499,46 @@ mod tests {
 
         assert!(scan_in(&dir).unwrap().is_empty(), "无持有者的残留条目必须被回收");
         assert!(!json_path(&dir, &id).exists(), "回收必须删掉 sidecar");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 孤立锁回收：只有 `.lock`、没有同名 `.json` 时，主循环根本看不到它，
+    /// 若不额外扫一遍就会永久留在目录里（Holder::drop 删完 json 即被 SIGKILL 的场景）。
+    /// 判据与主循环同构：拿得到排他锁才删，拿不到说明仍有人在持。
+    #[test]
+    fn orphan_lock_without_sidecar_is_reaped() {
+        let dir = temp_dir("orphan-lock");
+        let id = uuidish(5);
+        dir_of(&dir).unwrap();
+        let lp = lock_path(&dir, &id);
+        std::fs::write(&lp, b"").unwrap();
+        assert!(lp.exists(), "前置：孤立锁已造出");
+
+        assert!(scan_in(&dir).unwrap().is_empty(), "没有 json 的锁不该产生租约行");
+        assert!(!lp.exists(), "无持有者的孤立锁必须被回收");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 反向锁：孤立锁若**正被持有**（真有进程在写），不得被删——宁可留一个文件，
+    /// 也不能把活租约的锁抽掉（那会让其它扫描方误判它已死亡）。
+    #[test]
+    fn orphan_lock_held_by_a_process_is_kept() {
+        let dir = temp_dir("orphan-lock-held");
+        let id = uuidish(6);
+        dir_of(&dir).unwrap();
+        let lp = lock_path(&dir, &id);
+        let f = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(&lp)
+            .unwrap();
+        fs2::FileExt::lock_exclusive(&f).unwrap();
+
+        assert!(scan_in(&dir).unwrap().is_empty());
+        assert!(lp.exists(), "仍被持有的锁不得删除");
+
+        fs2::FileExt::unlock(&f).unwrap();
+        drop(f);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

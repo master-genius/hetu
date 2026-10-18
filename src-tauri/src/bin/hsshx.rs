@@ -439,6 +439,12 @@ async fn run_exec(
 /// 读不到别的进程的内存，只覆盖 hsshx 自己登记的租约。好处是不依赖宿主在跑、stdout 直接
 /// 可被脚本与 AI 捕获。
 fn list_connections(rest: &[String]) -> ExitCode {
+    // 只认 --json。两个 exec 专用开关在这里显式拒绝而不是静默忽略：listconn 既不转发
+    // 远端流、也不登记租约，收下它们等于让调用方以为「分流/登记已生效」——假承诺。
+    if let Some(bad) = rest.iter().find(|a| *a == "--machine" || *a == "--track") {
+        dprintln!("hsshx: listconn 不支持 {bad}（--machine/--track 只对执行命令有效）");
+        return ExitCode::from(2);
+    }
     let leases = match lease::scan() {
         Ok(v) => v,
         Err(e) => {
@@ -996,11 +1002,25 @@ async fn exec_mode(
             // 实测健康链路上 TERM 毫秒级落地，这里只是给停滞网络兜底的 200ms。
             Ok(()) = cancel_rx.changed() => {
                 if *cancel_rx.borrow() {
-                    let _ = tokio::time::timeout(
-                        std::time::Duration::from_millis(200),
-                        &mut term_rx,
-                    )
-                    .await;
+                    // 有界等 TERM 落地，并把「是否确认送达」如实写进诊断通道。
+                    // 只在 --machine 下写：默认路径保持静默（与改动前被信号终止时一致），
+                    // 否则会凭空多出一行 stderr。而 --machine 下必须写——不然「fd 3 空而
+                    // rc!=0 就是远端退出码」的判据会把取消的 130 误读成远端自己返回的 130。
+                    let confirmed = matches!(
+                        tokio::time::timeout(
+                            std::time::Duration::from_millis(200),
+                            &mut term_rx,
+                        )
+                        .await,
+                        Ok(Ok(()))
+                    );
+                    if diag::target().is_some() {
+                        if confirmed {
+                            dprintln!("hsshx: 已取消（TERM 已发往远端）");
+                        } else {
+                            dprintln!("hsshx: 已取消（TERM 未确认送达，远端可能仍在运行）");
+                        }
+                    }
                     // 130 = 128+SIGINT，Unix 惯例：让上层脚本把「被信号终止」与远端退出码分开
                     return 130;
                 }
@@ -1525,6 +1545,11 @@ fn print_doc() {
     println!("  （setsid / nohup ... & / 双 fork 守护化），那部分进程不受 SSH 管辖，杀不到。");
     println!("- exec 默认不进 listconn（一次性命令秒级完成，登记只是高频创删锁文件）；");
     println!("  长跑的任务要显式加 --track 才可见、才可被 killconn 终止。");
+    println!("- --track 的落盘只有租约目录 ~/.config/hetushell/conns/（目录 0700），每条连接");
+    println!("  <uuid>.json + <uuid>.lock 两个文件（文件 0600），不碰 profiles.json 等配置。");
+    println!("  命令结束（含取消）即删；被 kill -9 或第二次信号强退时留下的残留，会在下次");
+    println!("  `hsshx listconn` / `hssh listconn` 扫描时自动回收（含只剩 .lock 的孤立锁）。");
+    println!("  手工核对：grep -l '\"kind\":\"exec\"' ~/.config/hetushell/conns/*.json");
     println!();
     println!("安全提示");
     println!("--------");
