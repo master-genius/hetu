@@ -45,10 +45,6 @@ fn main() -> ExitCode {
 async fn real_main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
 
-    if args.len() == 2 && (args[1] == "-l" || args[1] == "--list") {
-        return list_profiles();
-    }
-
     // -h 可在任意位置（沿用原行为：解析中途遇到即打印帮助并成功退出）
     if args.iter().skip(1).any(|a| a == "-h" || a == "--help") {
         usage();
@@ -60,7 +56,13 @@ async fn real_main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    // 免连接的本地子命令：只读写租约目录，不开 SSH、不查 profiles。
+    // 免连接的本地子命令：只读本地数据，不开 SSH、不建连。
+    // `list` 与 hssh 同一分派（裸词子命令 + `-l`/`--list` 两种写法等价）：判据只看 args[1]，
+    // 尾参数交给子命令自己解析。此前用 `args.len() == 2` 约束，多给一个参数就整条分支跳过，
+    // 于是 `hsshx --list --json` 会把 `--list` 本身当成连接项名去 profiles 里找。
+    if matches!(args.get(1).map(String::as_str), Some("list") | Some("-l") | Some("--list")) {
+        return list_profiles(&args[2..]);
+    }
     // 放在连接项解析之前，否则 listconn/killconn 会被当成连接项名去找配置。
     if args.get(1).map(String::as_str) == Some("listconn") {
         return list_connections(&args[2..]);
@@ -1333,7 +1335,7 @@ fn usage() {
     dprintln!("  hsshx <连接项> --put <本地> <目录> -p  远端目录缺失时逐级自动创建（--mkdir 同义）");
     dprintln!("  hsshx listconn [--json]            列出活跃的 hsshx 连接（免连接，只读租约）");
     dprintln!("  hsshx killconn <id>                终止一条带 --by 标记的 hsshx 连接");
-    dprintln!("  hsshx -l                           列出已保存的连接项");
+    dprintln!("  hsshx list [--json]                列出已保存的连接项（-l/--list 同义，免连接）");
     dprintln!("  hsshx -h                           显示简要帮助");
     dprintln!("  hsshx --doc                        显示完整文档（含示例，适合人与 AI 参考）");
 }
@@ -1370,7 +1372,7 @@ fn print_doc() {
     println!("  7. 列目录: hsshx <连接项> --ls [远端目录]");
     println!("  8. 取元数据: hsshx <连接项> --stat <远端路径>");
     println!();
-    println!("C. 免连接的本地子命令（不读 profiles、不开 SSH，只操作租约目录）");
+    println!("C. 免连接的本地子命令（不开 SSH：listconn/killconn 只操作租约目录，list 只读 profiles）");
     println!("  9.  看连接: hsshx listconn [--json]");
     println!("      只列 hsshx 自己发起的活跃连接：交互会话、进行中的传输，以及带 --track");
     println!("      的长时 exec。GUI 面板/终端 hssh 建的连接不在此列——它们在另一个进程的");
@@ -1380,6 +1382,11 @@ fn print_doc() {
     println!("      终止；其余须 --force，且此时 --by 要与目标的发起标记一致——所以用户手敲的");
     println!("      会话不会被脚本随手杀。给目标进程发 SIGINT，对方按既有路径收尾（exec 会把");
     println!("      TERM 传到远端、传输会回滚清理）并自删租约。");
+    println!("  11. 看连接项: hsshx list [--json]");
+    println!("      列出 profiles.json 里已保存的连接项（`-l`/`--list` 同义，与终端 `hssh list`");
+    println!("      同一分派）。`--json` 是白名单视图，只含定位与认证方式（id/name/host/port/");
+    println!("      user/auth/source/note/keepalive/timeout）——私钥内容与密码不出现在这份输出里；");
+    println!("      凭据类字段不进任何机读流，这是硬约束。");
     println!();
     println!("命令来源优先级");
     println!("--------------");
@@ -1405,7 +1412,7 @@ fn print_doc() {
     println!("                     于是 stdout/stderr 只剩远端命令的两条流。fd 3 没开则报错");
     println!("  --track              给这条 exec 登记租约：进 listconn 可见、可被 killconn 终止");
     println!("                     （仅对执行命令有效，传输与交互模式本来就登记）");
-    println!("  -l, --list           列出已保存的连接项");
+    println!("  -l, --list, list     列出已保存的连接项（可加 --json 出机读，免连接）");
     println!("  -h, --help           显示简要帮助");
     println!("  --doc                显示完整文档（本内容）");
     println!();
@@ -1500,6 +1507,7 @@ fn print_doc() {
     println!("  hsshx web \"uptime\"");
     println!("  hsshx web \"df -h && free -m\"");
     println!("  hsshx -l");
+    println!("  hsshx list --json");
     println!();
     println!("  # 文件脚本");
     println!("  hsshx web -f deploy.sh");
@@ -1559,8 +1567,34 @@ fn print_doc() {
     println!("- 主机指纹为 TOFU（首次信任）：指纹变更即拒绝连接，防中间人。");
 }
 
-fn list_profiles() -> ExitCode {
+/// `hsshx list [--json]`（`-l`/`--list` 同义）：列出已保存的连接项，免连接、纯本地读 profiles。
+///
+/// `--json` 逐字段手工构造，**不走** `serde_json::to_value(profile)`：`Profile` 整体带
+/// `Serialize`，直接序列化会把 `keyData`（PEM 私钥）与 `password` 一起打进 stdout，
+/// 而这条流正是脚本与 AI 会管道走的那条——凭据一旦出去就收不回。
+fn list_profiles(rest: &[String]) -> ExitCode {
+    // 只认 --json，其余显式拒绝而不是静默忽略（同 listconn 的处理取向）：list 既不建连也不
+    // 登记租约，收下 --track/--machine 等于让调用方以为「已生效」，那是假承诺。
+    // 判据排在读盘之前：非法输入不该先去碰用户配置。
+    if let Some(bad) = rest.iter().find(|a| *a != "--json") {
+        dprintln!("hsshx: list 不支持 {bad}（只支持 --json）");
+        return ExitCode::from(2);
+    }
     let profiles = load_profiles();
+    if rest.iter().any(|a| a == "--json") {
+        // 空列表出 `[]` 而不是中文提示：机读侧不该需要解析自然语言才能判「没有」
+        let rows: Vec<serde_json::Value> = profiles.iter().map(profile_json).collect();
+        return match serde_json::to_string_pretty(&rows) {
+            Ok(s) => {
+                println!("{s}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                dprintln!("hsshx: 序列化失败: {e}");
+                ExitCode::from(1)
+            }
+        };
+    }
     if profiles.is_empty() {
         println!("（无连接项）");
         return ExitCode::SUCCESS;
@@ -1569,6 +1603,23 @@ fn list_profiles() -> ExitCode {
         println!("{:<20} {:<6} {}@{}:{}", p.name, p.auth, p.user, p.host, p.port);
     }
     ExitCode::SUCCESS
+}
+
+/// 连接项的机读视图：白名单只放「定位一台机器 + 判断能不能非交互连」所需的字段。
+/// `auth` 足以表达 `key` 可直连、`password` 需人在场，故凭据本体与私钥路径都不必出现。
+fn profile_json(p: &Profile) -> serde_json::Value {
+    serde_json::json!({
+        "id": p.id,
+        "name": p.name,
+        "host": p.host,
+        "port": p.port,
+        "user": p.user,
+        "auth": p.auth,
+        "source": p.source,
+        "note": p.note,
+        "keepalive": p.keepalive,
+        "timeout": p.timeout,
+    })
 }
 
 #[cfg(test)]
@@ -1589,6 +1640,57 @@ mod tests {
         let path = dir.join("s.sh");
         std::fs::write(&path, "uptime\n").unwrap();
         path.to_string_lossy().into_owned()
+    }
+
+    /// 机读视图的字段集锁死。`Profile` 整体带 `Serialize`，一旦哪天有人把这里改回
+    /// `to_value(profile)`，私钥与密码就会打进 stdout——而 `--json` 这条流正是用来
+    /// 管道给脚本和 AI 的，凭据出去了就收不回。
+    #[test]
+    fn profile_json_carries_no_credentials() {
+        let p = Profile {
+            id: "id-1".into(),
+            name: "web".into(),
+            host: "10.0.0.9".into(),
+            port: 2222,
+            user: "root".into(),
+            auth: "key".into(),
+            key_path: Some("/home/x/.ssh/id_ed25519".into()),
+            key_data: Some("-----BEGIN OPENSSH PRIVATE KEY-----\nSECRET\n".into()),
+            password: Some("hunter2".into()),
+            source: "manual".into(),
+            note: Some("生产机".into()),
+            keepalive: Some(30),
+            timeout: None,
+        };
+        let v = profile_json(&p);
+        let obj = v.as_object().expect("机读视图必须是对象");
+        let allowed = ["id", "name", "host", "port", "user", "auth", "source", "note", "keepalive", "timeout"];
+        for k in obj.keys() {
+            assert!(allowed.contains(&k.as_str()), "意外字段 {k} 进入机读流");
+        }
+        for k in allowed {
+            assert!(obj.contains_key(k), "字段 {k} 缺失，调用方契约被破坏");
+        }
+        let s = v.to_string();
+        assert!(!s.contains("hunter2"), "密码泄漏进机读流");
+        assert!(!s.contains("BEGIN OPENSSH PRIVATE KEY"), "私钥泄漏进机读流");
+        assert!(!s.contains("id_ed25519"), "私钥路径泄漏进机读流");
+        // 认证方式与端口仍在：调用方靠 auth 判断能否非交互连接
+        assert_eq!(obj["auth"], "key");
+        assert_eq!(obj["port"], 2222);
+    }
+
+    /// `list` 的尾参数只认 `--json`，其余显式拒绝而不是静默忽略（同 listconn 的既有取向）。
+    /// 判据排在读盘之前，所以这些用例不依赖本机 profiles.json 的内容。
+    #[test]
+    fn list_rejects_flags_it_does_not_support() {
+        for bad in ["--track", "--machine", "-p", "web"] {
+            assert_eq!(
+                list_profiles(&[bad.to_string()]),
+                ExitCode::from(2),
+                "list 应拒绝 {bad} 而不是假装生效"
+            );
+        }
     }
 
     fn exec_command(spec: &Spec) -> Option<&str> {
