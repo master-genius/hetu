@@ -1039,6 +1039,16 @@ export class Pane {
     }
     // 仅实际 resize 时才通知 PTY——冗余 SIGWINCH 会打扰 TUI 程序
     if (this.term.cols !== prevCols || this.term.rows !== prevRows) {
+      /**
+       * 尺寸一变，xterm 会按新折行重新映射选区：锚点行/列不变，覆盖的**行数**却会变。
+       * 上游只在行数变化时清（6.0.0 SelectionService：`e.rowsChanged && clearSelection()`），
+       * 而左右分屏进出只改列宽 ⇒ 选区按新折行漂移，最后胀成一整块底色的「选中区」，
+       * 且清不掉（终端选择不归程序管，只有 resize/按键/切缓冲区才清）。
+       * 折行后锚点已无意义，这里直接丢弃——下面本就要整屏重绘，不会留下错位高亮。
+       * 不能只清 `hasSelection()` 为真的：单格锚点（start===end）不算「有选区」，
+       * 却正是 reflow 之后被放大成整块的那一种。
+       */
+      this.term.clearSelection();
       void api.paneResize(this.backendId, this.term.cols, this.term.rows).catch(() => {});
     }
     // 始终刷新：DOM 移动或设置变更后 canvas 可能未重绘
