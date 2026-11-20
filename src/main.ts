@@ -28,6 +28,7 @@ import {
 } from "./ui";
 import {
   armRetry, beginTransfer, completeTransfer, failTransfer, initTransfers, updateTransfer,
+  updateTransferEndpoints,
 } from "./transfers";
 import type { LayoutNode } from "./layout";
 import type { ConnParams, Profile, SessionLayout } from "./types";
@@ -733,7 +734,7 @@ async function bootstrap() {
           const dir = await api.cacheDir(p.connId);
           const local = `${dir}/${name}`;
           const tid = crypto.randomUUID();
-          beginTransfer(tid, name, "download", local);
+          beginTransfer(tid, name, "download", { remote: path, local });
           // 下载→打开是一个动作，重试也重做整个动作（只重下不重开会把用户留在「点了没反应」里）
           const attempt = async () => {
             try {
@@ -1020,9 +1021,11 @@ async function bootstrap() {
       return;
     }
     const basename = (p: string) => p.replace(/[/\\]+$/, "").split(/[/\\]/).pop() ?? p;
-    // 立即为每个文件创建传输行（占位），让用户马上看到面板反馈
+    // 立即为每个文件创建传输行（占位），让用户马上看到面板反馈。
+    // 此刻目标目录还在解析：下行先填本地源文件（已知），上行留 note 占位，
+    // 等 dir 确定后再回填真正的远端目标路径。
     const entries = paths.map((p) => ({ path: p, name: basename(p), tid: crypto.randomUUID() }));
-    for (const e of entries) beginTransfer(e.tid, e.name, "upload", "解析目标目录…");
+    for (const e of entries) beginTransfer(e.tid, e.name, "upload", { local: e.path, note: "解析目标目录…" });
     // dirOverride（拖到某目录名上）最精确；否则用 pane 的已知 cwd，再退到 home。
     let dir: string | null;
     let guessed = false;
@@ -1051,6 +1054,11 @@ async function bootstrap() {
     // 同名文件处理：默认直接覆盖；开启「提示确认」后按项询问，可选「后续都如此」。
     const confirmOverwrite = getSettings().confirmOverwrite;
     let bulk: "overwrite" | "skip" | null = null; // 记住「全部」选择
+
+    // 目标目录已确定：回填每行的远端目标（上行）与本地源（下行）。
+    for (const e of entries) {
+      updateTransferEndpoints(e.tid, { remote: `${dir.replace(/\/+$/, "")}/${e.name}`, local: e.path });
+    }
 
     for (const e of entries) {
       const { path: p, name, tid } = e;
@@ -1292,7 +1300,12 @@ async function bootstrap() {
     for (const srcPath of srcPaths) {
       const name = srcPath.replace(/\/+$/, "").split("/").pop() ?? srcPath;
       const tid = crypto.randomUUID();
-      beginTransfer(tid, name, "upload", dir);
+      // 远端 → 远端复制：上行放远端源（"源头"），下行没有本地路径，
+      // 用 note 如实说明目标也在远端，避免那一行留空让人误以为本地有副本。
+      beginTransfer(tid, name, "upload", {
+        remote: srcPath,
+        note: `远端 → 远端：${dir.replace(/\/+$/, "")}/${name}`,
+      });
       const attempt = async () => {
         try {
           const dest = await api.sftpCopyRemote(src.connId, srcPath, target.connId, dir, tid);
@@ -1402,11 +1415,12 @@ async function bootstrap() {
       }
       if (!local) return false;
       // 传输进度与成败由右下角面板呈现（可暂停/取消/删除）；
-      // 落地完整路径作为行名悬停提示，让用户能找到文件。
+      // 两端完整路径进面板详情区（上行=远端源、下行=本地落地），让用户能找到文件。
       // 完成时另发一条 toast：小文件瞬间完成，仅靠面板行不够醒目
       const dest = meta.isDir ? `${local.replace(/\/+$/, "")}/${name}` : local;
       const tid = crypto.randomUUID();
-      beginTransfer(tid, name, "download", dest);
+      // 下行用 dest 而非 local：下载目录本身时，真正落地的是 dest（目录/同名文件）
+      beginTransfer(tid, name, "download", { remote: remotePath, local: dest });
       // 提成闭包：首次传输与面板上的「重试」共用同一份逻辑（含落地路径与提示），
       // 重试复用同一 tid——后端在命令 return 前就 unregister，同 id 重注册不会被陈旧摘除误删。
       const attempt = async (): Promise<boolean> => {

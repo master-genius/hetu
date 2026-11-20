@@ -2301,11 +2301,119 @@ input[type="checkbox"] {
   display: flex;
 }
 
+.t-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .t-bar {
   height: 5px;
   background: color-mix(in srgb, var(--term-fg) 12%, transparent);
   border-radius: 3px;
   overflow: hidden;
+  flex: 1;
+  min-width: 0;
+}
+
+/* 折叠图标：默认朝右，展开时旋转朝下。它是详情区唯一的开关。 */
+.t-expand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.5;
+  cursor: pointer;
+  transition: transform 0.15s, opacity 0.15s;
+}
+
+.t-expand:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--term-fg) 14%, transparent);
+}
+
+.transfer-row[data-detail="open"] .t-expand {
+  transform: rotate(90deg);
+  opacity: 0.8;
+}
+
+/* 详情区：收起时 display:none，不参与任何布局计算 */
+.t-detail {
+  display: none;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 1px;
+  padding-top: 5px;
+  border-top: 1px dashed color-mix(in srgb, var(--term-fg) 12%, transparent);
+}
+
+.transfer-row[data-detail="open"] .t-detail {
+  display: flex;
+}
+
+/* 单行路径：标签 + 可裁剪的横向滚动容器 */
+.t-route {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.t-tag {
+  flex-shrink: 0;
+  opacity: 0.5;
+  /* 固定宽度让「远端」「本地」两行路径左端对齐 */
+  width: 2.2em;
+}
+
+/* 路径容器：overflow:hidden 彻底不产生滚动条（不用 scrollbar-width:none ——
+   WebKitGTK 对横向滚动条的支持不一致，仍可能露出细条）。内容靠 inner 的
+   transform 动画平移，因此也不需要可滚动区域。 */
+.t-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 0.75;
+}
+
+.t-path-inner {
+  display: inline-block;
+  white-space: nowrap;
+  will-change: transform;
+}
+
+/* 占位/说明文案（如「解析目标目录…」）：弱化且不滚动 */
+.t-route-note .t-path-inner {
+  opacity: 0.55;
+  font-style: italic;
+}
+
+/* 横向往返滚动：停 1.2s → 匀速到末尾 → 停 1.2s → 回起点。
+   距离与时长由 armMarquee 按实际溢出量注入，短路径不产生动画。 */
+@keyframes t-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(var(--mq-distance, 0));
+  }
+}
+
+/* 尊重系统「减少动态效果」偏好：直接静止 */
+@media (prefers-reduced-motion: reduce) {
+  .t-path-inner {
+    animation: none !important;
+  }
 }
 
 .t-fill {

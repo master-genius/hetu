@@ -24,6 +24,25 @@ type TState = "active" | "paused" | "done" | "failed" | "cancelled";
 /** 后端取消错误的序列化文案（error.rs Error::Cancelled），用于权威区分取消/失败 */
 const CANCELLED_MARK = "传输已取消";
 
+/**
+ * 一次传输的两端路径。语义统一为「远端侧 / 本地侧」，因此不需要按方向分支：
+ * - 下载：remote = 远端源文件，local = 本地落地文件
+ * - 上传：remote = 远端目标文件，local = 本地源文件
+ * 恰好满足「展开后上面是源头、下面是下载路径；或上面是上传目标、下面是本地文件」。
+ */
+export interface TransferEndpoints {
+  /** 远端侧绝对路径 */
+  remote?: string;
+  /** 本地侧绝对路径 */
+  local?: string;
+  /**
+   * 某侧尚未确定时的占位/说明，填补缺的那一行：
+   * - 上传刚建行、目标目录还在解析 → remote 缺失，上行显示 note
+   * - 远端的远端复制（两侧都在远端）→ local 缺失，下行显示 note 说明来源
+   */
+  note?: string;
+}
+
 interface Row {
   id: string;
   el: HTMLElement;
@@ -42,10 +61,23 @@ interface Row {
   /** 用户已请求取消：用于渲染「取消中…」并作为取消意图记录 */
   cancelling: boolean;
   detail?: string;
+  /** 两端路径；建行时写入，上传在解析出目标目录后经 updateTransferEndpoints 回填 */
+  endpoints: TransferEndpoints;
+  /** 详情区是否展开。新行继承 detailDefaultOpen（用户上次的选择） */
+  open: boolean;
+  expandBtn: HTMLElement;
   /** 重发本行的请求，由调用方经 armRetry 挂上。没挂上=这行还没真正上过线，
    *  重试对它就是必败的假按钮（取目录失败/用户取消/跳过同名都属此类），故不显示图标。 */
   retry?: () => void | Promise<unknown>;
 }
+
+/** 新行详情默认展开状态：记住用户上次的折叠选择，本次会话内有效（纯 UI 偏好，不落盘） */
+let detailDefaultOpen = false;
+
+/** 横向滚动的像素速度（px/s）与时长上下限：兼顾短路径不闪烁、超长路径不至于爬到天荒地老 */
+const MARQUEE_SPEED = 45;
+const MARQUEE_MIN_SECS = 3;
+const MARQUEE_MAX_SECS = 20;
 
 const ICON = {
   pause: `<svg viewBox="0 0 16 16" width="13" height="13"><path fill="currentColor" d="M4.5 3h2.2v10H4.5V3zm4.8 0h2.2v10H9.3V3z"/></svg>`,
@@ -54,6 +86,8 @@ const ICON = {
   retry: `<svg viewBox="0 0 16 16" width="13" height="13"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="M12.9 6.3A5 5 0 1 0 13 9.7"/><path fill="currentColor" d="M13.7 2.1l.7 4.7-4.5-1.5z"/></svg>`,
   trash: `<svg viewBox="0 0 16 16" width="13" height="13"><path fill="currentColor" d="M6 2h4l.6 1H14v1.4H2V3h3.4L6 2zm-2.4 3.4h8.8l-.7 8A1.3 1.3 0 0110.4 14.6H5.6a1.3 1.3 0 01-1.3-1.2l-.7-8zM6.4 7v5.2h1.1V7H6.4zm2.1 0v5.2h1.1V7H8.5z"/></svg>`,
   close: `<svg viewBox="0 0 12 12" width="12" height="12"><path stroke="currentColor" stroke-width="1.3" stroke-linecap="round" d="M2.5 2.5l7 7M9.5 2.5l-7 7"/></svg>`,
+  /** 折叠箭头：默认指向右侧（收起），展开时由 CSS 旋转 90°（朝下） */
+  chevron: `<svg viewBox="0 0 12 12" width="10" height="10"><path stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none" d="M4.2 2.4L7.9 6l-3.7 3.6"/></svg>`,
 };
 
 let panel: HTMLElement | null = null;
@@ -127,13 +161,14 @@ function refreshVisibility(): void {
 
 /**
  * 开始一次传输：建立行。
- * @param dest 完整目标路径（下载落地位置 / 上传目标目录），作为行名悬停提示
+ * @param endpoints 两端路径（远端侧 / 本地侧）。上传可能先把远端侧留空、用 note 占位，
+ *                  解析出目标目录后再经 updateTransferEndpoints 回填。
  */
 export function beginTransfer(
   id: string,
   name: string,
   direction: "upload" | "download",
-  dest?: string,
+  endpoints?: TransferEndpoints,
 ): void {
   if (rows.has(id)) return;
   // 新传输一律重新弹出面板：之前的隐藏偏好只作用于当批传输，
@@ -153,11 +188,17 @@ export function beginTransfer(
         <button class="t-act t-del" title="删除">${ICON.trash}</button>
       </span>
     </div>
-    <div class="t-bar"><div class="t-fill"></div></div>
-    <div class="t-meta"><span class="t-prog"></span><span class="t-speed"></span></div>`;
+    <div class="t-bar-row">
+      <button class="t-expand" title="展开细节">${ICON.chevron}</button>
+      <div class="t-bar"><div class="t-fill"></div></div>
+    </div>
+    <div class="t-meta"><span class="t-prog"></span><span class="t-speed"></span></div>
+    <div class="t-detail">
+      <div class="t-route t-route-remote"><span class="t-tag">远端</span><span class="t-path"><span class="t-path-inner"></span></span></div>
+      <div class="t-route t-route-local"><span class="t-tag">本地</span><span class="t-path"><span class="t-path-inner"></span></span></div>
+    </div>`;
   const nameEl = el.querySelector(".t-name") as HTMLElement;
   nameEl.textContent = `${direction === "upload" ? "↑" : "↓"} ${name}`;
-  nameEl.title = dest ?? name;
   const row: Row = {
     id, el, state: "active",
     fill: el.querySelector(".t-fill") as HTMLElement,
@@ -165,15 +206,121 @@ export function beginTransfer(
     speed: el.querySelector(".t-speed") as HTMLElement,
     pauseBtn: el.querySelector(".t-pause") as HTMLElement,
     done: 0, total: 0, lastDone: 0, lastTs: Date.now(), speedBps: 0, cancelling: false,
+    endpoints: endpoints ?? {},
+    open: detailDefaultOpen,
+    expandBtn: el.querySelector(".t-expand") as HTMLElement,
   };
   row.pauseBtn.addEventListener("click", () => togglePause(row));
   el.querySelector(".t-cancel")!.addEventListener("click", () => requestCancel(row));
   el.querySelector(".t-retry")!.addEventListener("click", () => retryRow(row));
   el.querySelector(".t-del")!.addEventListener("click", () => removeRow(row));
+  row.expandBtn.addEventListener("click", () => toggleDetail(row));
   rows.set(id, row);
   list.prepend(el); // 最新的传输在最前面
+  // 顺序有依赖：先挂进文档并设好展开态，renderEndpoints 才能量到真实宽度装滚动。
+  applyDetailOpen(row);
+  renderEndpoints(row);
   render(row);
   refreshVisibility();
+}
+
+/**
+ * 回填两端路径（上传在解析出目标目录后调用）。
+ * 路径文本的写入与横向动画都集中在这里，避免进度事件里重复测量 DOM 引起布局抖动。
+ */
+export function updateTransferEndpoints(id: string, endpoints: TransferEndpoints): void {
+  const row = rows.get(id);
+  if (!row) return; // 行已删除：绝不复活僵尸行（与 updateTransfer 同一策略）
+  row.endpoints = endpoints;
+  renderEndpoints(row);
+}
+
+/** 把两端路径写进详情区；缺哪一侧就显示 note 占位 */
+function renderEndpoints(row: Row): void {
+  const { remote, local, note } = row.endpoints;
+  const setRow = (sel: string, value: string | undefined, useNote: boolean) => {
+    const line = row.el.querySelector(sel) as HTMLElement | null;
+    const inner = line?.querySelector(".t-path-inner") as HTMLElement | null;
+    if (!line || !inner) return;
+    const text = value || (useNote ? note : undefined);
+    if (!text) {
+      line.style.display = "none";
+      inner.textContent = "";
+      return;
+    }
+    line.style.display = "";
+    // note 是说明性短文本（如「解析目标目录…」），不参与横向滚动
+    if (value) {
+      line.classList.remove("t-route-note");
+      inner.textContent = value;
+    } else {
+      line.classList.add("t-route-note");
+      inner.textContent = text;
+    }
+  };
+  setRow(".t-route-remote", remote, true);
+  // note 已被上行占用时，下行不再重复显示同一句说明
+  setRow(".t-route-local", local, !remote);
+  // 两侧都没有内容时整块详情没有意义，隐藏展开图标避免出现「点了没反应」的空盒子
+  const hasAny = Boolean(remote || local || note);
+  row.expandBtn.style.display = hasAny ? "" : "none";
+  // 展开状态下立刻测量并装滚动；收起时留到 applyDetailOpen → remeasureRoutes 再做。
+  // （收起时 .t-detail 为 display:none，量出的 clientWidth 恒为 0，装了也是错的）
+  if (row.open) remeasureRoutes(row);
+}
+
+/**
+ * 给超宽路径装横向滚动。
+ *
+ * 需求是「一行显示、自动横向滚动、不出现滚动条」，因此：
+ * - `.t-path` 用 `overflow: hidden` 彻底掐掉滚动条，而不是靠 `scrollbar-width: none`
+ *   （后者在 WebKitGTK 上对横向滚动支持不一致，仍可能露出细条）；
+ * - 只有真正溢出时才滚动（`scrollWidth > clientWidth`），短路径完全静止不闪；
+ * - 用 CSS 自定义属性把距离与时长交给 CSS 动画，JS 只测量一次，不在进度事件里反复算。
+ *
+ * 滚动采用「先停 1.2s → 匀速走到末尾 → 停 1.2s → 回到起点」的往返式（alternate），
+ * 这样既不会让用户追不上起点，也能读到结尾那段。
+ */
+function armMarquee(line: HTMLElement, inner: HTMLElement): void {
+  // 先清掉上一次动画，避免快速回填时叠加上一轮的 transform
+  inner.style.animation = "none";
+  inner.style.transform = "";
+  // 测量必须在「无动画、已渲染」的状态下做；强制读一次布局即可（每次回填只发生一次）
+  const overflow = inner.scrollWidth - line.clientWidth;
+  if (overflow <= 0) return;
+  const secs = Math.min(MARQUEE_MAX_SECS, Math.max(MARQUEE_MIN_SECS, overflow / MARQUEE_SPEED));
+  inner.style.setProperty("--mq-distance", `-${overflow}px`);
+  inner.style.setProperty("--mq-duration", `${secs.toFixed(2)}s`);
+  inner.style.animation = "t-marquee var(--mq-duration) ease-in-out 1.2s infinite alternate";
+}
+
+/** 切换详情展开；同时记住偏好供后续新行沿用 */
+function toggleDetail(row: Row): void {
+  row.open = !row.open;
+  detailDefaultOpen = row.open;
+  applyDetailOpen(row);
+  // 展开后 .t-detail 才有布局，此时才量得到真实溢出量
+  if (row.open) remeasureRoutes(row);
+}
+
+function applyDetailOpen(row: Row): void {
+  row.el.dataset.detail = row.open ? "open" : "closed";
+  row.expandBtn.setAttribute("aria-expanded", String(row.open));
+  row.expandBtn.title = row.open ? "收起细节" : "展开细节";
+}
+
+/** 对当前可见的路径行重新测量并装/卸横向滚动（详情展开后调用） */
+function remeasureRoutes(row: Row): void {
+  for (const sel of [".t-route-remote", ".t-route-local"]) {
+    const line = row.el.querySelector(sel) as HTMLElement | null;
+    const inner = line?.querySelector(".t-path-inner") as HTMLElement | null;
+    if (!line || !inner || line.style.display === "none") continue;
+    if (line.classList.contains("t-route-note")) {
+      inner.style.animation = "none"; // 说明文案不滚动
+      continue;
+    }
+    armMarquee(line, inner);
+  }
 }
 
 /**
