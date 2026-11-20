@@ -235,36 +235,34 @@ export function updateTransferEndpoints(id: string, endpoints: TransferEndpoints
   renderEndpoints(row);
 }
 
-/** 把两端路径写进详情区；缺哪一侧就显示 note 占位 */
+/** 把两端路径写进详情区；缺哪一侧就把 note 显示到那一侧 */
 function renderEndpoints(row: Row): void {
   const { remote, local, note } = row.endpoints;
-  const setRow = (sel: string, value: string | undefined, useNote: boolean) => {
+  // isNote 显式传入而非用「值等于 note 文本」推断：真实路径恰好与说明同文时，
+  // 推断会把它误降级成斜体占位样式，且不会装滚动。
+  const setRow = (sel: string, value: string | undefined, isNote: boolean) => {
     const line = row.el.querySelector(sel) as HTMLElement | null;
     const inner = line?.querySelector(".t-path-inner") as HTMLElement | null;
     if (!line || !inner) return;
-    const text = value || (useNote ? note : undefined);
-    if (!text) {
+    if (!value) {
       line.style.display = "none";
       inner.textContent = "";
       return;
     }
     line.style.display = "";
-    // note 是说明性短文本（如「解析目标目录…」），不参与横向滚动
-    if (value) {
-      line.classList.remove("t-route-note");
-      inner.textContent = value;
-    } else {
-      line.classList.add("t-route-note");
-      inner.textContent = text;
-    }
+    line.classList.toggle("t-route-note", isNote);
+    inner.textContent = value;
   };
-  setRow(".t-route-remote", remote, true);
-  // note 已被上行占用时，下行不再重复显示同一句说明
-  setRow(".t-route-local", local, !remote);
+  // note 的归属由「哪一侧为空」决定，而不是看另一侧有没有值——
+  // 上传时远端未定（remote 空、local 有）→ note 去上行；
+  // 远端→远端复制时本地不存在（local 空、remote 有）→ note 去下行。
+  // 用 `!remote` 判断会把后者的 note 整个丢掉（下行被隐藏），是必须避免的错。
+  setRow(".t-route-remote", remote || note, !remote && Boolean(note));
+  setRow(".t-route-local", local || (remote ? note : undefined), !local && Boolean(note) && Boolean(remote));
   // 两侧都没有内容时整块详情没有意义，隐藏展开图标避免出现「点了没反应」的空盒子
   const hasAny = Boolean(remote || local || note);
   row.expandBtn.style.display = hasAny ? "" : "none";
-  // 展开状态下立刻测量并装滚动；收起时留到 applyDetailOpen → remeasureRoutes 再做。
+  // 展开状态下立刻测量并装滚动；收起时留到 toggleDetail → remeasureRoutes 再做。
   // （收起时 .t-detail 为 display:none，量出的 clientWidth 恒为 0，装了也是错的）
   if (row.open) remeasureRoutes(row);
 }
@@ -281,12 +279,12 @@ function renderEndpoints(row: Row): void {
  * 滚动采用「先停 1.2s → 匀速走到末尾 → 停 1.2s → 回到起点」的往返式（alternate），
  * 这样既不会让用户追不上起点，也能读到结尾那段。
  */
-function armMarquee(line: HTMLElement, inner: HTMLElement): void {
-  // 先清掉上一次动画，避免快速回填时叠加上一轮的 transform
-  inner.style.animation = "none";
-  inner.style.transform = "";
+function armMarquee(clip: HTMLElement, inner: HTMLElement): void {
+  // 先清掉上一次动画与其位移，避免快速回填时叠加上一轮的 transform
+  stopMarquee(inner);
   // 测量必须在「无动画、已渲染」的状态下做；强制读一次布局即可（每次回填只发生一次）
-  const overflow = inner.scrollWidth - line.clientWidth;
+  // clip 必须是真正 overflow:hidden 的容器，否则算出的距离与实际可见宽度不符
+  const overflow = inner.scrollWidth - clip.clientWidth;
   if (overflow <= 0) return;
   const secs = Math.min(MARQUEE_MAX_SECS, Math.max(MARQUEE_MIN_SECS, overflow / MARQUEE_SPEED));
   inner.style.setProperty("--mq-distance", `-${overflow}px`);
@@ -313,14 +311,28 @@ function applyDetailOpen(row: Row): void {
 function remeasureRoutes(row: Row): void {
   for (const sel of [".t-route-remote", ".t-route-local"]) {
     const line = row.el.querySelector(sel) as HTMLElement | null;
+    // 裁剪容器必须是 .t-path 而不是 .t-route：后者还包含「远端/本地」标签与间距，
+    // 拿它当基准会把标签宽度算进可用宽度，滚动距离随之少掉那一段——长路径的
+    // 尾部将永远滚不出来。这正是必须用真正 overflow:hidden 的那个元素来量的原因。
+    const clip = line?.querySelector(".t-path") as HTMLElement | null;
     const inner = line?.querySelector(".t-path-inner") as HTMLElement | null;
-    if (!line || !inner || line.style.display === "none") continue;
-    if (line.classList.contains("t-route-note")) {
-      inner.style.animation = "none"; // 说明文案不滚动
+    if (!line || !clip || !inner) continue;
+    // note 行、隐藏行一律停掉动画并清掉上一轮的位移，
+    // 否则内容从长路径变成短说明时会残留旧 transform，文字被推出可视区。
+    if (line.style.display === "none" || line.classList.contains("t-route-note")) {
+      stopMarquee(inner);
       continue;
     }
-    armMarquee(line, inner);
+    armMarquee(clip, inner);
   }
+}
+
+/** 停掉滚动并清干净上一轮注入的距离，回到静止的起点状态 */
+function stopMarquee(inner: HTMLElement): void {
+  inner.style.animation = "none";
+  inner.style.transform = "";
+  inner.style.removeProperty("--mq-distance");
+  inner.style.removeProperty("--mq-duration");
 }
 
 /**
