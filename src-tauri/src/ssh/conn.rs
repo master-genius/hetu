@@ -170,44 +170,60 @@ impl client::Handler for ClientHandler {
     ) -> std::result::Result<bool, Self::Error> {
         let key = format!("{}:{}", self.host, self.port);
         let fp = server_public_key.fingerprint(HashAlg::Sha256).to_string();
-        // 线程级锁：防同进程多 SSH 并发（flock 进程级，同进程内不互斥）
-        let _guard = HOSTS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let path = match known_hosts_path() {
-            Ok(p) => p,
-            Err(_) => return Ok(false),
-        };
-        // 跨进程文件锁：防多进程并发连接新主机时互相覆盖已固定指纹
-        let lock_path = path.with_extension("json.lock");
-        let lock_file = match std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .open(&lock_path)
-        {
-            Ok(f) => f,
-            Err(_) => return Ok(false),
-        };
-        if fs2::FileExt::lock_exclusive(&lock_file).is_err() {
-            return Ok(false);
-        }
-        let result = (|| {
-            let mut db = match Self::load_hosts_db() {
-                Ok(db) => db,
-                // 指纹库损坏：安全起见拒绝连接，而非清空后重新信任（否则等于放行 MITM）
-                Err(()) => return Ok(false),
-            };
-            match db.get(&key) {
-                Some(known) if *known == fp => Ok(true),
-                Some(_) => Ok(false), // 指纹变化，拒绝连接（防中间人）
-                None => {
-                    db.insert(key, fp);
-                    Self::save_hosts_db(&db);
-                    Ok(true) // 首次信任
-                }
-            }
-        })();
-        let _ = fs2::FileExt::unlock(&lock_file);
-        result
+        // 判定必须挪到 blocking 池：本回调由 russh 的会话任务在 tokio worker 线程上调用，
+        // 而下面的临界区是线程锁 + 跨进程 flock（**无超时**）+ 同步文件读写。留在原地时，
+        // 多连接并发 + 另一实例持锁就会把 worker 线程占死，整个执行器随之停摆——外部表现
+        // 正是「应用假死、只能重启」。挪走后 worker 不再被阻塞，判定逻辑与结果逐字节不变；
+        // 线程 panic 按失败关闭处理（unwrap_or(false) 即拒绝连接）。
+        Ok(tokio::task::spawn_blocking(move || verify_and_pin(&key, &fp))
+            .await
+            .unwrap_or(false))
     }
+}
+
+/// 校验并（首次）钉住主机指纹，返回是否放行。
+///
+/// **阻塞函数**：内含线程锁、跨进程 flock（无超时）与同步文件 I/O，只允许在
+/// spawn_blocking 线程上调用。任何异常路径一律返回 false（失败关闭）——指纹库损坏时
+/// 尤其不能「清空后重新信任」，那等于放行中间人。
+fn verify_and_pin(key: &str, fp: &str) -> bool {
+    // 线程级锁：防同进程多 SSH 并发（flock 进程级，同进程内不互斥）
+    let _guard = HOSTS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let path = match known_hosts_path() {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    // 跨进程文件锁：防多进程并发连接新主机时互相覆盖已固定指纹
+    let lock_path = path.with_extension("json.lock");
+    let lock_file = match std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(&lock_path)
+    {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    if fs2::FileExt::lock_exclusive(&lock_file).is_err() {
+        return false;
+    }
+    let result = (|| {
+        let mut db = match ClientHandler::load_hosts_db() {
+            Ok(db) => db,
+            // 指纹库损坏：安全起见拒绝连接，而非清空后重新信任（否则等于放行 MITM）
+            Err(()) => return false,
+        };
+        match db.get(key) {
+            Some(known) if known == fp => true,
+            Some(_) => false, // 指纹变化，拒绝连接（防中间人）
+            None => {
+                db.insert(key.to_string(), fp.to_string());
+                ClientHandler::save_hosts_db(&db);
+                true // 首次信任
+            }
+        }
+    })();
+    let _ = fs2::FileExt::unlock(&lock_file);
+    result
 }
 
 fn ensure_auth(result: AuthResult) -> Result<()> {
@@ -323,6 +339,21 @@ async fn establish_inner(params: &ConnParams) -> Result<client::Handle<ClientHan
     Ok(handle)
 }
 
+/// 重连任务存活期间的 RAII 守卫：Drop 时复位 `Connection::reconnecting`。
+///
+/// 为什么必须是 RAII 而非循环末尾一句 store：`reconnecting` 是 `trigger_reconnect` 的
+/// 幂等占位标志（入口 `swap(true)` 后若已是 true 即直接返回）。若任务因 panic 或被取消
+/// 而没走到末尾的 store，该标志永久为 true，此后**所有**重连触发都在入口处直接返回——
+/// 这条连接再也无法重连，pane 永远停在「等待重连」，只能重启应用。
+/// 正常 break、panic、取消三种出口，Drop 都会执行。
+struct ReconnectGuard(Arc<Connection>);
+
+impl Drop for ReconnectGuard {
+    fn drop(&mut self) {
+        self.0.reconnecting.store(false, Ordering::SeqCst);
+    }
+}
+
 impl Connection {
     pub fn new(id: String, params: ConnParams, auto_reconnect: bool) -> Self {
         Self {
@@ -380,6 +411,8 @@ impl Connection {
             return;
         }
         tokio::spawn(async move {
+            // 提前构造守卫：此后任何退出路径（正常 break、panic、任务被取消）都会复位占位标志
+            let _guard = ReconnectGuard(self.clone());
             let mut delay = 1u64;
             loop {
                 if !self.auto_reconnect.load(Ordering::SeqCst) {
@@ -432,7 +465,7 @@ impl Connection {
                     }
                 }
             }
-            self.reconnecting.store(false, Ordering::SeqCst);
+            // 标志复位由 _guard 的 Drop 负责（panic/取消也能覆盖），此处不再重复 store
         });
     }
 }
@@ -519,5 +552,40 @@ mod tests {
         let conn = Connection::new("c".into(), params_with_secrets(), false);
         assert!(!conn.is_reconnecting());
         assert!(!conn.auto_reconnect.load(Ordering::SeqCst));
+    }
+
+    /// 回归锁：`reconnecting` 的复位必须由 Drop 保证，而非依赖函数走到末尾。
+    ///
+    /// 这是「只能重启应用」最隐蔽的一条路径：该标志是 `trigger_reconnect` 的幂等占位，
+    /// 若任务 panic / 被取消而漏复位，此后**所有**触发都在入口 `swap` 掉直接返回，
+    /// 这条连接永久失去自愈能力。用 panic 构造「没走到末尾」的场景来验证 Drop 兜住了。
+    #[test]
+    fn reconnect_flag_is_reset_even_when_task_panics() {
+        let conn = Arc::new(Connection::new("c".into(), params_with_secrets(), true));
+        conn.reconnecting.store(true, Ordering::SeqCst);
+
+        let c = conn.clone();
+        // catch_unwind 捕获 panic，模拟任务异常退出（Drop 仍会执行）
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let _guard = ReconnectGuard(c);
+            panic!("模拟重连任务内部 panic");
+        }));
+        assert!(r.is_err(), "前置不成立：panic 未发生，测不到 Drop 路径");
+        assert!(
+            !conn.is_reconnecting(),
+            "panic 后标志仍为 true：该连接将永久无法重连"
+        );
+    }
+
+    /// 回归锁：正常作用域退出同样复位（RAII 覆盖所有出口，不只 panic 路径）。
+    #[test]
+    fn reconnect_flag_is_reset_on_normal_drop() {
+        let conn = Arc::new(Connection::new("c".into(), params_with_secrets(), true));
+        conn.reconnecting.store(true, Ordering::SeqCst);
+        {
+            let _guard = ReconnectGuard(conn.clone());
+            assert!(conn.is_reconnecting(), "守卫存活期间标志应保持占位");
+        }
+        assert!(!conn.is_reconnecting(), "守卫 drop 后必须复位");
     }
 }

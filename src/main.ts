@@ -634,30 +634,53 @@ async function bootstrap() {
     pane.onHfile = (spec, p) => handleHfile(spec, p);
     // hssh 控制面命令（listconn）：查合并视图并写响应文件
     pane.onHctl = (spec, p) => void handleHctl(spec, p);
-    // pane channel 关闭：shell 正常退出→切回本地/关 pane；连接断开→保留等待重连
-    pane.onClose = (exited) => {
-      if (!exited) return; // 连接断开（exited=false）→ 保留等待重连
-      if (pane.parked) {
-        // hssh park 模式：SSH 退出 → unpark 回到原 shell
-        const oldConn = pane.connId;
-        void pane.unparkFromSsh().then(() => {
-          tab.title = "本地终端";
-          if (tab.layout.panes().length === 1) tab.connId = "local";
-          tabs.setLabel(tab, "本地终端");
-          tab.pendingHssh = null;
-          tabs.gcConnections([oldConn]);
-          tabs.onLayoutChange?.();
-        }).catch(() => {});
-      } else if (!pane.isLocal) {
-        // 远程 shell 正常退出（用户 exit）→ 退回本地终端，不关闭 pane。
-        // 后台 tab 退出也需更新标签栏可见标题；单 pane 由轮询接管为 `目录:进程`
-        pane.switchConnection("local", true).then(() => {
-          syncPaneTitle(tab, pane);
-        }).catch(() => {});
-      } else {
-        // 本地终端退出 → 收起该分屏
-        void tabs.closePane(tab, pane);
+    // pane channel 关闭：shell 正常退出→切回本地/关 pane；channel 被关但连接还在→原地重开；
+    // 连接断开→保留等待重连（由 conn-state 事件驱动）。
+    pane.onClose = (exited, resumable) => {
+      if (exited) {
+        if (pane.parked) {
+          // hssh park 模式：SSH 退出 → unpark 回到原 shell
+          const oldConn = pane.connId;
+          void pane.unparkFromSsh().then(() => {
+            tab.title = "本地终端";
+            if (tab.layout.panes().length === 1) tab.connId = "local";
+            tabs.setLabel(tab, "本地终端");
+            tab.pendingHssh = null;
+            tabs.gcConnections([oldConn]);
+            tabs.onLayoutChange?.();
+          }).catch(() => {});
+        } else if (!pane.isLocal) {
+          // 远程 shell 正常退出（用户 exit）→ 退回本地终端，不关闭 pane。
+          // 后台 tab 退出也需更新标签栏可见标题；单 pane 由轮询接管为 `目录:进程`
+          pane.switchConnection("local", true).then(() => {
+            syncPaneTitle(tab, pane);
+          }).catch(() => {});
+        } else {
+          // 本地终端退出 → 收起该分屏
+          void tabs.closePane(tab, pane);
+        }
+        return;
       }
+      // exited=false 且 resumable=true：连接仍活着，只是这个 channel 被服务器关了
+      // （MaxSessions 清理 / sshd 主动 CHANNEL_CLOSE / ExitStatus 报文丢失）。
+      // 不需要重连，用同一 connId 原地重开 channel 即可 —— 改动前这里直接 return，
+      // 终端从此静默不动、无任何提示，用户唯一出路是关标签页。
+      if (resumable) void resumeChannel(pane);
+    };
+    // park 期间输入通路已失效（SSH 子 pane 不在了，本地 shell 阻塞在 hssh 脚本的 read 上）：
+    // 走与「SSH 退出」完全相同的 unpark 收尾，把控制权交还本地终端。
+    // 不加这一步，键盘输入会被 paneInput 静默丢弃，用户唯一出路是关标签页。
+    pane.onInputDead = () => {
+      if (!pane.parked) return;
+      pane.term.write("\r\n\x1b[33m[SSH 会话已失效，正在回到本地终端…]\x1b[0m\r\n");
+      const oldConn = pane.connId;
+      void pane.unparkFromSsh().then(() => {
+        if (tab.layout.panes().length === 1) tab.connId = "local";
+        tab.pendingHssh = null;
+        tabs.gcConnections([oldConn]);
+        syncPaneTitle(tab, pane);
+        tabs.onLayoutChange?.();
+      }).catch(() => {});
     };
     pane.onTooltip = showFileTooltip;
     // Ctrl+单击文件/目录 → 下载（默认 Downloads / 每次询问，按设置）
@@ -800,6 +823,81 @@ async function bootstrap() {
 
   // ---------- 后端事件路由 ----------
 
+  /**
+   * 重开 channel 的尝试上限（同一轮内）。服务器持续拒开 / 建好即关时（MaxSessions 打满、
+   * 被策略清理），无限重开就是重建风暴。到上限即停在明确的「已降级」提示上，交由用户
+   * 手动处置 —— 宁可如实停下，也不要无休止地折腾。
+   */
+  const RESUME_MAX_ATTEMPTS = 3;
+
+  /**
+   * 判定「同一轮连续失败」的时间窗。相隔超过此值的两次关闭不算连续：一条跑了很久
+   * 才被关掉的通道属偶发，理应重新获得完整的重试额度。
+   *
+   * 为什么不用「open 成功即清零」：`pane.open()` 返回只代表 channel 建起来了，不代表
+   * 它健康。服务器「建好即关」时那样清零等于把风暴闸门彻底打开 —— 这正是必须防的场景。
+   */
+  const RESUME_WINDOW_MS = 60_000;
+
+  /** pane.id → { 本轮已尝试次数, 上次尝试时刻 } */
+  const resumeAttempts = new Map<string, { n: number; at: number }>();
+
+  /**
+   * 连接仍活着、仅 channel 被关时的原地恢复：用同一 connId 重开 shell。
+   * 与 reopenPane 的区别是**不重连**、只重建 channel，故不经过连接状态机。
+   */
+  const resumeChannel = async (pane: Pane) => {
+    const now = Date.now();
+    const prev = resumeAttempts.get(pane.id);
+    const n = prev && now - prev.at < RESUME_WINDOW_MS ? prev.n + 1 : 1;
+    resumeAttempts.set(pane.id, { n, at: now });
+    // 有界清理：pane 关闭后其条目不会被单独回收，长期会话里随 pane 数缓慢增长。
+    // 这是极冷路径（仅在 channel 异常关闭时进入），顺手按时间窗淘汰即可。
+    if (resumeAttempts.size > 128) {
+      for (const [id, v] of resumeAttempts) {
+        if (now - v.at >= RESUME_WINDOW_MS) resumeAttempts.delete(id);
+      }
+    }
+    if (n > RESUME_MAX_ATTEMPTS) return; // 已在上一轮上限处提示过，不再重复写屏
+    pane.term.write("\r\n\x1b[33m[连接仍在，正在重开会话…]\x1b[0m\r\n");
+    const delays = [0, 500, 1000];
+    for (let i = 0; i < delays.length; i++) {
+      if (pane.disposed) return;
+      if (delays[i] > 0) await new Promise((r) => setTimeout(r, delays[i]));
+      if (pane.disposed) return;
+      try {
+        if (pane.parked) {
+          if (pane.activeBackendId) {
+            await pane.reopenParkedSsh();
+          } else {
+            // parked 但没有子 pane = 状态已不一致（本地 PTY 仍阻塞在 hssh 脚本的 read 上）。
+            // 此时绝不能走 pane.open()：那会在本地 pane id 上开 SSH channel，把本地 PTY 顶掉。
+            // 直接 unpark，把控制权还给本地终端。tab 现场查（pane 可能已被换到别的 tab）。
+            await pane.unparkFromSsh();
+            const owner = tabs.findPane(pane.id)?.tab;
+            if (owner) {
+              if (owner.layout.panes().length === 1) owner.connId = "local";
+              owner.pendingHssh = null;
+              syncPaneTitle(owner, pane);
+            }
+            tabs.onLayoutChange?.();
+          }
+        } else {
+          await pane.open();
+        }
+        return;
+      } catch (e) {
+        if (i === delays.length - 1) {
+          const why = n >= RESUME_MAX_ATTEMPTS
+            ? `连续 ${RESUME_MAX_ATTEMPTS} 次重开会话失败（${e}）。请右键「切换连接」重新建立，或关闭此分屏。`
+            : `重开会话失败（${e}），稍后重试…`;
+          pane.term.write(`\r\n\x1b[31m[${why}]\x1b[0m\r\n`);
+          if (n >= RESUME_MAX_ATTEMPTS) toast(why, true);
+        }
+      }
+    }
+  };
+
   /** 重连成功后重开 pane：park 模式重开 SSH 子任务（保留本地 PTY），非 park 走 pane.open() + 退避重试 */
   const reopenPane = async (pane: Pane) => {
     const delays = [0, 500, 1000, 2000];
@@ -808,8 +906,22 @@ async function bootstrap() {
       if (delays[i] > 0) await new Promise(r => setTimeout(r, delays[i]));
       if (pane.disposed) return;
       try {
-        if (pane.parked && pane.activeBackendId) {
-          await pane.reopenParkedSsh();
+        if (pane.parked) {
+          // parked 但没有子 pane = 状态已不一致（本地 PTY 仍阻塞在 hssh 脚本的 read 上）。
+          // 绝不能落到 pane.open()：那会在本地 pane id 上开 SSH channel 把本地 PTY 顶掉。
+          // 与 resumeChannel 同口径：直接 unpark，把控制权还给本地终端。
+          if (pane.activeBackendId) {
+            await pane.reopenParkedSsh();
+          } else {
+            await pane.unparkFromSsh();
+            const owner = tabs.findPane(pane.id)?.tab;
+            if (owner) {
+              if (owner.layout.panes().length === 1) owner.connId = "local";
+              owner.pendingHssh = null;
+              syncPaneTitle(owner, pane);
+            }
+            tabs.onLayoutChange?.();
+          }
         } else {
           await pane.open();
         }

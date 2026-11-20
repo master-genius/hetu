@@ -302,11 +302,23 @@ hctl_call() {
   fi
   # 首行是状态位（退出码），正文从第 2 行起：判成败看位置不看内容，dump 的屏幕文本
   # 无论首行像什么都不会被误判成错误。后端以「临时文件 + rename」原子落盘，非空即完整。
+  #
+  # 轮询分两段（总时长仍为 10s）：`sleep` 在 POSIX sh 里是外部命令，每次循环都要
+  # fork+exec 一个进程。原先固定 200 次 × 50ms 意味着**一次调用 fork 200 个进程**——
+  # 网络/前端一旦不响应就要跑满，正是「断网时不断创建子进程、CPU 打满」的来源。
+  # 前 1s 保持 50ms 密集轮询（宿主正常应答都在毫秒级，常见路径的延迟与体验逐字不变），
+  # 其后改为 500ms。fork 数由 200 降到 40（实测总耗时 10.05s，与原先同为 10s 量级），
+  # 超时口径与提示文案完全不变。
   i=0
   while [ ! -s "$out" ]; do
     i=$((i + 1))
-    [ "$i" -gt 200 ] && { rm -f "$out"; echo "hssh: 等待宿主应答超时（10s）——前端不含 $1（需重启应用），或 shell 的 TMPDIR 与宿主不一致导致响应文件被拒绝" >&2; exit 1; }
+    [ "$i" -gt 20 ] && break
     sleep 0.05
+  done
+  while [ ! -s "$out" ]; do
+    i=$((i + 1))
+    [ "$i" -gt 39 ] && { rm -f "$out"; echo "hssh: 等待宿主应答超时（10s）——前端不含 $1（需重启应用），或 shell 的 TMPDIR 与宿主不一致导致响应文件被拒绝" >&2; exit 1; }
+    sleep 0.5
   done
   code=$(head -n 1 "$out")
   case "$code" in ''|*[!0-9]*) code=1;; esac
@@ -758,7 +770,12 @@ pub fn open(
             }
         }
         let exited = !deliberate_r.load(Ordering::SeqCst);
-        let _ = on_event_r.send(PaneEvent::Closed { exited });
+        // resumable 恒为 false：本地 PTY 没有「在同一条连接上重开 channel」这层语义，
+        // 只能是进程真的结束了（exited）或被主动关闭。字段存在只为与 SSH pane 共用事件类型。
+        let _ = on_event_r.send(PaneEvent::Closed {
+            exited,
+            resumable: false,
+        });
     });
 
     // 控制线程：持有 master 与 child，串行处理指令（blocking_recv 不能在 async 上下文调用）

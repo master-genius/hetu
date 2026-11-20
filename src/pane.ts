@@ -211,8 +211,14 @@ export class Pane {
   onHfile: ((spec: HfileSpec, pane: Pane) => void) | null = null;
   /** 内建 hssh 控制面命令（listconn）：仅本地终端触发，宿主查合并视图并写响应文件 */
   onHctl: ((spec: HctlSpec, pane: Pane) => void) | null = null;
-  /** pane channel 关闭回调（shell 退出或连接断开），宿主据此切连接/关 pane */
-  onClose: ((exited: boolean) => void) | null = null;
+  /** pane channel 关闭回调：exited=shell 自行退出；resumable=连接仍在、只需重开 channel */
+  onClose: ((exited: boolean, resumable: boolean) => void) | null = null;
+  /** park 期间输入通路已失效（SSH 子 pane 已不存在）：本地 shell 正阻塞在 hssh 脚本的
+   *  read 上，键盘输入无处可去。宿主据此走与「SSH 退出」完全相同的 unpark 收尾，
+   *  把控制权还给本地终端 —— 否则用户只能关标签页。 */
+  onInputDead: (() => void) | null = null;
+  /** 输入失效闩锁：只在「失效→恢复」的边沿触发一次回调，避免每个按键都触发收尾。 */
+  private inputDead = false;
   /** hssh 来源校验令牌：随本地 shell 注入 $HSSH_TOKEN，OSC 载荷须回带一致值才受理，
    *  杜绝终端里被渲染的不可信内容伪造 hssh 序列诱导建连。每 pane 一枚随机值。 */
   private readonly hsshToken = crypto.randomUUID();
@@ -400,7 +406,7 @@ export class Pane {
 
     // 输入 → 后端 PTY
     this.term.onData((data) => {
-      void api.paneInput(this.backendId, b64encode(data)).catch(() => {});
+      void api.paneInput(this.backendId, b64encode(data)).catch((err) => this.markInputDead(err));
     });
 
     // OSC 7：shell 上报 cwd（file://host/path）
@@ -778,6 +784,7 @@ export class Pane {
     // 每次（重）打开都重置 ready 状态：新 shell 需重新等待首次输出
     this.firstOutput = false;
     this.readyPromise = new Promise<void>((r) => { this._readyResolve = r; });
+    this.resetInputDead(); // 新 channel = 输入通路已重建
 
     // per-pane Channel：点对点推送 PaneEvent，取代全局 app.emit 广播。
     // Channel 在 invoke 前创建并绑定 onmessage，确保首个事件不丢失。
@@ -871,6 +878,7 @@ export class Pane {
     this.statCache.clear();
     this.firstOutput = false;
     this.readyPromise = new Promise<void>((r) => { this._readyResolve = r; });
+    this.resetInputDead(); // 新 SSH 子 channel = 输入通路已重建
     const ch = new Channel<PaneEvent>();
     ch.onmessage = (e) => this.handlePaneEvent(e);
     this.term.reset();
@@ -894,9 +902,15 @@ export class Pane {
    * 发换行符解锁 hssh 脚本的 read → 脚本 exit → bash 输出 prompt。
    */
   async unparkFromSsh(): Promise<void> {
-    if (!this.activeBackendId) return;
+    // 守卫不能在「parked=true 但 activeBackendId 为空」时提前返回：那是不一致态
+    // （子 pane 已被后端移除），偏偏最需要收尾——本地 shell 还阻塞在 hssh 脚本的 read 上。
+    // 此时若 no-op，用户键盘永久无效，只能关标签页。下面所有 await 均已 catch，
+    // 空 id 只是多发一次无害的 paneClose，因此对不一致态也照常走完收尾。
+    if (!this.activeBackendId && !this.parked) return;
     this.term.options.cursorBlink = true; // SSH 退出回本地：恢复光标闪烁
-    await api.paneClose(this.activeBackendId).catch(() => {});
+    if (this.activeBackendId) {
+      await api.paneClose(this.activeBackendId).catch(() => {});
+    }
     this.activeBackendId = null;
     this.parked = false;
     this.connId = "local";
@@ -904,6 +918,7 @@ export class Pane {
     this.shellPid = null;
     this.statCache.clear();
     this.term.reset();
+    this.resetInputDead(); // 回本地终端：闩锁必须清掉，否则下次 park 后真实的失效不再触发收尾
     // 解锁 hssh 脚本的 read，bash 回到 prompt
     void api.paneInput(this.id, b64encode("\n")).catch(() => {});
   }
@@ -915,6 +930,7 @@ export class Pane {
     requestAnimationFrame(() => this.refit());
     this.firstOutput = false;
     this.readyPromise = new Promise<void>((r) => { this._readyResolve = r; });
+    this.resetInputDead(); // 重连后重开子 channel = 输入通路已重建
     this.shellPid = null;
     this.cwd = null;
     this.statCache.clear();
@@ -922,6 +938,29 @@ export class Pane {
     ch.onmessage = (e) => this.handlePaneEvent(e);
     await api.paneOpen(this.connId, this.activeBackendId, this.term.cols, this.term.rows, ch);
     this.injectCwdTracker();
+  }
+
+  /** 输入链路失效闩锁：边沿触发一次 onInputDead。
+   *
+   *  **只在「后端明确回答 pane 不存在」时才判死**（paneInput 的两种错误：
+   *  "pane 不存在" / "pane 已关闭"）。其它失败（IPC 序列化、webview 短暂抖动、
+   *  invoke 被拒）是瞬态的，据此 unpark 会把一条健康的 SSH 会话误踢回本地终端——
+   *  那样比原本的静默更糟。宁可漏判（用户仍可手动切换连接），不可误判。
+   *
+   *  非 park 时 backendId 就是本地 PTY 自己，paneInput 失败通常意味着 pane 正在关闭，
+   *  交给既有关闭流程即可，这里不做额外收尾。 */
+  private markInputDead(err: unknown) {
+    if (this.inputDead || this.disposed) return;
+    const msg = String(err);
+    const gone = msg.includes("pane 不存在") || msg.includes("pane 已关闭");
+    if (!gone) return; // 瞬态失败：不置闩锁，交给下一次按键重试
+    this.inputDead = true;
+    if (this.parked) this.onInputDead?.();
+  }
+
+  /** 重新打开后复位闩锁（新 channel 意味着输入通路已重建） */
+  private resetInputDead() {
+    this.inputDead = false;
   }
 
   /** cwd 是否由 shell（OSC7）真实上报，而非 home 兜底猜测 */
@@ -1014,7 +1053,7 @@ export class Pane {
         // 连接断开（exited=false）等待重连：暂停光标闪烁，renderer 停止每帧
         // rAF 调度，消除断开 pane 的稳态渲染负载（重连成功/退出后恢复）
         if (!e.exited) this.term.options.cursorBlink = false;
-        this.onClose?.(e.exited);
+        this.onClose?.(e.exited, e.resumable);
         break;
     }
   }

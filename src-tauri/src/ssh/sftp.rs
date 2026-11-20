@@ -12,12 +12,17 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::watch;
+use tokio::time::timeout;
 
 use crate::error::{Error, Result};
 use crate::ssh::conn::Connection;
 
 /// SFTP 单次操作超时：防止连接半断开（TCP 未检测到）时操作永久挂起
 const SFTP_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// exec / SFTP 建会话的额外时限：半开连接下服务器既不确认通道也不发 EOF，
+/// 这类「等服务器开口」的步骤必须有独立上限，不能沿用业务操作那套超时语义。
+const EXEC_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// SFTP 操作包装宏：带超时 + 失败重试一次。
 /// 首次失败（错误或超时）→ invalidate session → 重建 → 重试一次。
@@ -142,6 +147,11 @@ impl TransferCtl {
 }
 
 /// 获取（或懒创建）该连接的 SFTP 会话
+///
+/// **建会话必须整体限时**：`sftp_with_retry!` 的 timeout 只包住了 body，建会话本身若
+/// 卡在半开连接上（服务器不回 channel 确认 / 不回 subsystem 应答），这里会永久挂住，
+/// 而且挂起时正持有 `conn.sftp` 互斥锁 —— 该连接上**所有** SFTP 操作（面板、下载上传、
+/// 悬停 stat、cwd 解析）全部排队等死。这是「文件面板永久转圈、只能重启」的根因。
 pub async fn session(conn: &Arc<Connection>) -> Result<Arc<SftpSession>> {
     let mut guard = conn.sftp.lock().await;
     if let Some(s) = guard.as_ref() {
@@ -152,15 +162,27 @@ pub async fn session(conn: &Arc<Connection>) -> Result<Arc<SftpSession>> {
             return Ok(s.clone());
         }
     }
+    let sftp = match timeout(SFTP_TIMEOUT, open_session(conn)).await {
+        Ok(r) => r?,
+        Err(_) => {
+            return Err(Error::msg(
+                "建立 SFTP 会话超时（超过 10 秒）：连接可能已半开，请重建连接",
+            ))
+        }
+    };
+    *guard = Some(sftp.clone());
+    Ok(sftp)
+}
+
+/// 实际建会话的三步（由 `session` 统一施加超时）。
+async fn open_session(conn: &Arc<Connection>) -> Result<Arc<SftpSession>> {
     let channel = {
         let hguard = conn.handle.lock().await;
         let handle = hguard.as_ref().ok_or_else(|| Error::msg("连接未建立"))?;
         handle.channel_open_session().await?
     };
     channel.request_subsystem(true, "sftp").await?;
-    let sftp = Arc::new(SftpSession::new(channel.into_stream()).await?);
-    *guard = Some(sftp.clone());
-    Ok(sftp)
+    Ok(Arc::new(SftpSession::new(channel.into_stream()).await?))
 }
 
 /// SFTP 调用失败时使缓存会话失效，下次重建
@@ -1125,6 +1147,11 @@ fn sh_quote(s: &str) -> String {
 /// 在连接上执行一条命令，返回 (退出码, stderr)。退出码 None 表示服务器未上报。
 /// 抢占取消由调用方用 `ctl.preempt` 包裹：future 被 drop 时 channel 随之关闭，
 /// 服务端（OpenSSH）会终止会话子进程，属 best-effort 中止。
+///
+/// **刻意不加时限**：本函数的唯一调用方是同机 `cp -a` 快路径，复制大目录合法耗时
+/// 远超任何固定阈值，加硬超时会把「改前能成功」的操作变成失败；而超时后远端 cp
+/// 仍在跑，还会与回退的流式复制抢同一份目标文件。滞留靠既有的 keepalive（默认
+/// 15s×4）把死连接判掉，以及调用方的 `preempt` 取消来兜。
 async fn exec_status(conn: &Arc<Connection>, cmd: &str) -> Result<(Option<u32>, String)> {
     let mut channel = {
         let guard = conn.handle.lock().await;
@@ -1146,29 +1173,41 @@ async fn exec_status(conn: &Arc<Connection>, cmd: &str) -> Result<(Option<u32>, 
 
 /// 在连接上执行一条命令并捕获 stdout/stderr，返回 (stdout, stderr, 退出码)。
 /// 作为 SFTP 子系统不可用时的兜底通道（shell 正常 ⇒ exec 可用）。
+///
+/// **必须限时**：本函数只用于 `pwd` / `readlink /proc/<pid>/cwd` / `mkdir -p` / `rm -f`
+/// 这类毫秒级元数据命令，10 秒仍无结果说明连接已半开。它的调用点（home、proc_cwd、
+/// 上传前的目录创建与失败清理）都在关键路径上，一挂就拖住文件面板与上传目录解析。
 async fn exec_capture(conn: &Arc<Connection>, cmd: &str) -> Result<(String, String, Option<u32>)> {
-    let mut channel = {
-        let guard = conn.handle.lock().await;
-        let handle = guard.as_ref().ok_or_else(|| Error::msg("连接未建立"))?;
-        handle.channel_open_session().await?
-    };
-    channel.exec(true, cmd).await?;
-    let mut code = None;
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
-    while let Some(msg) = channel.wait().await {
-        match msg {
-            ChannelMsg::Data { data } => stdout.extend_from_slice(&data),
-            ChannelMsg::ExtendedData { data, .. } => stderr.extend_from_slice(&data),
-            ChannelMsg::ExitStatus { exit_status } => code = Some(exit_status),
-            _ => {}
+    let fut = async {
+        let mut channel = {
+            let guard = conn.handle.lock().await;
+            let handle = guard.as_ref().ok_or_else(|| Error::msg("连接未建立"))?;
+            handle.channel_open_session().await?
+        };
+        channel.exec(true, cmd).await?;
+        let mut code = None;
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        while let Some(msg) = channel.wait().await {
+            match msg {
+                ChannelMsg::Data { data } => stdout.extend_from_slice(&data),
+                ChannelMsg::ExtendedData { data, .. } => stderr.extend_from_slice(&data),
+                ChannelMsg::ExitStatus { exit_status } => code = Some(exit_status),
+                _ => {}
+            }
         }
+        Ok::<_, Error>((
+            String::from_utf8_lossy(&stdout).into_owned(),
+            String::from_utf8_lossy(&stderr).into_owned(),
+            code,
+        ))
+    };
+    match timeout(EXEC_TIMEOUT, fut).await {
+        Ok(r) => r,
+        Err(_) => Err(Error::msg(
+            "远端元数据命令超时（超过 10 秒）：连接可能已半开，请重建连接",
+        )),
     }
-    Ok((
-        String::from_utf8_lossy(&stdout).into_owned(),
-        String::from_utf8_lossy(&stderr).into_owned(),
-        code,
-    ))
 }
 
 /// 同连接快路径：服务器内 `cp -a`，零下行/上行带宽。

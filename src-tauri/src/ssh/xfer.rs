@@ -341,6 +341,11 @@ async fn preserve_to_remote(_sftp: &SftpSession, _local: &str, _remote: &str) {}
 // ---------- exec 通道（仅 --cp 的同机快路径用） ----------
 
 /// 在连接上执行命令，返回（退出码，stderr）。退出码 None 表示服务器未上报。
+///
+/// **刻意不加时限**：唯一调用方是同机 `cp -a` 快路径（下面 `--cp` 的 same_conn 分支），
+/// 复制大目录合法耗时远超任何固定阈值。加硬超时会把「改前能成功」的操作变成失败，且
+/// 超时后远端 cp 仍在跑，会与回退的流式复制抢同一份目标文件。滞留靠 keepalive 判死
+/// 与用户 Ctrl-C 的取消传播来兜——后者本就覆盖了「网络停滞」这个典型场景。
 async fn exec_status(conn: &Arc<Connection>, cmd: &str) -> Result<(Option<u32>, String)> {
     let mut channel = {
         let guard = conn.handle.lock().await;

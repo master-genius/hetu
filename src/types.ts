@@ -158,7 +158,8 @@ export interface Preview {
 export type PaneEvent =
   | { type: "output"; data: string }
   | { type: "exit"; status: number }
-  | { type: "closed"; exited: boolean };
+  /** resumable=true：连接仍活着，仅该 channel 被关，用同一 connId 重开即可恢复 */
+  | { type: "closed"; exited: boolean; resumable: boolean };
 
 export interface ConnStateEvent {
   connId: string;
