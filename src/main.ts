@@ -736,14 +736,23 @@ async function bootstrap() {
           const tid = crypto.randomUUID();
           beginTransfer(tid, name, "download", { remote: path, local });
           // 下载→打开是一个动作，重试也重做整个动作（只重下不重开会把用户留在「点了没反应」里）
+          // connAtStart：发起时的连接。传输期间 pane 可能被就地切换连接，finally 里的
+          // p.connId 已是另一条连接，据此 gc 会漏掉真正该回收的那条。
+          const connAtStart = p.connId;
           const attempt = async () => {
             try {
-              await api.sftpDownload(p.connId, path, local, tid);
+              await api.sftpDownload(connAtStart, path, local, tid);
               completeTransfer(tid);
               await api.openPath(local);
               toast(`已打开 ${name}`);
             } catch (err) {
               failTransfer(tid, String(err));
+            } finally {
+              // 清掉可能残留的 connMeta：连接仍被任何 pane 引用时 gcConnections 内部
+              // 是 no-op，只有「下载期间该 pane 已被切走/关闭」才会真正回收。
+              // 这一段是单次动作（不批量），可以就地回收；批量下载的回收在 downloadBatch
+              // 循环末尾，不能放在被它调用的 downloadFile 里。
+              tabs.gcConnections([connAtStart]);
             }
           };
           armRetry(tid, attempt);
@@ -828,8 +837,11 @@ async function bootstrap() {
    * 重开 channel 的尝试上限（同一轮内）。服务器持续拒开 / 建好即关时（MaxSessions 打满、
    * 被策略清理），无限重开就是重建风暴。到上限即停在明确的「已降级」提示上，交由用户
    * 手动处置 —— 宁可如实停下，也不要无休止地折腾。
+   *
+   * 定为 5：一轮内最多 5 次、每次内部还有 0/500/1000ms 三级退避，正常抖动（sshd 重启、
+   * MaxSessions 短暂占满）足够自愈；再往上加只会延长「明知失败还在刷屏」的观感。
    */
-  const RESUME_MAX_ATTEMPTS = 3;
+  const RESUME_MAX_ATTEMPTS = 5;
 
   /**
    * 判定「同一轮连续失败」的时间窗。相隔超过此值的两次关闭不算连续：一条跑了很久
@@ -937,28 +949,61 @@ async function bootstrap() {
   };
 
   void events.onConnState((e) => {
-    // 按 pane 自身 connId 定位受影响的分屏（而非 tab.connId）：多 pane 标签页里被就地
-    // 切换连接的 pane 才能正确收到自己连接的重连事件，且不会误重开同标签页其它连接的 pane。
+    // 两个作用域各自独立，缺一即漏：
+    // · affected   —— 仍挂在该连接上的 pane，决定「推进态」提示该不该点亮的对象；
+    // · bannerTabs —— 提示条归属该连接的 tab，决定「终态」该清掉谁。
+    // affected 按 pane 自身 connId 定位（而非 tab.connId）：多 pane 标签页里被就地切换
+    // 连接的 pane 才能正确收到自己连接的重连事件，且不会误重开同标签页其它连接的 pane。
+    // 只按 pane 定位会让 banner 成为无主孤儿：pane 在断连后被 unpark/切连接/新建连接
+    // 挪走后 panesByConn 恒空，此后该连接的所有事件（含 connected）整条被丢弃。
     const affected = tabs.panesByConn(e.connId);
-    if (affected.length === 0) return;
+    const bannerTabs = tabs.bannerTabsOfConn(e.connId);
+    if (affected.length === 0 && bannerTabs.length === 0) return;
     const affectedTabs = new Set(affected.map((a) => a.tab));
     switch (e.state) {
+      // 推进态：只给「确实还有 pane 挂在这条连接」的 tab 写提示。若也写 bannerTabs，
+      // pane 已迁走的旧连接每轮退避都会把提示条重新点亮 —— 幽灵提示。
       case "reconnecting":
-        for (const tab of affectedTabs) tabs.setBanner(tab, "连接已断开，正在重连…");
-        break;
-      case "waiting":
         for (const tab of affectedTabs)
-          tabs.setBanner(tab, `重连失败（${e.error ?? "未知错误"}），${e.retryIn}s 后重试…`);
+          tabs.setBanner(tab, "连接已断开，正在重连…", e.connId);
         break;
+      case "waiting": {
+        // 后端只在「还会再试」时发 waiting（达到上限时直接发 closed，不再经过这里），
+        // 所以 retryIn 恒为真实退避秒数，不需要为 0 做特判。
+        const err = e.error ?? "未知错误";
+        const text = `重连失败（${err}），${e.retryIn}s 后重试…`;
+        for (const tab of affectedTabs) tabs.setBanner(tab, text, e.connId);
+        break;
+      }
+      // 终态：清除按 banner 归属，不看 pane —— 本次修复的核心。
       case "connected":
-        for (const tab of affectedTabs) tabs.setBanner(tab, null);
+        tabs.clearBannerOfConn(e.connId);
         for (const { pane } of affected) {
           pane.term.write("\r\n\x1b[32m[连接已恢复]\x1b[0m\r\n");
           void reopenPane(pane);
         }
         break;
       case "closed":
-        for (const tab of affectedTabs) tabs.setBanner(tab, "连接已关闭（自动重连已禁用）");
+        // 分两种情形，判据是「还有没有 pane 挂在这条连接」：
+        // · 有 pane：给终态提示，文案按 retryExhausted 区分——次数用尽时
+        //   auto_reconnect 仍为 true，说「自动重连已禁用」是假话；
+        // · 无 pane（只剩本连接的孤儿 banner）：pane 已被 unpark/切连接挪走，用户此刻
+        //   用的是别的连接，再点亮提示等于为弃用的连接推新提示，且这条文案要亮到
+        //   后端真正拆除为止。只清不写。
+        if (affectedTabs.size > 0) {
+          const why = e.retryExhausted
+            ? `重连失败已达上限（${e.attempts ?? e.maxAttempts ?? 100} 次），请手动重连`
+            : "连接已关闭（自动重连已禁用）";
+          for (const tab of affectedTabs) tabs.setBanner(tab, why, e.connId);
+        } else {
+          tabs.clearBannerOfConn(e.connId);
+          // 无 pane 引用 = 重连循环已停（次数用尽或被放弃）。此刻补一次 gc 让它真正
+          // 拆除：否则会留下一条「不再重连、也没人断开」的死连接，connMeta 残留，
+          // findConnByName 还会把它当可用连接复用。
+          // 后端状态机保证这个请求一定被兑现：无阻碍则立即拆，有活跃传输则记账进
+          // Draining、等该批传输结束时自动拆（不需要前端重试）。
+          tabs.gcConnections([e.connId]);
+        }
         break;
     }
   });
@@ -1060,6 +1105,8 @@ async function bootstrap() {
       updateTransferEndpoints(e.tid, { remote: `${dir.replace(/\/+$/, "")}/${e.name}`, local: e.path });
     }
 
+    // 连接在整批开始前捕获：循环中 target.connId 可能被就地切换，末尾再读会漏掉该回收的那条
+    const connAtStart = target.connId;
     for (const e of entries) {
       const { path: p, name, tid } = e;
       if (confirmOverwrite && bulk !== "overwrite") {
@@ -1082,7 +1129,7 @@ async function bootstrap() {
       // dir 作为行名悬停提示，让用户知道传到了哪里
       const attempt = async () => {
         try {
-          await api.sftpUpload(target.connId, p, dir, tid);
+          await api.sftpUpload(connAtStart, p, dir, tid);
           completeTransfer(tid);
         } catch (err) {
           failTransfer(tid, String(err));
@@ -1093,6 +1140,10 @@ async function bootstrap() {
       armRetry(tid, attempt);
       await attempt();
     }
+    // 整批结束才做连接回收：本函数逐文件串行、每文件独立 tid，若在 attempt 内回收，
+    // 第一个文件传完就会因「无活跃传输」把连接拆掉，后续文件全部失败。
+    // 连接仍被 pane 引用时 gcConnections 内部是 no-op，重复调用安全。
+    tabs.gcConnections([connAtStart]);
   };
 
   const uploadViaDialog = async () => {
@@ -1306,9 +1357,13 @@ async function bootstrap() {
         remote: srcPath,
         note: `远端 → 远端：${dir.replace(/\/+$/, "")}/${name}`,
       });
+      // connAtStart：发起时的源/目标连接（传输期间 pane 可能被就地切换连接）。
+      // 两端都可能有挂起的断开请求 —— 远程复制在两端各占用一条连接。
+      const srcConn = src.connId;
+      const dstConn = target.connId;
       const attempt = async () => {
         try {
-          const dest = await api.sftpCopyRemote(src.connId, srcPath, target.connId, dir, tid);
+          const dest = await api.sftpCopyRemote(srcConn, srcPath, dstConn, dir, tid);
           completeTransfer(tid);
           ok++;
           if (!quiet) toast(`已复制到 ${dest}`);
@@ -1319,6 +1374,9 @@ async function bootstrap() {
       armRetry(tid, attempt);
       await attempt();
     }
+    // 整批结束才做连接回收：本循环逐项串行、每项独立 tid，在 attempt 内回收会在第一项
+    // 结束后就把连接拆掉，后续项全部失败。两端都可能有挂起的断开请求。
+    tabs.gcConnections([src.connId, target.connId]);
     if (quiet) {
       const fail = srcPaths.length - ok;
       if (fail > 0) toast(`批量复制：成功 ${ok} 项，失败 ${fail} 项`);
@@ -1423,9 +1481,13 @@ async function bootstrap() {
       beginTransfer(tid, name, "download", { remote: remotePath, local: dest });
       // 提成闭包：首次传输与面板上的「重试」共用同一份逻辑（含落地路径与提示），
       // 重试复用同一 tid——后端在命令 return 前就 unregister，同 id 重注册不会被陈旧摘除误删。
+      // 注意：**不在此处做连接回收**。downloadBatch 逐项串行调用本函数、每项独立 tid，
+      // 在此回收会在第一项结束后就判定「无活跃传输」而拆掉连接，后续项全部失败。
+      // 回收统一由 downloadBatch 循环结束时做。
+      const connAtStart = pane.connId;
       const attempt = async (): Promise<boolean> => {
         try {
-          await api.sftpDownload(pane.connId, remotePath, local, tid);
+          await api.sftpDownload(connAtStart, remotePath, local, tid);
           completeTransfer(tid);
           if (!quiet) toast(`已下载到 ${dest}`);
           return true;
@@ -1462,9 +1524,14 @@ async function bootstrap() {
       }
     }
     let ok = 0;
+    // 连接在整批开始前捕获：循环中 pane.connId 可能被就地切换，末尾再读会漏掉该回收的那条
+    const connAtStart = pane.connId;
     for (const spec of specs) {
       if (await downloadFile(pane, spec, dir, true)) ok++;
     }
+    // 整批结束才做连接回收：单项内部做会把「本项传完」误当「全部传完」而拆掉还在用的连接。
+    // 连接仍被 pane 引用时 gcConnections 内部是 no-op，重复调用安全。
+    tabs.gcConnections([connAtStart]);
     const fail = specs.length - ok;
     if (fail > 0) toast(`批量下载：成功 ${ok} 项，失败 ${fail} 项`);
     else if (specs.length > 1) toast(`已下载 ${ok} 项到 ${dir}`);

@@ -164,6 +164,10 @@ pub async fn open(
                     let alive = conn.is_alive().await;
                     let outcome = close_outcome(exited, deliberate_r.load(Ordering::SeqCst), alive);
                     if outcome == CloseOutcome::Reconnect {
+                        // 只启动退避任务。状态推进到 Reconnecting 由任务自己在入口完成
+                        // （`ReconnectStarted`）—— 不能在这里先推进状态：那会写入
+                        // `reconnecting` 原子位，使 trigger_reconnect 的幂等检查立即返回，
+                        // 任务根本不启动，连接就此永久失去自愈能力。
                         conn.clone().trigger_reconnect(app.clone());
                     }
                     let _ = on_event.send(PaneEvent::Closed {
@@ -200,10 +204,10 @@ pub async fn open(
                         break;
                     }
                     None => {
-                        // 发送端被 drop 而**没有**发 Close：`ssh_disconnect` 用
+                        // 发送端被 drop 而**没有**发 Close：`teardown_conn` 用
                         // `panes.retain(...)` 直接移除 PaneCtl，走的正是这条路径。
-                        // 那是「连接被断开、等待重连」，与主动关闭语义相反 ——
-                        // 绝不能置 deliberate，否则前端会把待重连的 pane 当成已收尾。
+                        // 那是「连接被放弃/拆除」，与主动关闭语义相反 ——
+                        // 绝不能置 deliberate，否则前端会把本该结束的 pane 当成已收尾。
                         // 这里只做通道清理，不需要额外标记。
                         let _ = write_half.eof().await;
                         let _ = write_half.close().await;

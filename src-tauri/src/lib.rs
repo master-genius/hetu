@@ -256,20 +256,37 @@ async fn ssh_connect(state: State<'_>, params: ConnParams) -> Result<String> {
     Ok(conn_id)
 }
 
-#[tauri::command]
-async fn ssh_disconnect(state: State<'_>, conn_id: String) -> Result<()> {
-    // 有活跃传输时拒绝断开，避免中断下载/上传
-    let has_transfers = state
-        .transfers
-        .lock()
-        .await
-        .values()
-        .any(|t| t.conn_id() == conn_id);
-    if has_transfers {
-        return Err(Error::msg("该连接有进行中的传输，请等待完成或取消后再断开"));
-    }
-    if let Some(conn) = state.conns.lock().await.remove(&conn_id) {
-        // 主动断开：关闭自动重连，优雅发送 disconnect
+/// 按**权威表**统计某连接当前的阻碍量。
+///
+/// 阻碍量是状态机判断「能否拆除」的唯一依据（`Obstacles`）。由本函数从
+/// `AppState.transfers` / `AppState.panes` 现算，而不是让 `Connection` 自己维护计数 ——
+/// 避免「两处计数不同步」这类经典缺陷（旧实现在前端 `connInUse` 与后端 pane 表之间
+/// 各判一次，正是混乱来源）。
+///
+/// `panes` 取 `state.panes`（后端权威），**不取**前端 `connInUse`：前端 gc 只负责
+/// 发 `AbandonRequested`，由后端按真实引用决定拆不拆。
+async fn obstacles_of(state: &AppState, conn_id: &str) -> ssh::conn::Obstacles {
+    let transfers = {
+        let tr = state.transfers.lock().await;
+        tr.values().filter(|t| t.conn_id() == conn_id).count()
+    };
+    let panes = {
+        let p = state.panes.lock().await;
+        p.values().filter(|c| c.conn_id == conn_id).count()
+    };
+    ssh::conn::Obstacles { transfers, panes }
+}
+
+/// 执行状态机给出的拆除动作：出表、断 handle、清 pane。
+///
+/// 幂等：连接已不在表内时什么也不做（重复结算安全）。
+/// 调用方不得持有 conns / transfers / panes 任一锁。
+async fn teardown_conn(state: &AppState, conn_id: &str) {
+    let conn = {
+        let mut conns = state.conns.lock().await;
+        conns.remove(conn_id)
+    };
+    if let Some(conn) = conn {
         conn.auto_reconnect.store(false, Ordering::SeqCst);
         if let Some(handle) = conn.handle.lock().await.take() {
             let _ = handle
@@ -277,13 +294,104 @@ async fn ssh_disconnect(state: State<'_>, conn_id: String) -> Result<()> {
                 .await;
         }
     }
-    // 清理该连接下所有 pane
+    // 清掉该连接下所有 pane（此时已无引用，留着只会变僵尸）
     state
         .panes
         .lock()
         .await
         .retain(|_, ctl| ctl.conn_id != conn_id);
-    Ok(())
+}
+
+/// 结算一条连接：按最新阻碍量推进状态机，返回是否已拆除。
+///
+/// 这是**唯一的拆除入口**。所有「可能改变阻碍量」的路径（传输注册/摘除、pane 打开/关闭）
+/// 结束时都调它，因此不存在「某条路径忘了拆」或「在错误的时机拆」的问题 ——
+/// 拆不拆由状态机按计数决定，不由调用点决定。
+///
+/// 关键特性：批量传输两项之间的空档（本条已摘除、下条未注册）里，阻碍量仍 >0
+/// （因为 front-end 是逐项串行、整批尚未结束），因此不会误拆。
+async fn settle_conn(state: &AppState, conn_id: &str) -> bool {
+    use ssh::conn::{ConnState, Effect};
+
+    let conn = {
+        let conns = state.conns.lock().await;
+        conns.get(conn_id).cloned()
+    };
+    let Some(conn) = conn else {
+        return true; // 已不在表内 = 已拆除，幂等
+    };
+    // 先看状态：只有 Draining 才可能因阻碍归零而拆除。
+    // Alive/Reconnecting 收到 ObstaclesChanged 是 no-op（转移表如此定义），提前返回
+    // 省掉一次加锁。
+    let cur = conn.state().await;
+    if !matches!(cur, ConnState::Draining) {
+        return false;
+    }
+    let obstacles = obstacles_of(state, conn_id).await;
+    let effects = conn.notify_obstacles(obstacles).await;
+    if effects.iter().any(|e| matches!(e, Effect::Teardown)) {
+        teardown_conn(state, conn_id).await;
+        return true;
+    }
+    false
+}
+
+/// 兜底清扫：把卡在 `Draining` 且已无任何阻碍的连接拆掉。
+///
+/// 正常路径下「阻碍归零」会由 `settle_conn` 的调用点（传输摘除、pane 关闭、pane 打开）
+/// 驱动。但存在一类边角：进入 `Draining` 时阻碍已为 0（例如前端 gc 早于后端 pane 表
+/// 清理，或时序上刚好错过事件），而后端再没有任何事件会触发结算 —— 这条连接就会永远
+/// 停在 `Draining`：不出表现在也不拆除，`conns_list` 一直列着它。
+///
+/// 由 setup 里的低频定时器周期（30s）调用，保证**没有任何状态会永久滞留**。
+/// 成本：一次遍历 conns + 每条连接查两张表，连接数是个位数，可忽略。
+async fn sweep_draining(state: &AppState) -> usize {
+    // 先在锁内只取 Arc 列表，随即放锁：conns 锁与 Connection::state 锁是两把锁，
+    // 持着 conns 去 await state 会把两条锁的持有期绑在一起。
+    let conns: Vec<Arc<Connection>> = {
+        let m = state.conns.lock().await;
+        m.values().cloned().collect()
+    };
+    let mut swept = 0;
+    for conn in conns {
+        if matches!(conn.state().await, ssh::conn::ConnState::Draining)
+            && settle_conn(state, &conn.id).await
+        {
+            swept += 1;
+        }
+    }
+    swept
+}
+
+/// 请求放弃一条连接，返回**是否已真正拆除**。
+///
+/// `true` = 已出表、handle 已断；`false` = 进入 `Draining`，等阻碍（活跃传输 / 剩余
+/// pane 引用）归零后由后端自动拆除。调用方据此决定是否立即清理前端元信息。
+///
+/// 与旧实现的语义差异：**永远成功，不再因有传输而 `Err`**。旧实现遇活跃传输
+/// 直接拒绝、请求丢失 → 僵尸重连；现在请求被状态机记为 `Draining`，必然会被兑现。
+async fn request_abandon(state: &AppState, conn_id: &str) -> Result<bool> {
+    use ssh::conn::{ConnEvent, Effect};
+
+    let conn = {
+        let conns = state.conns.lock().await;
+        conns.get(conn_id).cloned()
+    };
+    let Some(conn) = conn else {
+        return Ok(true); // 已拆除，幂等
+    };
+    let obstacles = obstacles_of(state, conn_id).await;
+    let effects = conn.apply_event(ConnEvent::AbandonRequested { obstacles }).await;
+    if effects.iter().any(|e| matches!(e, Effect::Teardown)) {
+        teardown_conn(state, conn_id).await;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+#[tauri::command]
+async fn ssh_disconnect(state: State<'_>, conn_id: String) -> Result<bool> {
+    request_abandon(&state, &conn_id).await
 }
 
 /// 查询某连接是否有进行中的传输（供前端 gcConnections 判断是否可安全断开）
@@ -995,6 +1103,8 @@ async fn pane_open(
 ) -> Result<()> {
     let conn = get_conn(&state, &conn_id).await?;
     let (tx, rx) = mpsc::unbounded_channel();
+    // conn_id 要 move 进 PaneCtl，先留一份给后面的结算用。
+    let conn_id_keep = conn_id.clone();
     // 先登记 PaneCtl 再启动任务：既避免任务在插入前就 emit pane-closed 造成漏删，
     // 也在重连复用同一 pane_id 时先关闭旧 channel 任务，杜绝两个任务并发向同一 pane 推流。
     if let Some(old) = state
@@ -1013,10 +1123,20 @@ async fn pane_open(
     {
         let _ = old.tx.send(PaneCmd::Close);
     }
+    // 打开成功与否都要恢复引用计数，故先留一份 Arc（只增计数，不复制连接）
+    let conn_keep = conn.clone();
     if let Err(e) = ssh::pane::open(app, conn, cols, rows, rx, on_event).await {
         state.panes.lock().await.remove(&pane_id); // 打开失败，回收占位
+        // 占位已回收，引用数未增，无需 Reacquired；但失败路径同样要让状态机看到最新阻碍量
+        settle_conn(&state, &conn_id_keep).await;
         return Err(e);
     }
+    // 打开成功 = 这条连接重新被 pane 引用：撤销可能存在的放弃请求。
+    // `Reacquired` 让状态机从 Draining 回到 Alive —— 否则后续结算会把刚建好的
+    // pane 连同连接一起拆掉（旧实现靠手动 store(false) 一个标志，现在由状态机负责）。
+    conn_keep.apply_event(ssh::conn::ConnEvent::Reacquired).await;
+    // 引用数增加也是阻碍量变化，顺手结算一次
+    settle_conn(&state, &conn_id_keep).await;
     Ok(())
 }
 
@@ -1119,8 +1239,16 @@ async fn pane_resize(state: State<'_>, pane_id: String, cols: u32, rows: u32) ->
 
 #[tauri::command]
 async fn pane_close(state: State<'_>, pane_id: String) -> Result<()> {
-    if let Some(ctl) = state.panes.lock().await.remove(&pane_id) {
+    let ctl = state.panes.lock().await.remove(&pane_id);
+    if let Some(ctl) = ctl {
+        let conn_id = ctl.conn_id.clone();
         let _ = ctl.tx.send(PaneCmd::Close);
+        // pane 引用减少 → 阻碍量变化 → 结算。
+        // 若该连接正处于 Draining 且这是最后一个引用，会在此真正拆除 ——
+        // 这是「关掉最后一个分屏后连接自动回收」的实现点。
+        if conn_id != "local" {
+            settle_conn(&state, &conn_id).await;
+        }
     }
     Ok(())
 }
@@ -1177,6 +1305,16 @@ async fn register_transfer(state: &AppState, id: &str, conn_id: &str) -> Arc<ssh
     ctl
 }
 
+/// 摘除传输句柄。
+///
+/// **刻意不在这里拆连接**，尽管此刻看起来是「最后一个传输结束」的天然时机。
+/// 原因：批量上传/下载是**前端逐项串行、每项独立 transfer_id**，两项之间存在
+/// 「本条已摘除、下条尚未注册」的空档。若在这里依据「当前有无活跃传输」决定拆除，
+/// 会命中该空档而误拆，第二项起全部 `get_conn` 失败。
+///
+/// 拆除判据现在由状态机承担：调用方（sftp_download/upload/copy）在摘除后调
+/// `settle_conn`，它按**计数**推进 —— 空档期计数仍 >0（整批未结束），不会误判。
+/// 本函数只做纯粹的书签摘除。
 async fn unregister_transfer(state: &AppState, id: &str) {
     state.transfers.lock().await.remove(id);
 }
@@ -1194,6 +1332,8 @@ async fn sftp_download(
     let ctl = register_transfer(&state, &transfer_id, &conn_id).await;
     let r = ssh::sftp::download(&app, &conn, &ctl, &remote_path, &local_path, &transfer_id).await;
     unregister_transfer(&state, &transfer_id).await;
+    // 阻碍量变化 → 结算。若该连接处于 Draining 且这是最后一个传输，这里就会真正拆除。
+    settle_conn(&state, &conn_id).await;
     r
 }
 
@@ -1210,6 +1350,8 @@ async fn sftp_upload(
     let ctl = register_transfer(&state, &transfer_id, &conn_id).await;
     let r = ssh::sftp::upload(&app, &conn, &ctl, &local_path, &remote_dir, &transfer_id).await;
     unregister_transfer(&state, &transfer_id).await;
+    // 阻碍量变化 → 结算（Draining 且传输归零时在此拆除）
+    settle_conn(&state, &conn_id).await;
     r
 }
 
@@ -1230,6 +1372,9 @@ async fn sftp_copy_remote(
     let ctl = register_transfer(&state, &transfer_id, &src_conn_id).await;
     let r = ssh::sftp::copy_remote(&app, &src, &dst, &ctl, &src_path, &dst_dir, &transfer_id).await;
     unregister_transfer(&state, &transfer_id).await;
+    // 远程复制占用源与目标两条连接，两端都要结算（任一端可能处于 Draining）
+    settle_conn(&state, &src_conn_id).await;
+    settle_conn(&state, &dst_conn_id).await;
     r
 }
 
@@ -1913,6 +2058,21 @@ pub fn run() {
                     tokio::time::sleep(std::time::Duration::from_secs(30 * 60)).await;
                 }
             });
+            // Draining 兜底清扫：正常路径下阻碍归零会由 settle_conn 的调用点驱动，
+            // 但边角时序（进入 Draining 时阻碍已为 0，之后再无任何事件）会让连接
+            // 永久停在 Draining —— 不出表也不拆除，连接面板一直列着一条幽灵。
+            // 周期取 30s：足够短到用户察觉不到残留，又足够长到不构成负担
+            // （每次只是遍历个小表 + 各查两张表）。
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                        let state = handle.state::<AppState>();
+                        let _ = sweep_draining(&state).await;
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

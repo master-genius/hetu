@@ -1,6 +1,6 @@
 [package]
 name = "hetushell"
-version = "3.3.11"
+version = "3.4.0"
 description = "河图终端 HetuShell：终端 + AI/工具链的融合体验，原生支持自实现 SSH"
 authors = ["BraveWang"]
 license = "MulanPSL-2.0"
@@ -33,9 +33,6 @@ uuid = { version = "1", features = ["v4"] }
 glob = "0.3"
 window-vibrancy = "0.6"
 fs2 = "0.4"
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
-async-trait = "0.1"
-futures-util = "0.3"
 
 # Linux 专用：WebProcess 崩溃检测（web-process-crashed 信号）与 reload
 [target.'cfg(target_os = "linux")'.dependencies]

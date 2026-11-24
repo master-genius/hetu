@@ -165,7 +165,14 @@ export interface ConnStateEvent {
   connId: string;
   state: "connected" | "reconnecting" | "waiting" | "closed";
   error?: string;
+  /** 下一次重试的等待秒数；=0 表示不会再有下一次（已达尝试上限） */
   retryIn?: number;
+  /** closed 专用：true = 尝试次数用尽（auto_reconnect 仍为 true），false/缺省 = 自动重连被关 */
+  retryExhausted?: boolean;
+  /** 已发起的建连尝试次数（waiting / closed 时给出） */
+  attempts?: number;
+  /** 尝试次数上限（waiting 时给出，供前端显示「已达上限（N 次）」） */
+  maxAttempts?: number;
 }
 
 export interface LocalEntry {

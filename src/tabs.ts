@@ -47,6 +47,10 @@ export interface Tab {
   /** 标签完整标题（未截断）：本地终端为 `目录:进程`，其余为连接名；用作 tooltip 与截断源串 */
   fullTitle: string;
   banner: HTMLElement | null; // 重连提示条
+  /** 提示条当前归属的连接 id：banner 是 tab 级单例，而重连事件按 connId 路由，
+   *  两者不匹配时提示条会成为无主孤儿（pane 已迁走 → 该 connId 的 connected 事件
+   *  被 panesByConn 命中数 0 丢弃，再没有清除入口）。清除因此必须按归属、而非按 pane。 */
+  bannerConnId: string | null;
   /** 本地文件管理器：每标签页独立实例，目录状态各自保留（懒创建） */
   explorer: Explorer | null;
   explorerOpen: boolean;
@@ -228,6 +232,7 @@ export class TabManager {
       labelEl: label,
       fullTitle: params.name,
       banner: null,
+      bannerConnId: null,
       explorer: null,
       explorerOpen: false,
       remoteOpen: false,
@@ -455,19 +460,33 @@ export class TabManager {
   gcConnections(candidates: string[]): void {
     for (const cid of new Set(candidates)) {
       if (cid !== "local" && !this.connInUse(cid)) {
-        // 异步断开：有活跃传输时后端 sshDisconnect 会拒绝，此时不调 onConnClosed
-        // （保留 connMeta，传输完成后再由后续 gcConnections 回收）
+        // 先按归属清除该连接的提示条：这里是 unpark / onInputDead / 切连接 / killconn
+        // 四条收尾路径的天然汇聚点，比在每处分别清理更不易漏。
+        // 语义是「前端已放弃这条连接」，与后端是否已真正拆除无关 —— 该 tab 已不在用它。
+        this.clearBannerOfConn(cid);
         void this.tryDisconnect(cid);
       }
     }
   }
 
+  /**
+   * 请求后端放弃一条连接。
+   *
+   * 后端语义（状态机）：**永远记账，不再拒绝**。
+   * · 无阻碍 → 立即拆除，返回已拆；
+   * · 有活跃传输 / 仍有 pane 引用 → 进入 Draining，等阻碍归零时后端自动拆除。
+   * 因此这里不再需要「被拒后等下次 gc 重试」的逻辑。唯一要处理的是：Draining 期间
+   * 连接仍在后端表里、也仍可能出现在连接面板中，此时**保留 connMeta** 才是如实的；
+   * 真正拆除后由后端不再出现在列表，下次 refreshPanels 自然消失。
+   */
   private async tryDisconnect(cid: string): Promise<void> {
     try {
-      await api.sshDisconnect(cid);
-      this.onConnClosed?.(cid);
+      const tornDown = await api.sshDisconnect(cid);
+      // 立即拆除 → 清元信息；进入 Draining → 保留（等传输结束后的 gc 再清）
+      if (tornDown) this.onConnClosed?.(cid);
     } catch {
-      // 有活跃传输或已断开：保留 connMeta，传输完成后由下次 gcConnections 回收
+      // 后端已不存在（重复请求）：同样清掉元信息，避免残留
+      this.onConnClosed?.(cid);
     }
   }
 
@@ -523,10 +542,19 @@ export class TabManager {
     }
   }
 
-  setBanner(tab: Tab, text: string | null) {
+  /**
+   * 设置/清除重连提示条。
+   *
+   * `connId` 记录这条提示是为哪条连接显示的：清除必须按归属判定，不能按 pane 判定 ——
+   * pane 在断连后会被 unpark / 切连接 / 新建连接挪走，届时 `panesByConn(旧id)` 恒为空，
+   * 该连接的 `connected` 事件整条被丢弃，提示条成为无主孤儿，永远停在「1s 后重试」。
+   * 传 null 清除时不校验归属：调用方已判定该清（见 clearBannerOfConn / gcConnections）。
+   */
+  setBanner(tab: Tab, text: string | null, connId?: string) {
     if (!text) {
       tab.banner?.remove();
       tab.banner = null;
+      tab.bannerConnId = null;
       return;
     }
     if (!tab.banner) {
@@ -535,6 +563,17 @@ export class TabManager {
       this.content.parentElement?.insertBefore(tab.banner, this.content);
     }
     tab.banner.textContent = text;
+    tab.bannerConnId = connId ?? null;
     tab.banner.style.display = tab.id === this.activeTabId ? "" : "none";
+  }
+
+  /** 提示条归属于某连接的标签页集合（与 pane 当前挂在哪儿无关） */
+  bannerTabsOfConn(connId: string): Tab[] {
+    return this.tabs.filter((t) => t.banner && t.bannerConnId === connId);
+  }
+
+  /** 按归属清除某连接的所有提示条：唯一的无条件清除入口，终态必经此处 */
+  clearBannerOfConn(connId: string): void {
+    for (const tab of this.bannerTabsOfConn(connId)) this.setBanner(tab, null);
   }
 }

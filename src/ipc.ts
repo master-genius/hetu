@@ -30,7 +30,8 @@ export const api = {
   sessionSet: (tabs: SessionTab[]) => invoke<void>("session_set", { tabs }),
 
   sshConnect: (params: ConnParams) => invoke<string>("ssh_connect", { params }),
-  sshDisconnect: (connId: string) => invoke<void>("ssh_disconnect", { connId }),
+  /** 请求放弃连接。返回 true=已拆除；false=已记账，等传输结束/引用归零后自动拆除 */
+  sshDisconnect: (connId: string) => invoke<boolean>("ssh_disconnect", { connId }),
   /** listconn 数据出口：后端合并 GUI 连接与 CLI 租约，渲染后写入脚本预先建好的响应文件。
    *  返回行数；路径校验与写入全在后端（webview 无 fs 权限，也不该有）。 */
   connsReport: (out: string, reqPane: string, json: boolean) =>
