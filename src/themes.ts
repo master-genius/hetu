@@ -374,7 +374,7 @@ function applyOverlayMaterial(
   // 「模糊程度」滑杆只在 blur 档显示（见 dialogs.ts 的 syncOverlayBlurVisibility），
   // 若 liquid 也吃这个值，用户在 blur 档把滑杆拖到 0 再切到 liquid，就会得到
   // 「无模糊的玻璃」，而滑杆此时是隐藏的 —— 无法从 UI 修复。
-  // 取 28px：实测 tint 0.42 下足以把背后终端文字糊成均匀色块（鬼影抑制同 blur 档量级）。
+  // 取 28px：实测在 tint 0.56 下足以把背后终端文字糊成均匀色块（鬼影抑制同 blur 档量级）。
   const LIQUID_BLUR_PX = 28;
 
   if (mat === "none") {
