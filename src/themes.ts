@@ -305,28 +305,31 @@ export function frostNoiseUrl(bg: string, alpha: number): string {
   return url;
 }
 
+export type OverlayMaterial = "none" | "blur" | "liquid";
+
+/**
+ * 材质归一 —— 前端唯一判据。
+ *
+ * 权威定义在 Rust 的 OverlayMaterial 枚举（serde try_from），正常路径上送到
+ * 前端的一定已是三个合法值之一，这里只是渲染前的最后一道兜底：dataset 一旦
+ * 写成非法值，CSS 的 [data-overlay-mat] 规则会全部失配，得到「有模糊、无厚度
+ * 高光」的半成品。dialogs.ts 也调本函数，避免两处判据漂移。
+ */
+export function normalizeOverlayMaterial(m: string): OverlayMaterial {
+  return m === "liquid" || m === "blur" || m === "none" ? m : "none";
+}
+
 export function applyThemeToUI(
   theme: ThemeDef,
   opacity: number,
-  blur: boolean,
-  blurAmount: number,
+  overlayMaterial: OverlayMaterial,
+  overlayBlur: number,
   titlebarColor?: string | null,
-  bgBlur: boolean = true,
 ) {
   const root = document.documentElement;
   const bg = theme.colors.background ?? "#10151c";
   const fg = theme.colors.foreground ?? "#d8dee9";
   const chromeAlpha = Math.min(1, opacity + 0.05);
-  // 文件面板透明度自适应：低透明度时略高（+4%）保持可用性，
-  // 高透明度时略低（-4%）保持通透美感，中间范围与主窗口一致
-  let panelAlpha: number;
-  if (opacity <= 0.42) {
-    panelAlpha = Math.min(1, opacity + 0.04);
-  } else if (opacity > 0.81) {
-    panelAlpha = Math.max(0, opacity - 0.04);
-  } else {
-    panelAlpha = opacity;
-  }
   root.dataset.base = theme.base;
   // 让原生控件（下拉列表、复选框、滚动条）跟随明暗，修正 select/option 白底看不清
   root.style.colorScheme = theme.base;
@@ -336,22 +339,101 @@ export function applyThemeToUI(
   root.style.setProperty("--bg-alpha", String(opacity));
   root.style.setProperty("--bg-rgba", hexToRgba(bg, opacity));
   root.style.setProperty("--chrome-rgba", hexToRgba(bg, chromeAlpha));
-  root.style.setProperty("--panel-rgba", hexToRgba(bg, panelAlpha));
   root.style.setProperty("--titlebar-rgba", hexToRgba(titlebarColor || bg, chromeAlpha));
-  const px = Math.max(0, Math.round(blurAmount));
-  root.style.setProperty("--blur", blur && px > 0 ? `blur(${px}px) saturate(1.3)` : "none");
-  // 磨砂质感已独立为单独设置（frosted/frostStrength），由 settings.ts 应用
-  // 终端背景毛玻璃（光晕内容层 #app::after + 玻璃面层 #glass-veil）：
-  // 桌面像素拿不到，改为自己垫光晕内容，由玻璃面层 backdrop-filter 真模糊。
-  // 「背景虚化」(bgBlur) 为总开关：关闭后终端整体背景不做任何虚化/光晕/玻璃处理，
-  // 但透明度(--bg-rgba)仍作用于底色，弹窗模糊(各自固定值)也不受影响。
-  const bgOn = bgBlur && blur && px > 0;
-  // 终端背景虚化不做饱和度增强：saturate>1 会放大暗色主题背景本身的蓝黑底色，
-  // 使整体"发蓝"。此处保持中性，忠实呈现主题黑色（弹窗模糊另有各自的 saturate）。
-  root.style.setProperty("--bg-blur", bgOn ? `blur(${px}px)` : "none");
-  root.dataset.glass = bgOn ? "1" : "0";
-  // 玻璃内容层已改用确定性文本点（#glass-content .gc-dot），不再需要 canvas 噪声。
-  // 文本点颜色由 CSS color-mix(var(--term-fg), var(--term-bg)) 自动跟随主题。
+  // 磨砂质感由 settings.ts 独立下发（frosted / frostStrength），此处不参与。
+  //
+  // 终端主体不做任何背景模糊：它的背后是窗口外桌面，不在本窗口合成上下文内，
+  // backdrop-filter 永远采样不到。终端背景只有「底色不透明度」与磨砂颗粒层。
+  // 覆盖层材质（面板/弹窗/菜单/弹出层）在这里下发，作用面见 styles.css 的 overlays 段。
+  applyOverlayMaterial(root, theme, overlayMaterial, overlayBlur);
+}
+
+/**
+ * 覆盖层材质令牌下发。
+ *
+ * 注意：backdrop-filter 中引用**未定义**的 CSS 变量会导致整条声明被静默丢弃
+ * （WebKitGTK 实测），因此下面每个令牌都必须写入具体值，且 styles.css 的
+ * :root 里也要给出兜底默认值——两处都不可省。
+ */
+function applyOverlayMaterial(
+  root: HTMLElement,
+  theme: ThemeDef,
+  material: OverlayMaterial,
+  overlayBlur: number,
+) {
+  const bg = theme.colors.background ?? "#10151c";
+  const fg = theme.colors.foreground ?? "#d8dee9";
+
+  // 归一化：渲染前的最后兜底，判据见 normalizeOverlayMaterial
+  const mat = normalizeOverlayMaterial(material);
+
+  // 材质分支标记：CSS 据此决定背景图层（厚度/高光/渐变）与边框强度
+  root.dataset.overlayMat = mat;
+
+  // 液态玻璃的模糊半径是**材质自身属性**，不读 overlayBlur：
+  // 「模糊程度」滑杆只在 blur 档显示（见 dialogs.ts 的 syncOverlayBlurVisibility），
+  // 若 liquid 也吃这个值，用户在 blur 档把滑杆拖到 0 再切到 liquid，就会得到
+  // 「无模糊的玻璃」，而滑杆此时是隐藏的 —— 无法从 UI 修复。
+  // 取 28px：实测 tint 0.42 下足以把背后终端文字糊成均匀色块（鬼影抑制同 blur 档量级）。
+  const LIQUID_BLUR_PX = 28;
+
+  if (mat === "none") {
+    // 无材质：覆盖层用接近不透明的主题底色，保证可读性最高
+    root.style.setProperty("--mat-backdrop", "none");
+    root.style.setProperty("--mat-tint", hexToRgba(bg, 0.94));
+  } else if (mat === "liquid") {
+    // 液态玻璃：真模糊 + 饱和度增益（质感靠高光与厚度撑起）。
+    //
+    // 刻意不加 brightness()：它会把「背后透出的内容」整体提亮，视觉上与
+    // 「玻璃更亮」无法区分，实测让面板亮度从 10 涨到 37（3.6×）——那主要是
+    // 背景内容被提亮，而不是玻璃质感。亮度交由高光层（--mat-hi）表达。
+    //
+    // tint 0.56 是实测出来的**对比度地板**，不是审美取值。
+    // 判据：探针块内不放文字，采样区即浮层纯底色；背景铺满高亮 ANSI（模拟
+    // vim 语法高亮的最坏情况）；取底色亮度分布的 p95 与前景 #fcfdfe 算 WCAG。
+    //   tint 0.42 → 最差 4.01:1（.modal/.hfile-overlay 区，✗ 低于 AA 4.5:1）
+    //   tint 0.50 → 最差 4.61:1（✓ 但余量仅 0.11，真实 ANSI 更亮即跌破）
+    //   tint 0.56 → 最差 5.15:1（✓ 采用，余量充足）
+    // 亮色主题同批实测最差 8.01:1，无需分档处理。
+    // 原 .ctx-menu 注释里「底色 62%→74%：透出过多时菜单文字发灰」是同一条经验，
+    // 首版实现把它抹掉了，此处以量化依据恢复。
+    root.style.setProperty("--mat-backdrop", `blur(${LIQUID_BLUR_PX}px) saturate(1.65)`);
+    root.style.setProperty("--mat-tint", hexToRgba(bg, 0.56));
+  } else {
+    // 毛玻璃：底色是「面板自身文字的对比度地板」（72% 时背后透出量刚好，
+    // 既能看出模糊质感又不发灰）；而模糊在此底色下的主要价值是**消除锐利鬼影**：
+    // 实测 blur=0 时面板内残留 8.6 的高频方差（背后终端文字锐利透出），
+    // blur=24 时降到 1.9（消除约 78%），这是旧「背景虚化」从未提供的能力。
+    // 半径取「模糊程度」滑杆值（唯一消费该设置的地方）。
+    const px = Number.isFinite(overlayBlur)
+      ? Math.max(0, Math.min(60, Math.round(overlayBlur)))
+      : 24;
+    root.style.setProperty("--mat-backdrop", `blur(${px}px) saturate(1.55)`);
+    root.style.setProperty("--mat-tint", hexToRgba(bg, 0.72));
+  }
+  // 液态玻璃顶部内辉的强度。只有液态玻璃消费它（styles.css 里所有 var(--mat-hi)
+// 都位于 [data-overlay-mat="liquid"] 规则内）。
+// 高光在**边缘**而非中央：液态玻璃的镜面反射来自材料边缘朝向光源的那一圈，
+// 不是指针跟随的中央光斑（后者是网页卡片聚光灯，会把底面从 24 抬到 47、+95%，
+// 文字对比度被吃掉一半）。此处只给顶部 24% 高度一层极淡内辉，让材料不至于纯平。
+  const hi = mat === "liquid" ? "0.05" : "0";
+  root.style.setProperty("--mat-hi", hi);
+  // 边框：液态玻璃需要更明确的玻璃沿口
+  root.style.setProperty("--mat-rim", colorMixAlpha(fg, mat === "liquid" ? 0.26 : 0.16));
+  // 外阴影：亮色主题阴影更轻（深阴影在白底上发脏），暗色主题更重靠阴影分层
+  const shadowAlpha = theme.base === "light" ? 0.18 : 0.42;
+  const shadowY = theme.base === "light" ? 28 : 42;
+  root.style.setProperty(
+    "--mat-shadow",
+    mat === "none" && theme.base === "dark"
+      ? "0 12px 36px rgba(0, 0, 0, 0.48)"
+      : `0 14px ${shadowY}px rgba(0, 0, 0, ${shadowAlpha})`,
+  );
+}
+
+/** 把 #rrggbb 转成带 alpha 的 color-mix 表达，用于跟随主题前景色的半透明边框 */
+function colorMixAlpha(hex: string, alpha: number): string {
+  return `color-mix(in srgb, ${hex} ${Math.round(alpha * 100)}%, transparent)`;
 }
 
 export function hexToRgba(hex: string, alpha: number): string {

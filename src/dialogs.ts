@@ -2,7 +2,7 @@
 
 import { api } from "./ipc";
 import { getSettings, loadSettings, updateSettings, sanitizeScrollback } from "./settings";
-import { allThemes, BUILTIN_THEMES, resolveTheme } from "./themes";
+import { allThemes, BUILTIN_THEMES, normalizeOverlayMaterial, resolveTheme } from "./themes";
 import { confirmDialog, customSelect, showMenu, toast, type CSOption } from "./ui";
 import {
   ACTIONS, comboToLabel, DEFAULT_KEYBINDINGS, eventToCombo, resolveBindings, type Action,
@@ -537,16 +537,19 @@ export function showSettingsDialog() {
         </section>
         <section>
           <h4>窗口</h4>
-          <p class="section-desc">半透明与毛玻璃效果依赖系统合成器（macOS / Windows / KDE 等）。</p>
+          <p class="section-desc">终端背景只有底色不透明度与磨砂颗粒（其背后是窗口外桌面，无法被采样）；面板、菜单、弹窗等覆盖层的材质在下方单独选择。</p>
           <label>背景不透明度 <span class="opacity-val"></span>
             <input name="opacity" type="range" min="0.3" max="1" step="0.01"></label>
-          <label class="check"><input name="bgBlur" type="checkbox"> 背景虚化（终端整体背景光晕/玻璃效果；关闭仅保留透明度，弹窗模糊不受影响）</label>
-          <label class="check"><input name="blur" type="checkbox"> 毛玻璃虚化（透明时仍保持终端内容清晰）</label>
-          <label>模糊程度 <span class="blur-val"></span>
-            <input name="blurAmount" type="range" min="0" max="100" step="1"></label>
-          <label class="check"><input name="frosted" type="checkbox"> 磨砂质感（同色系细颗粒，独立于毛玻璃）</label>
+          <label class="check"><input name="frosted" type="checkbox"> 磨砂质感（终端背景的同色系细颗粒）</label>
           <label>磨砂程度 <span class="frost-val"></span>
             <input name="frostStrength" type="range" min="0" max="100" step="1"></label>
+          <div class="settings-field">
+            <span>覆盖层材质（面板 / 菜单 / 弹窗 / 弹出层）</span>
+            <div class="mat-picker"></div>
+            <p class="section-desc">终端主体的背后是窗口外桌面，无法采样，故只由上面的不透明度与磨砂决定；覆盖层背后是终端内容，可以做真实模糊。</p>
+          </div>
+          <label class="overlay-blur-field">模糊程度 <span class="blur-val"></span>
+            <input name="overlayBlur" type="range" min="0" max="60" step="1"></label>
           <label>还原尺寸 <span class="restore-size-val"></span>
             <input name="restoreSize" type="range" min="50" max="90" step="1"></label>
           <label>图片预览上限 <span class="max-image-mb-val"></span>
@@ -625,13 +628,11 @@ export function showSettingsDialog() {
   input("fontSize").value = String(s.fontSize);
   input("opacity").value = String(s.opacity);
   q<HTMLElement>(".opacity-val").textContent = `${Math.round(s.opacity * 100)}%`;
-  input("bgBlur").checked = s.bgBlur;
-  input("blur").checked = s.blur;
-  input("blurAmount").value = String(s.blurAmount);
-  q<HTMLElement>(".blur-val").textContent = `${Math.round(s.blurAmount)}px`;
   input("frosted").checked = s.frosted;
   input("frostStrength").value = String(s.frostStrength);
   q<HTMLElement>(".frost-val").textContent = `${s.frostStrength}%`;
+  input("overlayBlur").value = String(s.overlayBlur);
+  q<HTMLElement>(".blur-val").textContent = `${Math.round(s.overlayBlur)}px`;
   input("restoreSize").value = String(s.restoreSize);
   q<HTMLElement>(".restore-size-val").textContent = `${s.restoreSize}%`;
   input("maxImageMb").value = String(s.maxImageMb ?? 128);
@@ -667,6 +668,42 @@ export function showSettingsDialog() {
       commit();
     }
   });
+
+  // 覆盖层材质选择器：三选一互斥（无 / 毛玻璃 / 液态玻璃），选中项显示模糊程度
+  // 归一化用与渲染侧同一判据（themes.ts），否则会出现「按钮高亮某材质、
+    // 实际渲染却是另一材质」的不一致。判据只有一处定义，此处只调用。
+    let overlayMaterial = normalizeOverlayMaterial(s.overlayMaterial);
+  const matPicker = q<HTMLElement>(".mat-picker");
+  const MATS: Array<{ v: Settings["overlayMaterial"]; label: string; hint: string }> = [
+    { v: "none", label: "无", hint: "覆盖层用接近不透明的主题底色，可读性最高" },
+    { v: "blur", label: "毛玻璃", hint: "覆盖层背景做均匀模糊，可调模糊程度" },
+    { v: "liquid", label: "液态玻璃", hint: "模糊 + 边缘厚度 + 跟随指针的镜面高光（模糊半径由材质固定，不受下方滑杆影响）" },
+  ];
+  const renderMats = () => {
+    matPicker.textContent = "";
+    for (const { v, label, hint } of MATS) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "mat-opt" + (v === overlayMaterial ? " selected" : "");
+      b.title = hint;
+      b.textContent = label;
+      b.addEventListener("click", () => {
+        overlayMaterial = v;
+        renderMats();
+        syncOverlayBlurVisibility();
+        commit();
+      });
+      matPicker.appendChild(b);
+    }
+  };
+  // 模糊程度只对 blur 有效：none / liquid 下隐藏，避免出现「调了没反应」的控件
+  // （liquid 的模糊半径由材质自身给出，不暴露给用户）
+  const syncOverlayBlurVisibility = () => {
+    q<HTMLElement>(".overlay-blur-field").style.display =
+      overlayMaterial === "blur" ? "" : "none";
+  };
+  renderMats();
+  syncOverlayBlurVisibility();
 
   // 圆角级别选择器：小图标（方形 → 大圆角），不显示文字
   let cornerRadius = s.cornerRadius;
@@ -954,11 +991,10 @@ export function showSettingsDialog() {
       theme: selectedThemeId,
       titlebarColor: input("titlebarFollow").checked ? null : input("titlebarColor").value,
       opacity: parseFloat(input("opacity").value),
-      bgBlur: input("bgBlur").checked,
-      blur: input("blur").checked,
-      blurAmount: parseFloat(input("blurAmount").value),
       frosted: input("frosted").checked,
       frostStrength: parseInt(input("frostStrength").value, 10) || 0,
+      overlayMaterial,
+      overlayBlur: Math.max(0, Math.min(60, parseFloat(input("overlayBlur").value) || 0)),
       restoreSize: parseInt(input("restoreSize").value, 10) || 78,
       maxImageMb: Math.max(32, Math.min(512, parseInt(input("maxImageMb").value, 10) || 128)),
       cursorStyle,
@@ -998,8 +1034,8 @@ export function showSettingsDialog() {
       `${Math.round(parseFloat(input("opacity").value) * 100)}%`;
     debouncedCommit();
   });
-  input("blurAmount").addEventListener("input", () => {
-    q<HTMLElement>(".blur-val").textContent = `${Math.round(parseFloat(input("blurAmount").value))}px`;
+  input("overlayBlur").addEventListener("input", () => {
+    q<HTMLElement>(".blur-val").textContent = `${Math.round(parseFloat(input("overlayBlur").value))}px`;
     debouncedCommit();
   });
   input("frostStrength").addEventListener("input", () => {

@@ -88,19 +88,18 @@ pub struct Settings {
     /// 标题栏颜色；None 表示跟随主题背景色
     pub titlebar_color: Option<String>,
     pub custom_themes: Vec<ThemeDef>,
-    /// 背景不透明度 0.0 ~ 1.0
+    /// 背景不透明度 0.0 ~ 1.0（仅作用于终端底色）
     pub opacity: f64,
-    /// 毛玻璃虚化
-    pub blur: bool,
-    /// 毛玻璃模糊程度（px）
-    pub blur_amount: f64,
-    /// 背景虚化：终端整体背景虚化/光晕/玻璃效果总开关（默认开）。
-    /// 关闭后透明度仍作用于底色，复杂背景效果停用，弹窗模糊不受影响。
-    pub bg_blur: bool,
-    /// 磨砂质感：独立于毛玻璃的表面颗粒层（同色系噪点）
+    /// 磨砂质感：终端背景的表面颗粒层（同色系噪点，不采样任何背景）
     pub frosted: bool,
     /// 磨砂程度 0–100（映射颗粒透明度）
     pub frost_strength: u16,
+    /// 覆盖层材质：面板/弹窗/菜单/弹出层的材质（终端主体不参与，见 styles.css）
+    #[serde(default)]
+    pub overlay_material: OverlayMaterial,
+    /// 覆盖层模糊半径（px，0–60），仅 overlay_material = "blur" 时生效
+    #[serde(default = "default_overlay_blur")]
+    pub overlay_blur: f64,
     /// 圆角级别："square" | "xs" | "sm" | "md" | "lg"
     pub corner_radius: String,
     /// 标签页平分横向宽度
@@ -163,6 +162,56 @@ fn default_mcr_enabled() -> bool {
 fn default_mcr_max() -> f64 {
     1.6
 }
+/// 覆盖层材质。用枚举而非 String：非法值在**反序列化阶段**就收敛为 None，
+/// 而不是散落在读路径/写路径/前端三处各归一一次（那正是漂移的来源）。
+/// 序列化仍是 "none"/"blur"/"liquid" 三个字符串，与前端 union 一一对应。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase", try_from = "String", into = "String")]
+pub enum OverlayMaterial {
+    None,
+    Blur,
+    Liquid,
+}
+
+impl Default for OverlayMaterial {
+    fn default() -> Self {
+        Self::Liquid
+    }
+}
+
+impl std::fmt::Display for OverlayMaterial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::None => "none",
+            Self::Blur => "blur",
+            Self::Liquid => "liquid",
+        })
+    }
+}
+
+impl From<OverlayMaterial> for String {
+    fn from(m: OverlayMaterial) -> Self {
+        m.to_string()
+    }
+}
+
+impl TryFrom<String> for OverlayMaterial {
+    type Error = std::convert::Infallible;
+    /// 非法值不报错，一律降级为 None（可读性最高的一档）。
+    /// 用 Infallible 是为了让损坏的 settings.json 不至于整份反序列化失败、
+    /// 连带丢掉用户的其它设置。
+    fn try_from(s: String) -> std::result::Result<Self, Self::Error> {
+        Ok(match s.as_str() {
+            "blur" => Self::Blur,
+            "liquid" => Self::Liquid,
+            _ => Self::None,
+        })
+    }
+}
+
+fn default_overlay_blur() -> f64 {
+    24.0
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -179,11 +228,10 @@ impl Default for Settings {
             titlebar_color: None,
             custom_themes: Vec::new(),
             opacity: 0.85,
-            blur: true,
-            blur_amount: 30.0,
-            bg_blur: true,
             frosted: true,
             frost_strength: 20,
+            overlay_material: OverlayMaterial::Liquid,
+            overlay_blur: 24.0,
             corner_radius: "md".into(),
             tab_bar_fill: true,
             tab_font_family: String::new(),
@@ -419,21 +467,98 @@ pub fn save_session(slot: usize, tabs: &[SessionTab]) -> Result<()> {
 }
 
 pub fn load() -> Settings {
-    // 与 profiles/session 共用损坏恢复策略（解析失败备份为 .bak 后回默认值）
-    let mut s = match settings_path() {
-        Ok(p) => read_json_or_default(&p),
-        Err(_) => Settings::default(),
+    let Ok(p) = settings_path() else {
+        return Settings::default();
     };
-    migrate(&mut s);
+    // 读原始 JSON 与 Settings 一次到位：迁移判据要看字段是否**出现过**，
+    // 而反序列化后「缺失字段」与「默认值」无法区分，这是唯一需要原始 JSON 的地方。
+    let Some(raw) = read_json_value(&p) else {
+        return Settings::default();
+    };
+    let mut s = serde_json::from_value::<Settings>(raw.clone()).unwrap_or_default();
+
+    if migrate(&mut s, &raw) {
+        // 迁移是一次性动作（升级首启），结果必须落盘：否则旧字段永远留在文件里，
+        // 每次 load 重新生效，把用户此后显式选择的材质压回去。
+        // 锁内重新读原始 JSON 再判一次——闭包拿到的是最新文件，若已被别的进程
+        // 升级过则 migrate 返回 false，不会覆盖。
+        let _ = update_locked::<Settings, _>(&p, |v| {
+            if let Some(locked) = read_json_value(&p) {
+                migrate(v, &locked);
+            }
+            Ok(())
+        });
+    }
+    // 材质非法值已在反序列化阶段由 OverlayMaterial 的 TryFrom 收敛，这里只剩
+    // 半径需要钳制（它不是枚举，无法在类型层表达区间）。
+    s.overlay_blur = clamp_overlay_blur(s.overlay_blur);
     s
+}
+
+/// 读 settings.json 为原始 JSON。损坏时按既有策略备份为 .bak 并返回 None。
+fn read_json_value(path: &std::path::Path) -> Option<serde_json::Value> {
+    let text = std::fs::read_to_string(path).ok()?;
+    match serde_json::from_str(&text) {
+        Ok(v) => Some(v),
+        Err(_) => {
+            let _ = std::fs::rename(path, path.with_extension("json.bak"));
+            None
+        }
+    }
+}
+
+/// 旧配置迁移。返回 true 表示做了改动，调用方据此落盘。
+fn migrate(s: &mut Settings, raw: &serde_json::Value) -> bool {
+    // 用 `|` 而非 `||`：两个迁移互不依赖，都必须执行
+    migrate_legacy_blur(s, raw) | migrate_font_weight(s)
+}
+
+/// 3.4.0 → 3.5.0：终端侧「背景虚化」整条链路删除（终端背景是窗口外桌面，
+/// backdrop-filter 采样不到，开关从未生效），改为覆盖层材质 overlay_material。
+///
+/// 判据全部来自原始 JSON，规则只有两条：
+/// - **已有新字段 → 视为已迁移，绝不覆写**。否则只要文件里同时残留旧字段
+///   （手改、从备份还原、旧版本文件被复制回来），用户此后显式选择的材质就会被
+///   每次 load 压回旧映射值，且界面上看不出任何异常。
+/// - 旧「毛玻璃虚化」开关即新「毛玻璃」材质；缺 blur 键时退到 bgBlur
+///   （两者都是「虚化」开关），都没有才沿用旧默认「开」。旧 blurAmount 钳到 [0,60]
+///   （它标定的是终端级模糊，直接拿来会把覆盖层糊成纯色）。
+fn migrate_legacy_blur(s: &mut Settings, raw: &serde_json::Value) -> bool {
+    if raw.get("overlayMaterial").is_some() || raw.get("overlayBlur").is_some() {
+        return false;
+    }
+    let blur = raw.get("blur").and_then(|v| v.as_bool());
+    let bg_blur = raw.get("bgBlur").and_then(|v| v.as_bool());
+    let amount = raw.get("blurAmount").and_then(|v| v.as_f64());
+    if blur.is_none() && bg_blur.is_none() && amount.is_none() {
+        return false; // 全新配置，无旧字段可迁
+    }
+    s.overlay_material = if blur.or(bg_blur).unwrap_or(true) {
+        OverlayMaterial::Blur
+    } else {
+        OverlayMaterial::None
+    };
+    if let Some(v) = amount.filter(|v| v.is_finite()) {
+        s.overlay_blur = clamp_overlay_blur(v);
+    }
+    true
+}
+
+/// 覆盖层模糊半径合法范围 [0, 60]，非法回退默认 24
+pub(crate) fn clamp_overlay_blur(v: f64) -> f64 {
+    if !v.is_finite() {
+        return default_overlay_blur();
+    }
+    v.clamp(0.0, 60.0)
 }
 
 /// 兼容旧配置：1.0.0 以 font_weight="300" 存储全局字重，据此唯一识别旧配置
 /// （新版本一律存 "normal"，故不会误伤新用户主动选择的字体）。仅当旧配置的等宽/CJK
 /// 仍是 1.0.0 默认（未定制）时，升级到「字重并入名字」的新 Light 默认；随后归一化字重。
-fn migrate(s: &mut Settings) {
+/// 返回 true 表示做了改动。
+fn migrate_font_weight(s: &mut Settings) -> bool {
     if s.font_weight != "300" {
-        return; // 新配置（weight=normal）不动，避免反复覆盖用户选择
+        return false; // 新配置（weight=normal）不动，避免反复覆盖用户选择
     }
     if s.font_family == "JetBrains Mono NL" && s.cjk_font_family == "Noto Sans SC" {
         let d = Settings::default();
@@ -442,4 +567,199 @@ fn migrate(s: &mut Settings) {
     }
     // 终端不再全局施加字重，字重由字体名承载；归一化后此分支不再匹配
     s.font_weight = "normal".into();
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 旧配置迁移：blur=true → overlay_material="blur"，blurAmount 钳到 [0,60]
+    #[test]
+    fn clamp_overlay_blur_bounds() {
+        assert_eq!(clamp_overlay_blur(82.0), 60.0);
+        assert_eq!(clamp_overlay_blur(24.0), 24.0);
+        assert_eq!(clamp_overlay_blur(-5.0), 0.0);
+        assert_eq!(clamp_overlay_blur(f64::NAN), default_overlay_blur());
+        assert_eq!(clamp_overlay_blur(f64::INFINITY), default_overlay_blur());
+    }
+
+    /// 默认值：新装用户拿到液态玻璃 + 24px
+    #[test]
+    fn defaults_use_liquid_material() {
+        let d = Settings::default();
+        assert_eq!(d.overlay_material, OverlayMaterial::Liquid);
+        assert_eq!(d.overlay_blur, 24.0);
+        // 终端侧只保留不透明度 + 磨砂
+        assert_eq!(d.opacity, 0.85);
+        assert!(d.frosted);
+    }
+
+    /// 新结构反序列化：缺失 overlay_* 时回落到默认（serde default）
+    #[test]
+    fn missing_overlay_fields_fall_back_to_default() {
+        let json = r#"{"fontFamily":"X","cjkFontFamily":"Y","fontSize":16,
+            "fontWeight":"normal","theme":"dark","customThemes":[],
+            "opacity":0.8,"frosted":true,"frostStrength":30,
+            "cornerRadius":"md","tabBarFill":true,"tabFontFamily":"",
+            "tabFontSize":12,"showScrollbar":true,"webgl":false,
+            "newTabMode":"local","autoReconnect":true,"copyOnSelect":true,
+            "confirmOverwrite":false,"downloadDir":"","askDownloadLocation":false,
+            "trackRemoteCwd":true,"restoreSession":true}"#;
+        let s: Settings = serde_json::from_str(json).expect("应能反序列化缺失新字段的配置");
+        assert_eq!(s.overlay_material, OverlayMaterial::Liquid);
+        assert_eq!(s.overlay_blur, 24.0);
+    }
+
+    /// 迁移决策（纯函数，无环境依赖）：三条规则一次覆盖
+    #[test]
+    fn legacy_blur_migration_rules() {
+        // blur=true → "blur"，blurAmount 超上限被钳住
+        let mut s = Settings::default();
+        assert!(migrate_legacy_blur(&mut s, &json(r#"{"blur":true,"blurAmount":82.0}"#)));
+        assert_eq!(s.overlay_material, OverlayMaterial::Blur);
+        assert_eq!(s.overlay_blur, 60.0);
+
+        // blur=false（用户显式关掉毛玻璃）→ "none"，合法的 blurAmount 保留
+        let mut s = Settings::default();
+        assert!(migrate_legacy_blur(&mut s, &json(r#"{"blur":false,"blurAmount":30.0}"#)));
+        assert_eq!(s.overlay_material, OverlayMaterial::None);
+        assert_eq!(s.overlay_blur, 30.0);
+
+        // blurAmount 缺失 / 非法（类型错、null）→ 保留默认
+        for raw in [
+            r#"{"blur":true}"#,
+            r#"{"blur":true,"blurAmount":"oops"}"#,
+            r#"{"blur":true,"blurAmount":null}"#,
+        ] {
+            let mut s = Settings::default();
+            assert!(migrate_legacy_blur(&mut s, &json(raw)));
+            assert_eq!(s.overlay_blur, default_overlay_blur(), "输入={raw}");
+        }
+    }
+
+    /// 缺 blur 键时以 bgBlur 为准：不能把 bgBlur 只当「存在标记」而丢掉它的布尔值。
+    /// 否则这份配置里唯一的反证信号被忽略，材质会被静默置成 blur。
+    #[test]
+    fn legacy_bg_blur_decides_when_blur_absent() {
+        let mut s = Settings::default();
+        assert!(migrate_legacy_blur(&mut s, &json(r#"{"blurAmount":30.0,"bgBlur":false}"#)));
+        assert_eq!(s.overlay_material, OverlayMaterial::None, "bgBlur=false 是唯一的反证信号，不应被忽略");
+
+        // 两个开关都没有 → 无法判断用户意图，沿用旧默认「开」
+        let mut s = Settings::default();
+        assert!(migrate_legacy_blur(&mut s, &json(r#"{"blurAmount":30.0}"#)));
+        assert_eq!(s.overlay_material, OverlayMaterial::Blur);
+    }
+
+    /// 【核心回归】旧字段与新字段并存时，新字段必须胜出。
+    /// 路径真实可达：从备份还原、手改文件补回旧字段、旧版本文件被复制回来。
+    /// 若判据只看「有没有旧字段」，用户此后显式选择的材质会被每次 load 压回旧映射值，
+    /// 且界面上看不出任何异常 —— 这是本重构最隐蔽的一条缺陷。
+    #[test]
+    fn new_field_always_beats_legacy_fields() {
+        for raw in [
+            r#"{"blur":true,"blurAmount":82.0,"overlayMaterial":"liquid","overlayBlur":12.0}"#,
+            r#"{"bgBlur":false,"overlayMaterial":"none"}"#,
+            r#"{"blur":false,"overlayBlur":40.0}"#,
+        ] {
+            let mut s = Settings::default();
+            s.overlay_material = OverlayMaterial::Liquid.into();
+            s.overlay_blur = 12.0;
+            assert!(!migrate_legacy_blur(&mut s, &json(raw)), "含新字段的配置不得被旧字段覆写：{raw}");
+            assert_eq!(s.overlay_material, OverlayMaterial::Liquid, "新字段值必须原样保留：{raw}");
+            assert_eq!(s.overlay_blur, 12.0, "新字段值必须原样保留：{raw}");
+        }
+    }
+
+    /// 全新配置（无旧字段）不触发迁移，也就不产生写盘
+    #[test]
+    fn fresh_config_needs_no_migration() {
+        let mut s = Settings::default();
+        assert!(!migrate_legacy_blur(&mut s, &json(r#"{"opacity":0.8}"#)));
+    }
+
+    /// 端到端：旧文件 → load() 迁移并**落盘**（D-1 的关键：不落盘则旧字段永不消失、
+    /// 每次 load 重放迁移，会把用户此后显式设置的新材质一路压回去）。
+    ///
+    /// 本用例改 XDG_CONFIG_HOME（进程级全局态），与并行用例有竞争风险；
+    /// 故模块内其余用例一律是纯函数/serde，不读配置目录。
+    #[test]
+    fn legacy_file_migrates_and_persists() {
+        let tmp = std::env::temp_dir().join(format!("hetu-mig-{}", std::process::id()));
+        let dir = tmp.join("hetushell");
+        std::fs::create_dir_all(&dir).expect("建临时配置目录");
+        let path = dir.join("settings.json");
+        std::fs::write(&path, r#"{"opacity":0.83,"blur":true,"blurAmount":82.0,
+            "frosted":true,"frostStrength":64}"#).expect("写旧配置");
+
+        let prev = std::env::var_os("XDG_CONFIG_HOME");
+        std::env::set_var("XDG_CONFIG_HOME", &tmp);
+        let s = load();
+        let after = std::fs::read_to_string(&path).unwrap_or_default();
+        let s2 = load();
+        match prev {
+            Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
+            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        }
+
+        // 终端侧观感原样保留（升级不得动用户已有设置）
+        assert_eq!(s.opacity, 0.83);
+        assert!(s.frosted);
+        assert_eq!(s.frost_strength, 64);
+        // 迁移结果落在合法域
+        assert_eq!(s.overlay_material, OverlayMaterial::Blur);
+        assert_eq!(s.overlay_blur, 60.0);
+        // 关键：旧字段已被写盘消除，第二次 load 读到的是新结构。
+        // 注意不能用 contains("\"blur\"") 判断 —— 新字段 overlayBlur 也含该子串。
+        // 按 JSON 键存在性判断才准确。
+        let after_json: serde_json::Value = serde_json::from_str(&after).expect("落盘内容应是合法 JSON");
+        for legacy_key in ["blur", "blurAmount", "bgBlur"] {
+            assert!(after_json.get(legacy_key).is_none(), "迁移后文件不应再含旧字段 {legacy_key}，实际={after}");
+        }
+        assert_eq!(after_json.get("overlayMaterial").and_then(|v| v.as_str()), Some("blur"),
+                   "迁移后文件应含新字段，实际={after}");
+        assert_eq!(s2.overlay_material, s.overlay_material);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// 材质类型层归一：非法值在**反序列化阶段**收敛为 None，且不连带丢失其它设置。
+    /// 这是把归一从「三处各写一遍」收敛到「类型本身」的验证点。
+    #[test]
+    fn overlay_material_rejects_unknown_values() {
+        // 合法值原样通过，且三个字符串与前端 union 一致
+        for (raw, want) in [
+            (r#""blur""#, OverlayMaterial::Blur),
+            (r#""liquid""#, OverlayMaterial::Liquid),
+            (r#""none""#, OverlayMaterial::None),
+        ] {
+            let m: OverlayMaterial = serde_json::from_str(raw).expect("合法值应能反序列化");
+            assert_eq!(m, want, "输入={raw}");
+        }
+        // 手改配置 / 大小写差异 / 空串 / 多余空格，一律降级为 None
+        for bad in [r#""glass""#, r#""Blur""#, r#""LIQUID""#, r#""""#, r#""liquid ""#] {
+            let m: OverlayMaterial = serde_json::from_str(bad).expect("非法值不应导致反序列化失败");
+            assert_eq!(m, OverlayMaterial::None, "输入={bad}");
+        }
+        // 序列化回字符串（决定 settings.json 里存什么）
+        assert_eq!(serde_json::to_string(&OverlayMaterial::Liquid).unwrap(), r#""liquid""#);
+        assert_eq!(serde_json::to_string(&OverlayMaterial::None).unwrap(), r#""none""#);
+    }
+
+    /// 非法材质不得拖垮整份配置的反序列化：用户其它设置必须保住。
+    /// 这是用 Infallible + try_from（而非让 serde 报错）的全部理由。
+    #[test]
+    fn bad_material_does_not_drop_other_settings() {
+        let raw = r#"{"opacity":0.71,"frostStrength":42,"overlayMaterial":"glass"}"#;
+        let s: Settings = serde_json::from_str(raw).expect("非法材质不应导致整份配置解析失败");
+        assert_eq!(s.opacity, 0.71);
+        assert_eq!(s.frost_strength, 42);
+        assert_eq!(s.overlay_material, OverlayMaterial::None);
+    }
+
+    /// 测试辅助：JSON 字面量 → Value（迁移判据看的是原始 JSON，不是反序列化结果）
+    fn json(raw: &str) -> serde_json::Value {
+        serde_json::from_str(raw).expect("测试 JSON 应合法")
+    }
 }

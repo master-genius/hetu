@@ -81,8 +81,11 @@ async fn settings_get(state: State<'_>) -> Result<Settings> {
 }
 
 #[tauri::command]
-async fn settings_set(state: State<'_>, settings: Settings) -> Result<()> {
+async fn settings_set(state: State<'_>, mut settings: Settings) -> Result<()> {
     // 连接项已独立到 profiles.json，settings 不再包含它们，无需特殊保护
+    // 覆盖层参数落盘前归一：材质是枚举，非法值在反序列化阶段已收敛；
+    // 这里只剩半径需要钳制（不是枚举，无法在类型层表达区间）。
+    settings.overlay_blur = settings::clamp_overlay_blur(settings.overlay_blur);
     let auto = settings.auto_reconnect;
     // 跨进程文件锁保护写入，防多进程同时改设置互相覆盖
     let s = settings.clone();

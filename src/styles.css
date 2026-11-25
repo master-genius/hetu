@@ -1,4 +1,8 @@
-/* HetuShell 全局样式：透明窗口 + 毛玻璃 + 主题变量驱动 */
+/* HetuShell 全局样式：透明窗口 + 主题变量驱动
+ * 背景效果分两层，能力不同，不可混用（详见「覆盖层材质」段）：
+ *   终端主体 —— 只有底色不透明度 + 磨砂颗粒（背后是窗口外桌面，采样不到）
+ *   覆盖层   —— 可做真实模糊/玻璃（背后是应用自己绘制的终端内容）
+ */
 
 :root {
   --term-bg: #10151c;
@@ -7,7 +11,6 @@
   --bg-alpha: 0.92;
   --bg-rgba: rgba(16, 21, 28, 0.92);
   --chrome-rgba: rgba(16, 21, 28, 0.97);
-  --blur: blur(30px) saturate(1.3);
   --ui-font: "JetBrains Mono NL", "Noto Sans SC", monospace;
   --tab-font: var(--ui-font);
   --tab-font-size: 12px;
@@ -70,11 +73,9 @@ body {
   /* 磨砂质感层（::before, z-index:-1）的定位与层叠基准 */
   position: relative;
   isolation: isolate;
-  /* 毛玻璃层：即使很透明，内容层仍有底色保证可读 */
+  /* 终端底色：只由主题背景色 + 「背景不透明度」决定。
+     终端背后是窗口外的桌面，backdrop-filter 采样不到，故此处不做任何背景模糊。 */
   background: var(--bg-rgba);
-  /* 终端背景虚化（受「背景虚化」开关 + 模糊程度控制；关闭时为 none，弹窗模糊不受影响） */
-  backdrop-filter: var(--bg-blur);
-  -webkit-backdrop-filter: var(--bg-blur);
   /* 整窗圆角随圆角级别变化（直角时为 0）；透明窗口下四角露出桌面，形成圆角窗口观感 */
   border-radius: var(--radius-modal);
   overflow: hidden;
@@ -158,69 +159,119 @@ body {
 }
 
 /*
- * 玻璃内容层（终端背景真模糊）：backdrop-filter 够不到窗口外的桌面，
- * 所以自己垫「被模糊的内容」——用确定性的同色系文本点替代 canvas 随机噪声。
- * 随机噪声 + blur 会产生统计性聚集（水渍）；确定性文本点经模糊后形成
- * 均匀的钟形光晕，无水渍、无平铺接缝。受「背景虚化」总开关控制。
+ * 终端背景是窗口外桌面，不在本窗口的合成上下文内 —— backdrop-filter 永远采样
+ * 不到它（三个平台同理）。因此终端侧不做任何背景模糊：可用的只有「底色不透明度」
+ * 与下面的磨砂颗粒层。覆盖层的真实模糊见文件末尾 overlays 材质段。
  */
-:root[data-glass="1"] #glass-content {
-  display: block;
-  position: absolute;
-  inset: 0;
-  z-index: -3; /* 在玻璃面层(-2)、磨砂颗粒(-1)与所有内容之下、#app 半透明底色之上 */
-  pointer-events: none;
-  border-radius: inherit;
-  overflow: hidden;
-}
 
-:root[data-glass="1"] #glass-content .gc-dot {
-  position: absolute;
-  font-size: 4px;
-  line-height: 1;
-  color: color-mix(in srgb, var(--term-fg) 12%, var(--term-bg));
-  filter: blur(4px);
-}
-
-/* 4×4 网格：16 个点均匀分布，模糊后覆盖全屏 */
-:root[data-glass="1"] #glass-content .gc-dot:nth-child(1) { top: 12.5%; left: 12.5%; }
-:root[data-glass="1"] #glass-content .gc-dot:nth-child(2) { top: 12.5%; left: 37.5%; }
-:root[data-glass="1"] #glass-content .gc-dot:nth-child(3) { top: 12.5%; left: 62.5%; }
-:root[data-glass="1"] #glass-content .gc-dot:nth-child(4) { top: 12.5%; left: 87.5%; }
-:root[data-glass="1"] #glass-content .gc-dot:nth-child(5) { top: 37.5%; left: 12.5%; }
-:root[data-glass="1"] #glass-content .gc-dot:nth-child(6) { top: 37.5%; left: 37.5%; }
-:root[data-glass="1"] #glass-content .gc-dot:nth-child(7) { top: 37.5%; left: 62.5%; }
-:root[data-glass="1"] #glass-content .gc-dot:nth-child(8) { top: 37.5%; left: 87.5%; }
-:root[data-glass="1"] #glass-content .gc-dot:nth-child(9) { top: 62.5%; left: 12.5%; }
-:root[data-glass="1"] #glass-content .gc-dot:nth-child(10) { top: 62.5%; left: 37.5%; }
-:root[data-glass="1"] #glass-content .gc-dot:nth-child(11) { top: 62.5%; left: 62.5%; }
-:root[data-glass="1"] #glass-content .gc-dot:nth-child(12) { top: 62.5%; left: 87.5%; }
-:root[data-glass="1"] #glass-content .gc-dot:nth-child(13) { top: 87.5%; left: 12.5%; }
-:root[data-glass="1"] #glass-content .gc-dot:nth-child(14) { top: 87.5%; left: 37.5%; }
-:root[data-glass="1"] #glass-content .gc-dot:nth-child(15) { top: 87.5%; left: 62.5%; }
-:root[data-glass="1"] #glass-content .gc-dot:nth-child(16) { top: 87.5%; left: 87.5%; }
-
-#glass-content { display: none; }
-
-/*
- * 玻璃面层（#glass-veil，真实 div 以获得独立于两个伪元素的层级）：
- * 毛玻璃的"玻璃本体"——对身后的光晕内容做 backdrop-filter 真模糊（跟随
- * 「模糊程度」滑杆，复用 --blur），并罩一层主题底色的"玻璃膜"，让光晕呈现
- * 「隔着玻璃看」的奶雾感，而非画在表面。位于光晕(-3)之上、磨砂颗粒(-1)之下。
+/* ---------- 覆盖层材质（面板 / 菜单 / 弹窗 / 弹出层） ----------
+ *
+ * 为什么只有覆盖层能做玻璃：它们的背后是**应用自己绘制的终端内容**，属于同一
+ * 合成上下文，backdrop-filter 能真实采样；而终端主体背后是窗口外的桌面，
+ * 永远采样不到（三个平台同理，与滤镜写法无关）。
+ *
+ * 材质三选一由 settings 下发（:root[data-overlay-mat]）：
+ *   none   无      —— 接近不透明的主题底色（tint 0.94），可读性最高
+ *   blur   毛玻璃  —— 真模糊 + tint 0.72；模糊半径由「模糊程度」滑杆决定
+ *   liquid 液态    —— 真模糊（半径固定 28px，不吃滑杆）+ tint 0.56
+ *                      + 四边厚度 + 跟随指针的镜面高光
+ *   三档 tint 都是实测的对比度地板（见 themes.ts::applyOverlayMaterial 的数据），
+ *   不是审美取值；改动前请先复跑 WCAG 判据。
+ *
+ * 全部尺寸/透明度都走 --mat-* 令牌，:root 里给的是兜底默认值：
+ * backdrop-filter 引用未定义变量会导致整条声明被静默丢弃（WebKitGTK 实测），
+ * 所以令牌必须两处都有值。兜底档位的选择理由见下面 :root 的注释。
+ *
+ * 已知引擎边界（WebKitGTK 2.54.3 实测）：backdrop-filter: url(#svgFilter) 会被
+ * 静默丢弃，无法做真实折射位移。液态玻璃的「透镜感」用内阴影厚度 + 径向高光
+ * 伪造，不依赖 SVG 滤镜。
  */
-#glass-veil {
-  display: none;
+
+:root {
+  /* 兜底 = none 档（不模糊 + 高不透明底色），这是唯一在 data-overlay-mat
+     尚未设置时也能完整自洽的一档：liquid/none 的厚度、高光、覆盖规则都以
+     [data-overlay-mat=...] 为前提，dataset 缺失时不会生效。
+     若把兜底写成 liquid 的 backdrop/tint（曾犯过的错），加载前构造出的浮层会拿到
+     「模糊 + 低底色但无厚度高光」这个三档都不存在的半成品；写成 blur 档的 0.72
+     更糟：不模糊却透出 28% 背景，正是本次要消灭的鬼影。
+     正常情况下 applyThemeToUI 会在 settings 加载后立刻覆写这五个令牌。 */
+  --mat-backdrop: none;
+  --mat-tint: rgba(16, 21, 28, 0.94);
+  --mat-hi: 0;
+  --mat-rim: color-mix(in srgb, var(--term-fg) 16%, transparent);
+  --mat-shadow: 0 14px 42px rgba(0, 0, 0, 0.42);
 }
 
-:root[data-glass="1"] #glass-veil {
-  display: block;
-  position: absolute;
-  inset: 0;
-  z-index: -2;
-  pointer-events: none;
-  border-radius: inherit;
-  backdrop-filter: var(--bg-blur);
-  -webkit-backdrop-filter: var(--bg-blur);
-  background: color-mix(in srgb, var(--term-bg) 33%, transparent);
+/* 覆盖层材质作用面：面板 / 菜单 / 弹窗 / 弹出层。
+   用 :is() 分组而非给元素添加类名 —— 这 8 处分散在 HTML 与 4 个 TS 创建点，
+   集中在此一处收敛，避免改动 DOM 结构。:is() 取最高特异性，
+   #explorer-panel / #remote-panel 的 ID 特异性足以压过各组件自有规则。
+
+   ⚠ 本选择器的特异性是 (1,0,0)（取了参数里 ID 选择器的最高值），
+   高于 .modal(0,1,0) 与 .modal.settings(0,2,0)。**绝对不要在这里加 overflow**：
+   实测（WebKitGTK 2.54.3）inset 阴影随背景层一起画在 border-radius 边框内，
+   overflow 取 visible/hidden 时圆角区逐像素差为 0（加它防不了"毛边"），
+   而一旦写 overflow 就会盖掉 .modal{overflow:auto} —— 那是设置弹窗唯一的滚动机制。
+   各浮层是否需要裁剪，由自己的规则决定。 */
+:is(#explorer-panel, #remote-panel, .ctx-menu, .modal, .file-tooltip, .transfer-panel, .toast, .hfile-overlay) {
+  background-color: var(--mat-tint);
+  backdrop-filter: var(--mat-backdrop);
+  -webkit-backdrop-filter: var(--mat-backdrop);
+  box-shadow: var(--mat-shadow);
+  /* 此处刻意【不】设置 overflow：
+     1) 实测（WebKitGTK 2.54.3）inset 阴影随背景层一起画在 border-radius 边框内，
+        overflow 取 visible/hidden 时圆角区逐像素差为 0，加它并不能防"毛边"；
+     2) 本选择器含 ID 选择器 #explorer-panel，:is() 取最高特异性(1,0,0)，
+        会盖过 .modal{overflow:auto}(0,1,0) —— 一旦写成 clip，设置弹窗
+        （max-height:86vh + overflow:auto 是其唯一滚动机制）将彻底无法滚动。
+     各浮层是否需要裁剪，仍由自己的规则决定。 */
+}
+
+/* 液态玻璃：边缘镜面反射 + 材料厚度。
+ *
+ * 设计依据 —— Apple Liquid Glass 的高光在**边缘**，不在中央：
+ * 玻璃是一块有厚度的材料，光从侧面照射时只有朝向光源的那圈边缘会反射出
+ * 一条细亮线（specular rim），材料内部几乎是均匀的。
+ *
+ * 早先版本做成了「指针跟随的中央径向光晕」，那是网页常见的卡片聚光灯
+ * （glassmorphism card），与 Liquid Glass 不是一回事：它把整块面板底面从
+ * 亮度 24 抬到 47（+95%），而文字最亮处只有 ~170，对比度被吃掉一半，
+ * 观感就是「蒙了一层灰、字看不清」。中央光晕已移除。
+ *
+ * 本引擎做不到的部分要说清楚：真正的 lensing（边缘折射位移，背后内容在
+ * 边缘附近被弯曲放大）需要 backdrop-filter: url(#svgFilter)，而 WebKitGTK
+ * 2.54.3 会静默丢弃该声明（实测：同滤镜用于元素自身 filter 时正常，用于
+ * backdrop 时无效）。所以这里用「边缘亮线 + 内阴影厚度」表达玻璃的材料感，
+ * 不假装有折射。
+ */
+:root[data-overlay-mat="liquid"]
+  :is(#explorer-panel, #remote-panel, .ctx-menu, .modal, .file-tooltip, .transfer-panel, .toast, .hfile-overlay) {
+  /* 只有极淡的顶部内辉：模拟玻璃上沿受光，强度压到几乎只剩「材质不是纯平」。
+     不跟随指针、不覆盖文字区。 */
+  background-image: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, calc(var(--mat-hi) * 1.4)),
+    rgba(255, 255, 255, 0) 24%
+  );
+  /* 厚度：上/左边缘受光，下/右边缘积暗 → 材料有立体感。
+     边缘高光用固定系数而非 --mat-hi：它只有 1px 宽，量化上几乎不影响
+     任何区域的对比度，却是「像玻璃」的主要来源，不该跟着内辉一起被压低。 */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.36),
+    inset 1px 0 0 rgba(255, 255, 255, 0.16),
+    inset -1px 0 0 rgba(0, 0, 0, 0.22),
+    var(--mat-shadow);
+  /* 此处不再单独设 border-color：8 个浮层的 border 都已直接引用 --mat-rim
+     （该变量本身按材质分档取值），若在此再写 border-color，其 :is() 特异性会
+     压过 .toast.error 等状态色规则，把错误提示的红边吞掉。 */
+}
+
+/* 无材质：不要任何模糊残留，底色拉满保证可读 */
+:root[data-overlay-mat="none"]
+  :is(#explorer-panel, #remote-panel, .ctx-menu, .modal, .file-tooltip, .transfer-panel, .toast, .hfile-overlay) {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 /* 仅一个标签页时不显示标签栏（由 JS 切换 .single 类） */
@@ -669,13 +720,9 @@ body {
   bottom: 4px;
   width: 45%;
   z-index: 60;
-  /* 毛玻璃但偏实：文件操作需要专注，透明度比主窗口高 2%，背后仍强模糊 */
-  background: var(--panel-rgba);
-  backdrop-filter: blur(35px) saturate(1.4);
-  -webkit-backdrop-filter: blur(35px) saturate(1.4);
-  border: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
+  /* 材质由覆盖层材质分组规则统一提供（见文件顶部覆盖层材质段） */
+  border: 1px solid var(--mat-rim);
   border-radius: var(--radius);
-  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.25);
   overflow: hidden;
   /* 常驻 DOM，用位移+透明度做进出动画（display:none 无法过渡） */
   transform: translateX(calc(100% + 8px));
@@ -698,13 +745,9 @@ body {
   bottom: 4px;
   width: 45%;
   z-index: 60;
-  /* 毛玻璃但偏实：文件操作需要专注，透明度比主窗口高 2%，背后仍强模糊 */
-  background: var(--panel-rgba);
-  backdrop-filter: blur(35px) saturate(1.4);
-  -webkit-backdrop-filter: blur(35px) saturate(1.4);
-  border: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
+  /* 材质由覆盖层材质分组规则统一提供 */
+  border: 1px solid var(--mat-rim);
   border-radius: var(--radius);
-  box-shadow: 8px 0 24px rgba(0, 0, 0, 0.25);
   overflow: hidden;
   transform: translateX(calc(-100% - 8px));
   opacity: 0;
@@ -967,14 +1010,10 @@ body {
   position: fixed;
   z-index: 200;
   min-width: 180px;
-  /* 底色 62%→74%：背后终端透出过多时菜单文字发灰，与弹窗同款提对比度 */
-  background: color-mix(in srgb, var(--term-bg) 74%, transparent);
-  backdrop-filter: blur(33px) saturate(1.6);
-  -webkit-backdrop-filter: blur(33px) saturate(1.6);
-  border: 1px solid color-mix(in srgb, var(--term-fg) 16%, transparent);
+  /* 材质由覆盖层材质分组规则统一提供 */
+  border: 1px solid var(--mat-rim);
   border-radius: var(--radius);
   padding: 4px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
   transform-origin: top left;
   animation: fade-in 0.1s ease;
 }
@@ -1034,21 +1073,15 @@ body {
 }
 
 .modal {
-  /* 真·毛玻璃：背景很透明 + 背后强模糊。弹窗挂在 body（非嵌套于 #app 的 backdrop-filter），
-     只有一层 backdrop-filter，性能可接受；入场只做透明度渐显、不缩放，避免多帧重算模糊。 */
-  /* 底色不透明度是文字对比度的地板：58% 时背后终端透出太多、字发灰，
-     提到 72% 后各主题下文字都清晰，毛玻璃质感仍在 */
-  background: color-mix(in srgb, var(--term-bg) 72%, transparent);
-  backdrop-filter: blur(33px) saturate(1.7);
-  -webkit-backdrop-filter: blur(33px) saturate(1.7);
-  border: 1px solid color-mix(in srgb, var(--term-fg) 18%, transparent);
+  /* 材质由覆盖层材质分组规则统一提供（无材质时为接近不透明的主题底色，
+     有材质时底色是文字对比度的地板，模糊质感在；入场只做透明度渐显、
+     不缩放，避免多帧重算模糊） */
+  border: 1px solid var(--mat-rim);
   border-radius: var(--radius-modal);
   padding: 20px;
   max-width: min(860px, 92vw);
   max-height: 86vh;
   overflow: auto;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 color-mix(in srgb, var(--term-fg) 12%, transparent);
   /* 不对毛玻璃层做透明度入场动画：backdrop-filter blur 会在动画每一帧重算模糊
      （叠加背后实时终端），是「打开设置有点卡」的主因。改为一次合成到位，
      入场淡入交给遮罩层 overlay-in（不带模糊、开销极低），毛玻璃观感不变。 */
@@ -1675,6 +1708,36 @@ input[type="checkbox"] {
   margin-top: 4px;
 }
 
+/* 覆盖层材质三选一（无 / 毛玻璃 / 液态玻璃）：文字按钮，与圆角选择器同风格 */
+.mat-picker {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.mat-opt {
+  border: 1px solid color-mix(in srgb, var(--term-fg) 18%, transparent);
+  background: color-mix(in srgb, var(--term-fg) 5%, transparent);
+  color: color-mix(in srgb, var(--term-fg) 65%, transparent);
+  border-radius: 7px;
+  padding: 5px 14px;
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+
+.mat-opt:hover {
+  color: var(--term-fg);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.mat-opt.selected {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
 .radius-opt {
   border: 1px solid color-mix(in srgb, var(--term-fg) 18%, transparent);
   background: color-mix(in srgb, var(--term-fg) 5%, transparent);
@@ -1763,15 +1826,13 @@ input[type="checkbox"] {
 .file-tooltip {
   position: fixed;
   z-index: 180;
-  background: var(--chrome-rgba);
-  backdrop-filter: blur(16px);
-  border: 1px solid color-mix(in srgb, var(--term-fg) 18%, transparent);
+  /* 材质由覆盖层材质分组规则统一提供；浮层指针穿透，不拦截交互 */
+  border: 1px solid var(--mat-rim);
   border-radius: 8px;
   padding: 10px 12px;
   font-size: 12px;
   pointer-events: none;
   max-width: 420px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
 
 .tip-path {
@@ -2114,14 +2175,18 @@ input[type="checkbox"] {
   bottom: 24px;
   left: 50%;
   transform: translate(-50%, 12px);
-  background: var(--chrome-rgba);
-  border: 1px solid color-mix(in srgb, var(--term-fg) 20%, transparent);
+  /* 材质由覆盖层材质分组规则统一提供 */
+  border: 1px solid var(--mat-rim);
   border-radius: 8px;
   padding: 9px 18px;
   font-size: 13px;
   z-index: 300;
   opacity: 0;
-  transition: all 0.25s;
+  /* 显式列出过渡属性，不用 all：toast 现在是覆盖层材质作用面之一，
+     `transition: all` 会把 backdrop-filter / box-shadow 也纳入过渡，于是每次弹
+     toast 都逐帧重算整块模糊（同 .modal「毛玻璃不做透明度入场动画」那条契约）。
+     颜色类属性保留过渡，与原 all 的观感一致（.toast.error 红边仍淡入）。 */
+  transition: opacity 0.25s, transform 0.25s, color 0.25s, border-color 0.25s;
   max-width: 70vw;
 }
 
@@ -2151,10 +2216,9 @@ input[type="checkbox"] {
   flex-direction: column;
   width: 320px;
   max-height: 60vh;
-  background: var(--chrome-rgba);
-  border: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
+  /* 材质由覆盖层材质分组规则统一提供 */
+  border: 1px solid var(--mat-rim);
   border-radius: 10px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
   overflow: hidden;
   font-size: 12px;
 }
@@ -2464,30 +2528,25 @@ input[type="checkbox"] {
   color: #e5484d;
 }
 
-/* 亮色主题下的阴影与遮罩微调 */
-
+/* 亮色主题下遮罩更淡（压暗层，不属于覆盖层材质作用面）。
+   暗色主题的遮罩从不带模糊（见 .modal-overlay 本体），此处原先特意加了
+   blur(24px)，造成明暗两套行为不一致、且「覆盖层材质=无」时仍然糊背景。
+   现统一为纯压暗：模糊只由覆盖层材质决定。 */
 :root[data-base="light"] .modal-overlay {
   background: rgba(255, 255, 255, 0.28);
-  backdrop-filter: blur(24px) saturate(1.3);
-  -webkit-backdrop-filter: blur(24px) saturate(1.3);
 }
 
-:root[data-base="light"] .ctx-menu,
-:root[data-base="light"] .modal {
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
-}
+/* 亮色主题下覆盖层阴影更轻：交给 --mat-shadow 令牌，由 themes.ts 按明暗基调决定。
+   （原先在此硬编码 box-shadow，会覆盖材质令牌，已移除） */
 
 /* ---------- hfile 浮动覆盖层（-w 模式，跟随终端分屏定位） ---------- */
 
 .hfile-overlay {
   position: fixed;
   z-index: 200;
-  background: var(--panel-rgba);
-  backdrop-filter: blur(35px) saturate(1.4);
-  -webkit-backdrop-filter: blur(35px) saturate(1.4);
-  border: 1px solid color-mix(in srgb, var(--term-fg) 15%, transparent);
+  /* 材质由覆盖层材质分组规则统一提供（hfile -w 浮动覆盖层同样属于弹出层） */
+  border: 1px solid var(--mat-rim);
   border-radius: var(--radius);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
   overflow: hidden;
   display: flex;
   flex-direction: column;

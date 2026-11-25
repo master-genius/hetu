@@ -38,16 +38,16 @@ export interface Settings {
   titlebarColor: string | null;
   customThemes: ThemeDef[];
   opacity: number;
-  blur: boolean;
-  /** 毛玻璃模糊程度（px） */
-  blurAmount: number;
-  /** 背景虚化：终端整体背景虚化/光晕/玻璃效果的总开关（默认开）。
-   *  关闭后透明度仍作用于底色，但复杂背景效果停用，弹窗模糊不受影响。 */
-  bgBlur: boolean;
-  /** 磨砂质感：独立于毛玻璃的表面颗粒层（同色系噪点） */
+  /** 磨砂质感：终端背景的表面颗粒层（同色系噪点，不采样任何背景） */
   frosted: boolean;
   /** 磨砂程度 0–100（映射颗粒透明度） */
   frostStrength: number;
+  /** 覆盖层材质："none" 无 | "blur" 毛玻璃 | "liquid" 液态玻璃
+   *  作用面为面板/弹窗/菜单/弹出层——它们的背后是应用自己绘制的内容，可被采样；
+   *  终端主体不参与（背后是窗口外桌面，backdrop-filter 采样不到）。 */
+  overlayMaterial: "none" | "blur" | "liquid";
+  /** 覆盖层模糊半径（px，0–60），仅 overlayMaterial = "blur" 时生效 */
+  overlayBlur: number;
   /** 圆角级别 */
   cornerRadius: "square" | "xs" | "sm" | "md" | "lg";
   /** 标签页平分横向宽度 */
