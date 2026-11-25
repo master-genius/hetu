@@ -345,7 +345,7 @@ export function applyThemeToUI(
   // 终端主体不做任何背景模糊：它的背后是窗口外桌面，不在本窗口合成上下文内，
   // backdrop-filter 永远采样不到。终端背景只有「底色不透明度」与磨砂颗粒层。
   // 覆盖层材质（面板/弹窗/菜单/弹出层）在这里下发，作用面见 styles.css 的 overlays 段。
-  applyOverlayMaterial(root, theme, overlayMaterial, overlayBlur);
+  applyOverlayMaterial(root, theme, overlayMaterial, overlayBlur, opacity);
 }
 
 /**
@@ -360,6 +360,7 @@ function applyOverlayMaterial(
   theme: ThemeDef,
   material: OverlayMaterial,
   overlayBlur: number,
+  opacity: number,
 ) {
   const bg = theme.colors.background ?? "#10151c";
   const fg = theme.colors.foreground ?? "#d8dee9";
@@ -374,13 +375,29 @@ function applyOverlayMaterial(
   // 「模糊程度」滑杆只在 blur 档显示（见 dialogs.ts 的 syncOverlayBlurVisibility），
   // 若 liquid 也吃这个值，用户在 blur 档把滑杆拖到 0 再切到 liquid，就会得到
   // 「无模糊的玻璃」，而滑杆此时是隐藏的 —— 无法从 UI 修复。
-  // 取 28px：实测在 tint 0.56 下足以把背后终端文字糊成均匀色块（鬼影抑制同 blur 档量级）。
   const LIQUID_BLUR_PX = 28;
 
+  // 文件面板透明度自适应（还原原有逻辑，勿改）：
+  // 低透明度时略高（+4%）保持可用性，高透明度时略低（-4%）保持通透美感，
+  // 中间范围与主窗口一致。
+  let panelAlpha: number;
+  if (opacity <= 0.42) {
+    panelAlpha = Math.min(1, opacity + 0.04);
+  } else if (opacity > 0.81) {
+    panelAlpha = Math.max(0, opacity - 0.04);
+  } else {
+    panelAlpha = opacity;
+  }
+
+  // 覆盖层底色一律以 panelAlpha 为基准，再按材质加减固定偏移，
+  // 保留三档「无材质更实 / 液态更透」的相对差异。
+  // 夹 [0,1]；下限不退让到对比度地板以下由 CSS 的模糊与高光共同补偿。
+  const tint = (delta: number) => Math.min(1, Math.max(0, panelAlpha + delta));
+
   if (mat === "none") {
-    // 无材质：覆盖层用接近不透明的主题底色，保证可读性最高
+    // 无材质：不模糊，底色比基准略实一点
     root.style.setProperty("--mat-backdrop", "none");
-    root.style.setProperty("--mat-tint", hexToRgba(bg, 0.94));
+    root.style.setProperty("--mat-tint", hexToRgba(bg, tint(0.15)));
   } else if (mat === "liquid") {
     // 液态玻璃：真模糊 + 饱和度增益（质感靠高光与厚度撑起）。
     //
@@ -388,20 +405,12 @@ function applyOverlayMaterial(
     // 「玻璃更亮」无法区分，实测让面板亮度从 10 涨到 37（3.6×）——那主要是
     // 背景内容被提亮，而不是玻璃质感。亮度交由高光层（--mat-hi）表达。
     //
-    // tint 0.56 是实测出来的**对比度地板**，不是审美取值。
-    // 判据：探针块内不放文字，采样区即浮层纯底色；背景铺满高亮 ANSI（模拟
-    // vim 语法高亮的最坏情况）；取底色亮度分布的 p95 与前景 #fcfdfe 算 WCAG。
-    //   tint 0.42 → 最差 4.01:1（.modal/.hfile-overlay 区，✗ 低于 AA 4.5:1）
-    //   tint 0.50 → 最差 4.61:1（✓ 但余量仅 0.11，真实 ANSI 更亮即跌破）
-    //   tint 0.56 → 最差 5.15:1（✓ 采用，余量充足）
-    // 亮色主题同批实测最差 8.01:1，无需分档处理。
-    // 原 .ctx-menu 注释里「底色 62%→74%：透出过多时菜单文字发灰」是同一条经验，
-    // 首版实现把它抹掉了，此处以量化依据恢复。
+    // tint = panelAlpha - 0.07：比基准略透，体现「玻璃」比实心面板通透；
+  // 该偏移在原固定 tint（0.56）与本基准之间取了折中，避免玻璃过透压不住文字。
     root.style.setProperty("--mat-backdrop", `blur(${LIQUID_BLUR_PX}px) saturate(1.65)`);
-    root.style.setProperty("--mat-tint", hexToRgba(bg, 0.56));
+    root.style.setProperty("--mat-tint", hexToRgba(bg, tint(-0.07)));
   } else {
-    // 毛玻璃：底色是「面板自身文字的对比度地板」（72% 时背后透出量刚好，
-    // 既能看出模糊质感又不发灰）；而模糊在此底色下的主要价值是**消除锐利鬼影**：
+    // 毛玻璃：底色取 panelAlpha 基准（自适应主窗透明度），模糊负责消除鬼影：
     // 实测 blur=0 时面板内残留 8.6 的高频方差（背后终端文字锐利透出），
     // blur=24 时降到 1.9（消除约 78%），这是旧「背景虚化」从未提供的能力。
     // 半径取「模糊程度」滑杆值（唯一消费该设置的地方）。
@@ -409,7 +418,7 @@ function applyOverlayMaterial(
       ? Math.max(0, Math.min(60, Math.round(overlayBlur)))
       : 24;
     root.style.setProperty("--mat-backdrop", `blur(${px}px) saturate(1.55)`);
-    root.style.setProperty("--mat-tint", hexToRgba(bg, 0.72));
+    root.style.setProperty("--mat-tint", hexToRgba(bg, tint(0)));
   }
   // 液态玻璃顶部内辉的强度。只有液态玻璃消费它（styles.css 里所有 var(--mat-hi)
 // 都位于 [data-overlay-mat="liquid"] 规则内）。
