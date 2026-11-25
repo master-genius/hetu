@@ -389,9 +389,7 @@ function applyOverlayMaterial(
     panelAlpha = opacity;
   }
 
-  // 覆盖层底色一律以 panelAlpha 为基准，再按材质加减固定偏移，
-  // 保留三档「无材质更实 / 液态更透」的相对差异。
-  // 夹 [0,1]；下限不退让到对比度地板以下由 CSS 的模糊与高光共同补偿。
+  // 各材质在 panelAlpha 基准上的固定偏移：无材质更实、液态玻璃更透。
   const tint = (delta: number) => Math.min(1, Math.max(0, panelAlpha + delta));
 
   if (mat === "none") {
@@ -405,10 +403,21 @@ function applyOverlayMaterial(
     // 「玻璃更亮」无法区分，实测让面板亮度从 10 涨到 37（3.6×）——那主要是
     // 背景内容被提亮，而不是玻璃质感。亮度交由高光层（--mat-hi）表达。
     //
-    // tint = panelAlpha - 0.07：比基准略透，体现「玻璃」比实心面板通透；
-  // 该偏移在原固定 tint（0.56）与本基准之间取了折中，避免玻璃过透压不住文字。
+    // 底色走**独立公式**，语义是「比 panelAlpha 基准更通透的玻璃」：
+    // 基准偏移 -0.07（玻璃比实心面板透），再额外 -0.05（液态玻璃比毛玻璃更透），
+    // 合计 -0.12。两个数分开写而不是合并成 -0.12，是为了让「哪一部分属于玻璃
+    // 的共性、哪一部分属于液态玻璃的特性」在代码里可读、可单独调整。
+    // 地板 0.44：低于它在本项目实测的对比度曲线上开始压不住 11px 小字，
+    // 因此即便用户把「背景不透明度」拖到底，液态玻璃也不会比它更透。
+    const LIQUID_TINT_BASE = -0.07;
+    const LIQUID_TINT_EXTRA = -0.05;
+    const LIQUID_TINT_FLOOR = 0.44;
+    const liquidTint = Math.min(
+      1,
+      Math.max(LIQUID_TINT_FLOOR, panelAlpha + LIQUID_TINT_BASE + LIQUID_TINT_EXTRA),
+    );
     root.style.setProperty("--mat-backdrop", `blur(${LIQUID_BLUR_PX}px) saturate(1.65)`);
-    root.style.setProperty("--mat-tint", hexToRgba(bg, tint(-0.07)));
+    root.style.setProperty("--mat-tint", hexToRgba(bg, liquidTint));
   } else {
     // 毛玻璃：底色取 panelAlpha 基准（自适应主窗透明度），模糊负责消除鬼影：
     // 实测 blur=0 时面板内残留 8.6 的高频方差（背后终端文字锐利透出），
