@@ -174,7 +174,7 @@ body {
  *   none   无      —— 不模糊，底色 = panelAlpha + 0.15，可读性最高
  *   blur   毛玻璃  —— 真模糊；半径取「模糊程度」滑杆，底色 = panelAlpha
  *   liquid 液态    —— 真模糊（半径固定 28px，不吃滑杆）；
- *                      底色 = clamp(panelAlpha − 0.10, 下限 0.44)；
+ *                      底色 = clamp(panelAlpha − 0.09, 下限 0.44)；
  *                      + 边缘镜面光路（光全部落在边上，见下方液态玻璃段）
  *   三档底色都受实测的对比度地板约束（见 themes.ts::applyOverlayMaterial 的
  *   常量与注释），不是审美取值；改动前请先复跑 WCAG 判据。
