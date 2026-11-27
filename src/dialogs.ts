@@ -677,7 +677,7 @@ export function showSettingsDialog() {
   const MATS: Array<{ v: Settings["overlayMaterial"]; label: string; hint: string }> = [
     { v: "none", label: "无", hint: "覆盖层用接近不透明的主题底色，可读性最高" },
     { v: "blur", label: "毛玻璃", hint: "覆盖层背景做均匀模糊，可调模糊程度" },
-    { v: "liquid", label: "液态玻璃", hint: "模糊 + 边缘厚度 + 跟随指针的镜面高光（模糊半径由材质固定，不受下方滑杆影响）" },
+    { v: "liquid", label: "液态玻璃", hint: "真模糊 + 边缘镜面光（光落在四边的窄亮带上，不铺满面板；模糊半径由材质固定，不受下方滑杆影响）" },
   ];
   const renderMats = () => {
     matPicker.textContent = "";

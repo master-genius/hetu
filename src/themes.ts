@@ -375,7 +375,16 @@ function applyOverlayMaterial(
   // 「模糊程度」滑杆只在 blur 档显示（见 dialogs.ts 的 syncOverlayBlurVisibility），
   // 若 liquid 也吃这个值，用户在 blur 档把滑杆拖到 0 再切到 liquid，就会得到
   // 「无模糊的玻璃」，而滑杆此时是隐藏的 —— 无法从 UI 修复。
-  const LIQUID_BLUR_PX = 28;
+  //
+  // 半径取 25：这一档是三次实测后的落点 ——
+  //   28px 会把背后 11px 小字揉成一片均匀色块，观感是「不透明的雾」，
+  //        玻璃反而看着更实（降级前的值）；
+  //   20px 仍保留行间起伏，但在「底色已抬亮」（见下方 LIQUID_LIFT）之后，
+  //        背后内容被压得太清楚，与抬亮的材料叠加会显得不够「隔着一层」；
+  //   25px 介于两者：文字已不可辨形，但色块与行距仍透得出结构。
+  // 注意这个值只在「底色抬亮 6%」的前提下成立：抬亮会让材料自身可见，
+  // 于是模糊可以更重而不会变成一块不透明的板。改动任一参数都要同步复验。
+  const LIQUID_BLUR_PX = 25;
 
   // 文件面板透明度自适应（还原原有逻辑，勿改）：
   // 低透明度时略高（+4%）保持可用性，高透明度时略低（-4%）保持通透美感，
@@ -401,23 +410,36 @@ function applyOverlayMaterial(
     //
     // 刻意不加 brightness()：它会把「背后透出的内容」整体提亮，视觉上与
     // 「玻璃更亮」无法区分，实测让面板亮度从 10 涨到 37（3.6×）——那主要是
-    // 背景内容被提亮，而不是玻璃质感。亮度交由高光层（--mat-hi）表达。
+    // 背景内容被提亮，而不是玻璃质感。亮度交由边缘光路（--mat-hi）表达。
+    // 这也是「色透上来、亮不透上来」的分界线：saturate 增益让背后的颜色更鲜，
+    // 但底色与边缘光都不去抬升整体亮度。
     //
     // 底色走**独立公式**，语义是「比 panelAlpha 基准更通透的玻璃」：
-    // 基准偏移 -0.07（玻璃比实心面板透），再额外 -0.05（液态玻璃比毛玻璃更透），
-    // 合计 -0.12。两个数分开写而不是合并成 -0.12，是为了让「哪一部分属于玻璃
+    // 基准偏移 -0.07（玻璃比实心面板透），再额外 -0.03（液态玻璃比毛玻璃更透），
+    // 合计 -0.10。两个数分开写而不是合并成 -0.10，是为了让「哪一部分属于玻璃
     // 的共性、哪一部分属于液态玻璃的特性」在代码里可读、可单独调整。
     // 地板 0.44：低于它在本项目实测的对比度曲线上开始压不住 11px 小字，
     // 因此即便用户把「背景不透明度」拖到底，液态玻璃也不会比它更透。
     const LIQUID_TINT_BASE = -0.07;
-    const LIQUID_TINT_EXTRA = -0.05;
+    const LIQUID_TINT_EXTRA = -0.03;
     const LIQUID_TINT_FLOOR = 0.44;
     const liquidTint = Math.min(
       1,
       Math.max(LIQUID_TINT_FLOOR, panelAlpha + LIQUID_TINT_BASE + LIQUID_TINT_EXTRA),
     );
-    root.style.setProperty("--mat-backdrop", `blur(${LIQUID_BLUR_PX}px) saturate(1.65)`);
-    root.style.setProperty("--mat-tint", hexToRgba(bg, liquidTint));
+    // 底色**不是**背景色的半透明复制，而是朝白抬高一档的独立颜色 —— 见
+    // liftToward 的实测数据：用背景色会让面板在终端空白区完全隐形（差 0.2/255），
+    // 「色透上来、亮不透上来」说的是**背景内容**不要被提亮，不是材料本身
+    // 不能比背景亮。材料必须有亮度差才成其为材料。
+    const LIQUID_LIFT = 0.06;
+    root.style.setProperty(
+      "--mat-tint",
+      hexToRgba(liftToward(bg, LIQUID_LIFT, theme.base === "light" ? "light" : "dark"), liquidTint),
+    );
+    // 模糊与饱和：25px 沿用 LIQUID_BLUR_PX（取值理由见该常量处）。
+    // saturate 1.9：玻璃的「色透上来」靠它，背后 ANSI 彩色文字透过来的颜色
+    // 更鲜，与抬亮的底色形成「有色无亮」的分离感。
+    root.style.setProperty("--mat-backdrop", `blur(${LIQUID_BLUR_PX}px) saturate(1.9)`);
   } else {
     // 毛玻璃：底色取 panelAlpha 基准（自适应主窗透明度），模糊负责消除鬼影：
     // 实测 blur=0 时面板内残留 8.6 的高频方差（背后终端文字锐利透出），
@@ -429,15 +451,30 @@ function applyOverlayMaterial(
     root.style.setProperty("--mat-backdrop", `blur(${px}px) saturate(1.55)`);
     root.style.setProperty("--mat-tint", hexToRgba(bg, tint(0)));
   }
-  // 液态玻璃顶部内辉的强度。只有液态玻璃消费它（styles.css 里所有 var(--mat-hi)
-// 都位于 [data-overlay-mat="liquid"] 规则内）。
-// 高光在**边缘**而非中央：液态玻璃的镜面反射来自材料边缘朝向光源的那一圈，
-// 不是指针跟随的中央光斑（后者是网页卡片聚光灯，会把底面从 24 抬到 47、+95%，
-// 文字对比度被吃掉一半）。此处只给顶部 24% 高度一层极淡内辉，让材料不至于纯平。
-  const hi = mat === "liquid" ? "0.05" : "0";
+  // 液态玻璃边缘光路的强度基准。只有液态玻璃消费它（styles.css 里所有
+  // var(--mat-hi) 都位于 [data-overlay-mat="liquid"] 规则内）。
+  //
+  // 高光在**边缘**而非中央：液态玻璃的镜面反射来自材料边缘朝向光源的那一圈，
+  // 不是指针跟随的中央光斑（后者是网页卡片聚光灯，会把底面从 24 抬到 47、+95%，
+  // 文字对比度被吃掉一半，已移除）。也不是「顶部一整片均匀面纱」——那同样把
+  // 能量铺在面上，实测衰减横跨 40px、全程高于底色 75%，观感是蒙了一层灰。
+  // 现在这个值只驱动 6 条贴边 inset 阴影，光全部落在边缘 14px 内。
+  //
+  // 明暗分档的理由：同一份白色高光，压在深色终端上（底 ~20）与压在亮色主题上
+  // （底 ~246）的相对对比差很大。两档都是实测值（阶梯剖面反解），不是估计：
+  //   暗色 0.26 → 1px 峰值 175，底色 20，收敛 8px
+  //   亮色 0.34 → 1px 峰值 253（已接近 255 上限），底色 246，收敛 2px
+  // 亮色档不能再高：白色高光在亮底上很快触及 255 饱和，抬 alpha 只会让亮带
+  // 变宽而不是变亮，反而糊掉边缘。所以亮色靠边框的暗线勾勒轮廓
+  // （实测边框 207 vs 底色 246），高光只负责上沿一线。
+  const hi = mat === "liquid" ? (theme.base === "light" ? "0.34" : "0.26") : "0";
   root.style.setProperty("--mat-hi", hi);
-  // 边框：液态玻璃需要更明确的玻璃沿口
-  root.style.setProperty("--mat-rim", colorMixAlpha(fg, mat === "liquid" ? 0.26 : 0.16));
+  // 边框：液态玻璃需要更明确的玻璃沿口。上沿已有 inset 高光，若边框也用 0.26
+  // 会和光叠加成双线，故降到 0.18（实测 0.26 时顶边呈现 2px 宽亮线，不像单层玻璃）。
+  root.style.setProperty(
+    "--mat-rim",
+    colorMixAlpha(fg, mat === "liquid" ? 0.18 : 0.16),
+  );
   // 外阴影：亮色主题阴影更轻（深阴影在白底上发脏），暗色主题更重靠阴影分层
   const shadowAlpha = theme.base === "light" ? 0.18 : 0.42;
   const shadowY = theme.base === "light" ? 28 : 42;
@@ -460,4 +497,29 @@ export function hexToRgba(hex: string, alpha: number): string {
   const g = parseInt(m.slice(2, 4), 16);
   const b = parseInt(m.slice(4, 6), 16);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+/**
+ * 把主题底色朝白色抬起一档，作为覆盖层材质的 tint 色。
+ *
+ * 为什么必须要抬：覆盖层直接用「背景色 + alpha」时，叠在同色背景上恒等于背景
+ * （result = α·bg + (1−α)·blur(bg) = bg），面板在终端空白区**完全隐形**，
+ * 只剩一圈边光。实测（Chromium/WebKitGTK，终端空白区）：
+ *     背景 L=19.9
+ *     同色 tint    → 面板内部 L=20.1   差值 +0.2   不可见
+ *     抬亮 5%      → L=29.0            差值 +9.1   清晰
+ *     抬亮 6%      → L=30.1            差值 +10.2  清晰
+ *     抬亮 9%      → L=35.0            差值 +15.2  偏灰、发闷
+ * 5–6% 是「看得见但不发灰」的窗口，取 6%。
+ *
+ * 亮色主题反向朝黑抬：白底上再提亮只会撞上 255 溢出，需要压暗才显出材料。
+ *
+ * @param hex   主题背景色
+ * @param lift  抬升比例 0–1（暗色朝白 / 亮色朝黑）
+ */
+function liftToward(hex: string, lift: number, base: "dark" | "light"): string {
+  const m = hex.replace("#", "");
+  const ch = [0, 2, 4].map((i) => parseInt(m.slice(i, i + 2), 16));
+  const target = base === "light" ? 0 : 255;
+  return `rgb(${ch.map((v) => Math.round(v + (target - v) * lift)).join(", ")})`;
 }

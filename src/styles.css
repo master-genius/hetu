@@ -171,20 +171,23 @@ body {
  * 永远采样不到（三个平台同理，与滤镜写法无关）。
  *
  * 材质三选一由 settings 下发（:root[data-overlay-mat]）：
- *   none   无      —— 接近不透明的主题底色（tint 0.94），可读性最高
- *   blur   毛玻璃  —— 真模糊 + tint 0.72；模糊半径由「模糊程度」滑杆决定
- *   liquid 液态    —— 真模糊（半径固定 28px，不吃滑杆）+ tint 0.56
- *                      + 四边厚度 + 跟随指针的镜面高光
- *   三档 tint 都是实测的对比度地板（见 themes.ts::applyOverlayMaterial 的数据），
- *   不是审美取值；改动前请先复跑 WCAG 判据。
+ *   none   无      —— 不模糊，底色 = panelAlpha + 0.15，可读性最高
+ *   blur   毛玻璃  —— 真模糊；半径取「模糊程度」滑杆，底色 = panelAlpha
+ *   liquid 液态    —— 真模糊（半径固定 28px，不吃滑杆）；
+ *                      底色 = clamp(panelAlpha − 0.10, 下限 0.44)；
+ *                      + 边缘镜面光路（光全部落在边上，见下方液态玻璃段）
+ *   三档底色都受实测的对比度地板约束（见 themes.ts::applyOverlayMaterial 的
+ *   常量与注释），不是审美取值；改动前请先复跑 WCAG 判据。
  *
  * 全部尺寸/透明度都走 --mat-* 令牌，:root 里给的是兜底默认值：
  * backdrop-filter 引用未定义变量会导致整条声明被静默丢弃（WebKitGTK 实测），
  * 所以令牌必须两处都有值。兜底档位的选择理由见下面 :root 的注释。
  *
- * 已知引擎边界（WebKitGTK 2.54.3 实测）：backdrop-filter: url(#svgFilter) 会被
- * 静默丢弃，无法做真实折射位移。液态玻璃的「透镜感」用内阴影厚度 + 径向高光
- * 伪造，不依赖 SVG 滤镜。
+ * 已知引擎边界（WebKitGTK 2.54 实测）：backdrop-filter: url(#svgFilter) 会被
+ * 静默丢弃，无法做真实折射位移。注意它比「不支持」更隐蔽 ——
+ * CSS.supports("backdrop-filter","url(#f)") 返回 true，但渲染时毫无位移；
+ * 同一条滤镜用于元素自身的 filter 则正常。判定只能用渲染像素，不能用 supports。
+ * 液态玻璃的「透镜感」由边缘光路表达，不依赖 SVG 滤镜。
  */
 
 :root {
@@ -197,6 +200,10 @@ body {
      正常情况下 applyThemeToUI 会在 settings 加载后立刻覆写这五个令牌。 */
   --mat-backdrop: none;
   --mat-tint: rgba(16, 21, 28, 0.94);
+  /* 液态玻璃整条边缘光路的强度基准（styles.css 液态玻璃段里 6 条 inset 阴影
+     的 alpha 都写成 calc(var(--mat-hi) * 系数)）。兜底 0 = 无光，与上面
+     「兜底自洽为 none 档」的原则一致：dataset 缺失时 liquid 规则不生效，
+     这个 0 只在主题尚未下发时短暂存在。 */
   --mat-hi: 0;
   --mat-rim: color-mix(in srgb, var(--term-fg) 16%, transparent);
   --mat-shadow: 0 14px 42px rgba(0, 0, 0, 0.42);
@@ -227,7 +234,7 @@ body {
      各浮层是否需要裁剪，仍由自己的规则决定。 */
 }
 
-/* 液态玻璃：边缘镜面反射 + 材料厚度。
+/* 液态玻璃：边缘镜面光路 + 材料厚度。
  *
  * 设计依据 —— Apple Liquid Glass 的高光在**边缘**，不在中央：
  * 玻璃是一块有厚度的材料，光从侧面照射时只有朝向光源的那圈边缘会反射出
@@ -238,29 +245,48 @@ body {
  * 亮度 24 抬到 47（+95%），而文字最亮处只有 ~170，对比度被吃掉一半，
  * 观感就是「蒙了一层灰、字看不清」。中央光晕已移除。
  *
+ * 上一版又矫枉过正成「顶部 24% 高度一层均匀面纱」—— 能量落在**面**上，
+ * 同样不是玻璃。真实产物实测阶梯剖面（WebKitGTK 2.54，终端底色，L 取 0–255，
+ * 详见下方「光路」注释里的逐像素读数）：
+ *     距顶边   面纱版    本版
+ *       1px    110      173    ← 边缘该亮
+ *      +4px     35       32    ← 面该迅速暗下去
+ *     +10px     35       19    ← 已收敛到底色
+ *     +40px     20       19
+ *   面纱版从顶边一路衰减 40px、全程高于底色 75%，等价于在面板上部盖了一层
+ *   接近均匀的纱；本版 8px 内收敛。结论：高光要**窄而亮**，不是**宽而淡**。
+ *
  * 本引擎做不到的部分要说清楚：真正的 lensing（边缘折射位移，背后内容在
  * 边缘附近被弯曲放大）需要 backdrop-filter: url(#svgFilter)，而 WebKitGTK
- * 2.54.3 会静默丢弃该声明（实测：同滤镜用于元素自身 filter 时正常，用于
- * backdrop 时无效）。所以这里用「边缘亮线 + 内阴影厚度」表达玻璃的材料感，
+ * 2.54 会静默丢弃该声明（实测：同滤镜用于元素自身 filter 时正常，用于
+ * backdrop 时无效）。所以这里用「边缘明暗 + 内阴影厚度」表达玻璃的材料感，
  * 不假装有折射。
  */
 :root[data-overlay-mat="liquid"]
   :is(#explorer-panel, #remote-panel, .ctx-menu, .modal, .file-tooltip, .transfer-panel, .toast, .hfile-overlay) {
-  /* 只有极淡的顶部内辉：模拟玻璃上沿受光，强度压到几乎只剩「材质不是纯平」。
-     不跟随指针、不覆盖文字区。 */
-  background-image: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, calc(var(--mat-hi) * 1.4)),
-    rgba(255, 255, 255, 0) 24%
-  );
-  /* 厚度：上/左边缘受光，下/右边缘积暗 → 材料有立体感。
-     边缘高光用固定系数而非 --mat-hi：它只有 1px 宽，量化上几乎不影响
-     任何区域的对比度，却是「像玻璃」的主要来源，不该跟着内辉一起被压低。 */
+  /* 刻意不设 background-image：光由下面的 inset 阴影画在边缘，不铺面。
+     （曾在此写过 linear-gradient 面纱，已移除，理由见段首实测剖面。） */
+
+  /* 光路：光源在左上，故上沿最亮、左沿次之、右沿背离光源、下沿积暗。
+     上沿四层是「1px 硬高光 + 三档递减柔带」：硬线给玻璃的锐利边缘，
+     柔带让亮线不是硬描边、而是有厚度的受光面 —— 两者缺一则要么像描边、
+     要么像蒙纱。全部强度由 --mat-hi 派生（暗色 0.26 / 亮色 0.34，
+     见 themes.ts），改一档即整体调亮暗，不必逐个阴影改数。
+     系数 1.90 / 1.00 / 0.70 / 0.46 由阶梯实测反解。真实产物实测衰减：
+     暗色 1px→173、2px→63、4px→32、8px→19（底色 19，收敛 8px）。 */
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.34),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.36),
-    inset 1px 0 0 rgba(255, 255, 255, 0.16),
-    inset -1px 0 0 rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, calc(var(--mat-hi) * 1.9)),
+    inset 0 2px 2px -1px rgba(255, 255, 255, calc(var(--mat-hi) * 1)),
+    inset 0 4px 4px -3px rgba(255, 255, 255, calc(var(--mat-hi) * 0.7)),
+    inset 0 8px 7px -6px rgba(255, 255, 255, calc(var(--mat-hi) * 0.46)),
+    inset 1px 0 0 rgba(255, 255, 255, calc(var(--mat-hi) * 0.54)),
+    inset -1px 0 0 rgba(0, 0, 0, 0.2),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.34),
+    inset 0 -4px 5px -3px rgba(0, 0, 0, 0.26),
+    inset 0 -11px 13px -10px rgba(0, 0, 0, 0.2),
+    /* 近影：贴边 1px 的实影，让材料「坐」在表面上而不是飘着 */
+    0 1px 2px rgba(0, 0, 0, 0.34),
+    /* 远影：由 --mat-shadow 按明暗基调给出，保持原有单层大投影的观感 */
     var(--mat-shadow);
   /* 此处不再单独设 border-color：8 个浮层的 border 都已直接引用 --mat-rim
      （该变量本身按材质分档取值），若在此再写 border-color，其 :is() 特异性会
